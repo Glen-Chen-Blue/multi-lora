@@ -3,7 +3,8 @@ import uuid
 import threading
 import time
 import logging
-from queue import Queue
+import json
+from queue import Queue, Empty
 from typing import Dict, Any, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -11,7 +12,7 @@ from pydantic import BaseModel
 from multilora_system import MultiLoRAEngine
 
 # ============================================================
-# Logging Setup (防止 /metrics 洗版)
+# Logging Setup
 # ============================================================
 class MetricsFilter(logging.Filter):
     def filter(self, record):
@@ -27,6 +28,7 @@ NODE_ID = os.environ.get("NODE_ID", "cn-1")
 MODEL_ID = os.environ.get("MODEL_ID", "unsloth/Meta-Llama-3.1-8B")
 LORA_PATH = os.environ.get("LORA_PATH", "./testLoRA")
 
+print(f"[{NODE_ID}] Initializing Engine...")
 engine = MultiLoRAEngine(
     model_id=MODEL_ID,
     adapter_slots=4,
@@ -40,7 +42,6 @@ engine_wakeup = threading.Event()
 # Streaming & Decoding State
 # ============================================================
 stream_queues: Dict[str, Queue] = {}
-# [新增] 用來記錄每個請求已解碼的長度，解決黏字問題
 decoding_state: Dict[str, int] = {} 
 stream_lock = threading.Lock()
 
@@ -60,9 +61,11 @@ def on_token(rid, tokens_list):
         # 取出新增的部分 (Delta)
         if len(full_text) > start_len:
             delta = full_text[start_len:]
-            # 處理著名的 "replacement character" 問題 (發生在 multibyte character 被切斷時)
-            if delta.endswith(""):
-                return # 等下一個 token 進來再一起解
+            
+            # [FIXED] 關鍵修正：檢查 Replacement Character (\ufffd)
+            # 只有當字串結尾是 \ufffd 時，才代表 Unicode 被切斷，需要等待下一個 token
+            if delta.endswith("\ufffd"):
+                return 
                 
             stream_queues[rid].put(delta)
             decoding_state[rid] = len(full_text)
@@ -78,7 +81,7 @@ def on_finish(rid, reason):
                 })
             else:
                 stream_queues[rid].put({"type": "final", "reason": reason})
-            stream_queues[rid].put(None)
+            stream_queues[rid].put(None) # Sentinel to stop generator
             
         # 清理狀態
         decoding_state.pop(rid, None)
@@ -108,7 +111,7 @@ class AddRequest(BaseModel):
 
 class MergeRequest(BaseModel):
     adapter_id: str
-    force: bool = False  # 預設為優雅模式 (Graceful)
+    force: bool = False
 
 class UnmergeRequest(BaseModel):
     force: bool = False
@@ -120,7 +123,6 @@ app = FastAPI(title=f"Compute Node {NODE_ID}")
 
 @app.get("/metrics")
 def metrics():
-    # 加入 is_draining 狀態監控
     return {
         "node_id": NODE_ID,
         "load": {
@@ -142,7 +144,7 @@ def add_request(req: AddRequest):
     q = Queue()
     with stream_lock: 
         stream_queues[rid] = q
-        decoding_state[rid] = 0 # 初始化解碼狀態
+        decoding_state[rid] = 0
     
     try:
         engine.add_request(req.prompt, req.adapter_id, rid, req.max_new_tokens)
@@ -160,13 +162,17 @@ def add_request(req: AddRequest):
                 if item is None:
                     yield "event: end\ndata: [DONE]\n\n"
                     break
+                
                 if isinstance(item, dict): 
-                    # 處理錯誤訊息
                     if item.get("type") == "error":
-                        yield f"event: error\ndata: {item['message']}\n\n"
+                        yield f"event: error\ndata: {json.dumps(item['message'])}\n\n"
                         break
-                    continue
-                yield f"data: {item}\n\n"
+                    # Final event with reason (optional to send)
+                    if item.get("type") == "final":
+                         continue
+
+                # [FIXED] 使用 JSON 傳輸以確保換行符號正確傳遞
+                yield f"data: {json.dumps(item)}\n\n"
         finally:
             with stream_lock: 
                 stream_queues.pop(rid, None)
@@ -176,8 +182,6 @@ def add_request(req: AddRequest):
 
 @app.post("/merge")
 def merge(req: MergeRequest):
-    # 此 API 可能會阻塞較長時間 (等待 Draining)
-    # 如果是 Force，會比較快
     try:
         engine.merge_adapter(req.adapter_id, force=req.force)
         return {

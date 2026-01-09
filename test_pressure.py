@@ -3,6 +3,7 @@ import httpx
 import random
 import time
 import sys
+import json  # [Added] Import json
 from datetime import datetime
 
 # ==========================================
@@ -84,15 +85,28 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
                     break
                 
                 if line.startswith("data:"):
-                    content = line[len("data:"):].strip()
-                    # 忽略握手訊號 "ok" 與錯誤標記
-                    if content and content != "ok" and not content.startswith("[ERROR]"):
-                        if ttft == 0.0: ttft = time.time() - start_ts
-                        full_response_text.append(content)
+                    # [Modified] 這裡做了關鍵修改：只移除尾端換行，並解析 JSON
+                    raw_content = line[len("data:"):].rstrip("\n")
                     
-                    # 處理錯誤訊息
-                    if content.startswith("[ERROR]") or "Processing aborted" in content:
+                    if raw_content.strip() == "ok": continue # Handshake
+
+                    try:
+                        # 嘗試解析 JSON Token
+                        content = json.loads(raw_content)
+                    except json.JSONDecodeError:
+                        # Fallback (若是舊格式或純字串錯誤)
+                        content = raw_content
+
+                    # 檢查內容是否為字串並包含錯誤訊息
+                    if isinstance(content, str) and (content.startswith("[ERROR]") or "Processing aborted" in content):
                          full_response_text.append(f"{RED}{content}{RESET}")
+                         continue
+
+                    # 記錄首字時間 (TTFT)
+                    if ttft == 0.0: ttft = time.time() - start_ts
+                    
+                    # 累積回應內容 (確保轉為字串)
+                    full_response_text.append(str(content))
 
         elapsed = time.time() - start_ts
         stats["finished"] += 1
@@ -103,7 +117,9 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
         print(f"{GREEN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq} DONE <- {adapter} (Time: {elapsed:.2f}s, TTFT: {final_ttft:.2f}s){RESET}")
         
         if answer:
-            print(f"    {GREY}>> {answer}{RESET}")
+            # 只顯示前 100 個字元避免洗版
+            preview = (answer) if len(answer) > 100 else answer
+            print(f"    {GREY}>> {preview.replace(chr(10), ' ')}{RESET}")
         else:
             if elapsed < 0.1:
                 print(f"    {RED}>> [Request Failed Immediately - Check Server Logs]{RESET}")
@@ -115,7 +131,7 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
         print(f"{RED}[ERROR] #{req_id_seq} Failed: {repr(e)}{RESET}")
 
 async def main():
-    print(f"=== Traffic Simulator (Alpaca Format) ===")
+    print(f"=== Traffic Simulator (Alpaca Format / JSON SSE) ===")
     
     background_tasks = set()
     limits = httpx.Limits(max_keepalive_connections=200, max_connections=200)

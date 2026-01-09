@@ -4,6 +4,7 @@ import uuid
 import threading
 import asyncio
 import httpx
+import json # [Added] Import json
 from queue import Queue, Empty
 from typing import Dict, List, Deque, Optional, Tuple, Any
 from collections import deque, defaultdict
@@ -364,52 +365,52 @@ threading.Thread(target=scheduler, daemon=True).start()
 threading.Thread(target=reaper, daemon=True).start()
 
 # ============================================================
-# Proxy Helper (修正 Bug 處)
+# Proxy Helper
 # ============================================================
 def _proxy_to_efo(req_id, prompt, adapter, tokens):
     async def run():
-        # [Fix] 建立新的 client，避免 Loop 衝突
         async with httpx.AsyncClient(timeout=None) as client:
             try:
                 async with client.stream("POST", f"{EFO_URL}/relay_request", 
                                          json={"prompt": prompt, "adapter_id": adapter, "max_new_tokens": tokens}) as r:
                     async for line in r.aiter_lines():
-                        if line: 
-                            if line.startswith("data:"):
-                                content = line[len("data:"):].strip()
-                                if content: _push_data(req_id, content)
+                        if line and line.startswith("data:"):
+                            # [Modified] 改用 rstrip("\n") 避免刪除空白 token
+                            content = line[len("data:"):].rstrip("\n")
+                            if content: _push_data(req_id, content)
             except Exception as e:
-                _push_data(req_id, f"[Error: {e}]")
+                # [Modified] Error 也轉為 JSON 格式
+                _push_data(req_id, json.dumps(f"[Error: {e}]"))
             finally:
                 _finish_stream(req_id)
     threading.Thread(target=lambda: asyncio.run(run()), daemon=True).start()
 
 def _dispatch_to_compute(url, req):
     async def run():
-        # [Fix] 建立新的 client，避免 Loop 衝突
         async with httpx.AsyncClient(timeout=None) as client:
             try:
-                # 這裡要使用 Compute Node 預期的參數格式
                 payload = {
                     "prompt": req["prompt"], 
                     "adapter_id": req["adapter_id"], 
                     "max_new_tokens": req["max_new_tokens"]
                 }
                 async with client.stream("POST", f"{url}/add_request", json=payload) as r:
-                    # 檢查狀態碼，如果不是 200，立刻報錯，不要繼續空轉
                     if r.status_code != 200:
                         logger.error(f"Compute node {url} rejected request {req['rid']} with {r.status_code}")
-                        _push_data(req["rid"], f"[ERROR] Compute node returned {r.status_code}")
+                        # [Modified] Error 也轉為 JSON 格式
+                        _push_data(req["rid"], json.dumps(f"[ERROR] Compute node returned {r.status_code}"))
                         return
 
                     async for line in r.aiter_lines():
                         if line and line.startswith("data:"):
-                            content = line[len("data:"):].strip()
+                             # [Modified] 改用 rstrip("\n") 避免刪除空白 token，並使用 JSON 字串
+                            content = line[len("data:"):].rstrip("\n")
                             if content and content != "[DONE]": 
                                 _push_data(req["rid"], content)
             except Exception as e:
                 logger.error(f"Dispatch error to {url}: {e}")
-                _push_data(req["rid"], f"[ERROR] Dispatch failed: {e}")
+                # [Modified] Error 也轉為 JSON 格式
+                _push_data(req["rid"], json.dumps(f"[ERROR] Dispatch failed: {e}"))
             finally:
                 _finish_stream(req["rid"])
     threading.Thread(target=lambda: asyncio.run(run()), daemon=True).start()
@@ -429,6 +430,10 @@ def send_request(req: AddRequest):
     
     if is_local:
         with lock:
+            # Local adapter, 轉成 JSON 格式放入 queue，以與遠端一致
+            # 這裡要注意: 之前是直接放 dict，scheduler pop 出來後再 call _dispatch_to_compute
+            # 而 _dispatch_to_compute 會 call remote API, 該 API 會回傳 JSON-encoded stream
+            # 所以這裡是 "任務" queue, 不需要 JSON encode。
             adapter_queues[req.adapter_id].append({
                 "rid": rid, "prompt": req.prompt, "adapter_id": req.adapter_id, "max_new_tokens": req.max_new_tokens
             })
@@ -453,6 +458,9 @@ async def stream(request_id: str, request: Request):
                 if data is None:
                     yield "event: end\ndata: [DONE]\n\n"
                     break
+                # Control node 的 Queue 裡現在存放的是已經 JSON encoded 的 string (來自 compute node)
+                # 或者 JSON encoded 的 Error string
+                # 所以直接送出即可
                 yield f"data: {data}\n\n"
             except Empty:
                 await asyncio.sleep(0.01)

@@ -1,15 +1,15 @@
 import asyncio
 import httpx
 import sys
+import json # [Added] Import json
 
 # ==========================================
 # 設定
 # ==========================================
 CONTROL_URL = "http://localhost:9000"
-ADAPTER_ID = "code"  # 請確保這個資料夾存在於 compute node 的 ./testLoRA 中
+ADAPTER_ID = "chat"  # 請確保這個資料夾存在於 compute node 的 ./testLoRA 中
 PROMPT_TEXT = "List 5 benefits of regular exercise."
 MAX_NEW_TOKENS = 128
-
 # ==========================================
 # Alpaca 格式化函式 (對應你的 Fine-tuning)
 # ==========================================
@@ -49,24 +49,32 @@ async def main():
                 async for line in response.aiter_lines():
                     if not line: continue
 
-                    # 處理結束訊號
+                    # 處理結束訊號 (通常由 Control Node 發送)
                     if line.startswith("data: [DONE]"):
                         print("\n\n[DONE] Stream finished.")
                         break
                     
                     # 處理資料
                     if line.startswith("data:"):
-                        content = line[len("data:"):].strip()
+                        # [Modified] 移除 strip(), 改用 json 解析
+                        content = line[len("data:"):].rstrip("\n")
                         
-                        # 過濾掉握手訊息或錯誤
-                        if content == "ok": continue
+                        if content == "ok": continue # Handshake
                         
-                        if content.startswith("[ERROR]"):
-                            print(f"\n❌ Server Error: {content}")
+                        try:
+                            # 嘗試解析 JSON (因為 Compute Node 現在送 JSON)
+                            text_token = json.loads(content)
+                        except json.JSONDecodeError:
+                            # Fallback: 如果不是 JSON (例如 legacy error)，直接用 raw string
+                            text_token = content
+                        
+                        # 處理錯誤訊息
+                        if text_token.startswith("[ERROR]"):
+                            print(f"\n❌ Server Error: {text_token}")
                             break
 
                         # 即時印出 Token (不換行)
-                        print(content, end="", flush=True)
+                        print(text_token, end="", flush=True)
 
         except httpx.HTTPStatusError as e:
             print(f"\n❌ HTTP Error: {e.response.status_code} - {e.response.text}")
