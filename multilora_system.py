@@ -2,6 +2,8 @@ import os
 import psutil
 import torch
 import torch.nn as nn
+import time
+import threading
 from typing import Dict, Optional, Any, List, Tuple, Callable
 from collections import OrderedDict, deque
 from safetensors.torch import load_file
@@ -165,6 +167,10 @@ class MultiLoRAEngine:
         self.finished_results = deque(maxlen=1000)
         self.current_merged_adapter = None
 
+        # 狀態管理與鎖
+        self.lock = threading.RLock() # 允許 Reentrant
+        self.is_draining = False      # 是否正在排空請求
+
         self._replace_layers(r, alpha)
 
     def _replace_layers(self, r, alpha):
@@ -250,24 +256,72 @@ class MultiLoRAEngine:
             self.slot_lru.move_to_end(self.adapter_to_slot[aid])
 
     @torch.no_grad()
-    def merge_adapter(self, adapter_id):
-        if adapter_id not in self.cpu_cache: raise KeyError(f"Unknown adapter {adapter_id}")
-        if adapter_id not in self.adapter_to_slot:
-            self._load_adapter_to_slot(adapter_id, next(iter(self.slot_lru)))
-        
-        slot_id = self.adapter_to_slot[adapter_id]
-        if self.current_merged_adapter and self.current_merged_adapter != adapter_id:
-            self.unmerge_all()
-        
-        for m in self.model.modules():
-            if isinstance(m, DynamicLoRALinear): m.manual_merge(slot_id)
-        self.current_merged_adapter = adapter_id
+    def merge_adapter(self, adapter_id, force: bool = False):
+        """
+        Merge 指定的 Adapter 到模型權重中。
+        :param force: 
+            True  -> 強制中斷不相容的請求 (Abort)
+            False -> 優雅等待所有請求完成 (Drain)
+        """
+        if adapter_id not in self.cpu_cache: 
+            raise KeyError(f"Unknown adapter {adapter_id}")
+
+        # 1. Graceful Draining (非強制模式)
+        if not force:
+            with self.lock:
+                self.is_draining = True # 通知 step() 停止接新客
+            
+            print(f"⏳ [Merge] Draining requests for merge {adapter_id}...")
+            
+            # 等待 Running Queue 清空
+            while True:
+                with self.lock:
+                    if len(self.running_queue) == 0:
+                        break
+                time.sleep(0.1) # 讓出 CPU/Lock 給 step() 執行
+                
+            print(f"✅ [Merge] Drained. Proceeding to merge.")
+
+        # 2. 執行 Merge (加鎖)
+        with self.lock:
+            # 如果是 Force 模式，清除殘留的不相容請求
+            if force:
+                new_running = []
+                aborted = 0
+                for req in self.running_queue:
+                    if req["adapter_id"] != adapter_id:
+                        req["done"] = True
+                        if self.on_finish: 
+                            self.on_finish(req["request_id"], "aborted_by_merge")
+                        aborted += 1
+                    else:
+                        new_running.append(req)
+                self.running_queue = new_running
+                if aborted > 0: 
+                    print(f"⚠️ [Merge] Force aborted {aborted} requests.")
+
+            # 設定完成，解除 Draining 狀態
+            self.is_draining = False 
+
+            if adapter_id not in self.adapter_to_slot:
+                self._load_adapter_to_slot(adapter_id, next(iter(self.slot_lru)))
+            
+            slot_id = self.adapter_to_slot[adapter_id]
+            
+            if self.current_merged_adapter and self.current_merged_adapter != adapter_id:
+                self.unmerge_all()
+            
+            for m in self.model.modules():
+                if isinstance(m, DynamicLoRALinear): m.manual_merge(slot_id)
+            
+            self.current_merged_adapter = adapter_id
 
     @torch.no_grad()
     def unmerge_all(self):
-        for m in self.model.modules():
-            if isinstance(m, DynamicLoRALinear): m.manual_unmerge()
-        self.current_merged_adapter = None
+        with self.lock:
+            for m in self.model.modules():
+                if isinstance(m, DynamicLoRALinear): m.manual_unmerge()
+            self.current_merged_adapter = None
 
     def add_request(self, prompt, adapter_id, request_id, max_new_tokens=128):
         if adapter_id not in self.cpu_cache: raise KeyError(f"Adapter {adapter_id} not available")
@@ -288,85 +342,83 @@ class MultiLoRAEngine:
 
     @torch.no_grad()
     def step(self):
-        # Scheduler
-        self.running_queue = [r for r in self.running_queue if not r["done"]]
-        
-        # Merge Filter
-        if self.current_merged_adapter:
-            # 優先處理 Merged Adapter，如果 running queue 有不符合的要剔除(這裡簡化為只進符合的)
-            pass 
-
-        while len(self.running_queue) < self.max_batch_size and self.request_queue:
-            req = self.request_queue[0]
-            if self.current_merged_adapter and req["adapter_id"] != self.current_merged_adapter:
-                # 若已 Merge，只能執行該 Adapter 的請求，跳過不符合的
-                # 這裡簡單處理：如果頭部請求不符合，就暫停填充 (head-of-line blocking for simplicity)
-                # 實際生產環境可以遍歷 queue 找符合的
-                break 
+        # [Critical] 加鎖保護 Step，防止與 Merge 動作衝突
+        with self.lock:
+            # Scheduler
+            self.running_queue = [r for r in self.running_queue if not r["done"]]
             
-            # 檢查 slot 是否夠
-            current_aids = {r["adapter_id"] for r in self.running_queue}
-            if not self.current_merged_adapter and req["adapter_id"] not in current_aids and len(current_aids) >= self.adapter_slots:
-                break
+            # [Modified] 如果正在 Draining，禁止從 request_queue 加入新請求到 running_queue
+            if not self.is_draining:
+                if self.current_merged_adapter:
+                    pass 
+
+                while len(self.running_queue) < self.max_batch_size and self.request_queue:
+                    req = self.request_queue[0]
+                    if self.current_merged_adapter and req["adapter_id"] != self.current_merged_adapter:
+                        break 
+                    
+                    current_aids = {r["adapter_id"] for r in self.running_queue}
+                    if not self.current_merged_adapter and req["adapter_id"] not in current_aids and len(current_aids) >= self.adapter_slots:
+                        break
+                        
+                    self.running_queue.append(self.request_queue.pop(0))
+
+            if not self.running_queue: return False
+
+            # Load Adapters
+            if self.current_merged_adapter:
+                required = [self.current_merged_adapter]
+            else:
+                required = sorted(list({r["adapter_id"] for r in self.running_queue}))
+            self._ensure_adapters_resident(required)
+
+            # Batching
+            prefill = [r for r in self.running_queue if r["past_key_values"] is None]
+            decode = [r for r in self.running_queue if r["past_key_values"] is not None]
+
+            # Prefill Logic
+            if prefill:
+                if not self.current_merged_adapter:
+                    mapping = torch.tensor([self.adapter_to_slot[r["adapter_id"]] for r in prefill], device=self.device)
+                    LoRAContext.set_mapping(mapping)
+                else:
+                    LoRAContext.set_mapping(None)
+
+                input_ids = [r["input_ids"] for r in prefill]
+                max_len = max(x.shape[1] for x in input_ids)
+                padded = torch.full((len(prefill), max_len), self.tokenizer.pad_token_id, device=self.device)
+                attn = torch.zeros((len(prefill), max_len), device=self.device)
                 
-            self.running_queue.append(self.request_queue.pop(0))
+                for i, ids in enumerate(input_ids):
+                    L = ids.shape[1]
+                    padded[i, -L:] = ids[0]
+                    attn[i, -L:] = 1
 
-        if not self.running_queue: return False
-
-        # Load Adapters
-        if self.current_merged_adapter:
-            required = [self.current_merged_adapter]
-        else:
-            required = sorted(list({r["adapter_id"] for r in self.running_queue}))
-        self._ensure_adapters_resident(required)
-
-        # Batching
-        prefill = [r for r in self.running_queue if r["past_key_values"] is None]
-        decode = [r for r in self.running_queue if r["past_key_values"] is not None]
-
-        # Prefill Logic
-        if prefill:
-            if not self.current_merged_adapter:
-                mapping = torch.tensor([self.adapter_to_slot[r["adapter_id"]] for r in prefill], device=self.device)
-                LoRAContext.set_mapping(mapping)
-            else:
+                out = self.model(input_ids=padded, attention_mask=attn, use_cache=True)
+                self._process_logits(out, prefill)
                 LoRAContext.set_mapping(None)
+                return True
 
-            input_ids = [r["input_ids"] for r in prefill]
-            max_len = max(x.shape[1] for x in input_ids)
-            padded = torch.full((len(prefill), max_len), self.tokenizer.pad_token_id, device=self.device)
-            attn = torch.zeros((len(prefill), max_len), device=self.device)
-            
-            for i, ids in enumerate(input_ids):
-                L = ids.shape[1]
-                padded[i, -L:] = ids[0]
-                attn[i, -L:] = 1
+            # Decode Logic
+            if decode:
+                if not self.current_merged_adapter:
+                    mapping = torch.tensor([self.adapter_to_slot[r["adapter_id"]] for r in decode], device=self.device)
+                    LoRAContext.set_mapping(mapping)
+                else:
+                    LoRAContext.set_mapping(None)
 
-            out = self.model(input_ids=padded, attention_mask=attn, use_cache=True)
-            self._process_logits(out, prefill)
-            LoRAContext.set_mapping(None)
-            return True
+                past_list = [r["past_key_values"] for r in decode]
+                max_past = max(p[0][0].shape[2] for p in past_list)
+                batched_past = _to_model_cache(_batch_past(past_list, max_past))
+                inputs = torch.cat([r["input_ids"][:, -1:] for r in decode], dim=0)
+                attn = torch.ones((len(decode), max_past + 1), device=self.device) # Simplified mask
 
-        # Decode Logic
-        if decode:
-            if not self.current_merged_adapter:
-                mapping = torch.tensor([self.adapter_to_slot[r["adapter_id"]] for r in decode], device=self.device)
-                LoRAContext.set_mapping(mapping)
-            else:
+                out = self.model(input_ids=inputs, attention_mask=attn, past_key_values=batched_past, use_cache=True)
+                self._process_logits(out, decode)
                 LoRAContext.set_mapping(None)
+                return True
 
-            past_list = [r["past_key_values"] for r in decode]
-            max_past = max(p[0][0].shape[2] for p in past_list)
-            batched_past = _to_model_cache(_batch_past(past_list, max_past))
-            inputs = torch.cat([r["input_ids"][:, -1:] for r in decode], dim=0)
-            attn = torch.ones((len(decode), max_past + 1), device=self.device) # Simplified mask
-
-            out = self.model(input_ids=inputs, attention_mask=attn, past_key_values=batched_past, use_cache=True)
-            self._process_logits(out, decode)
-            LoRAContext.set_mapping(None)
-            return True
-
-        return False
+            return False
 
     def _process_logits(self, out, batch_reqs):
         logits = out.logits[:, -1, :]
@@ -376,7 +428,10 @@ class MultiLoRAEngine:
         for i, req in enumerate(batch_reqs):
             tok = tokens[i].item()
             req["tokens_gen"].append(tok)
-            if self.on_token: self.on_token(req["request_id"], tok)
+            
+            # [修改] 傳送完整的 tokens_gen 列表，而不是只有 tok，讓 Server 端能做正確的 Context Decode
+            if self.on_token: 
+                self.on_token(req["request_id"], req["tokens_gen"])
             
             # Update State
             req["input_ids"] = torch.cat([req["input_ids"], tokens[i:i+1].view(1,1)], dim=-1)

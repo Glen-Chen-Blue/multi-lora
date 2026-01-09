@@ -9,81 +9,115 @@ from datetime import datetime
 # Configuration
 # ==========================================
 CONTROL_URL = "http://localhost:9000"
-ADAPTERS = ["chat","chat","chat", "chat", "chat", "math", '1', '2'] 
+# 請確認這些 Adapter ID 與資料夾名稱一致 (大小寫敏感)
+ADAPTERS = ["chat", "chat", "chat", "math", "math"] 
 TOTAL_REQUESTS = 50
-
-# 如果你的電腦出現 Reaper 誤殺，可以稍微調低 RPS (例如 2.0 或 3.0)
-AVG_RPS = 4.0 
-
+AVG_RPS = 2.0 
 MAX_NEW_TOKENS = 128
-PROMPTS = ["Hello", "Test", "Math", "Code", "Joke"]
+
+# 真實的 Prompts
+PROMPTS = [
+    "Explain the theory of relativity in simple terms for a 5-year-old.",
+    "Write a Python function to calculate the Fibonacci sequence using recursion.",
+    "Solve the quadratic equation: x^2 - 5x + 6 = 0.",
+    "What are the three laws of thermodynamics?",
+    "Translate 'The quick brown fox jumps over the lazy dog' into French and Spanish.",
+    "List 5 benefits of regular exercise and explain one in detail.",
+    "Create a SQL query to find the second highest salary from an Employee table.",
+    "Summarize the plot of 'Romeo and Juliet' in three sentences.",
+    "Explain the difference between TCP and UDP protocols.",
+    "Write a haiku about artificial intelligence.",
+    "If I have 3 apples and you take away 2, how many do you have?",
+    "Debug this code: `def add(a,b): return a * b` - it should add numbers.",
+]
 
 GREEN = "\033[92m"
 CYAN = "\033[96m"
 YELLOW = "\033[93m"
 RED = "\033[91m"
 RESET = "\033[0m"
+GREY = "\033[90m"
 
 stats = {"sent": 0, "finished": 0, "errors": 0}
 
+# [修改] 配合 Fine-tuning 程式碼的 Alpaca 格式
+def format_alpaca_prompt(user_prompt):
+    return (
+        f"### Instruction:\n{user_prompt}\n\n"
+        f"### Response:\n"
+    )
+
 async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
     adapter = random.choice(ADAPTERS)
-    prompt = random.choice(PROMPTS)
+    raw_prompt = random.choice(PROMPTS)
+    
+    # [使用] 改用 Alpaca Template
+    formatted_prompt = format_alpaca_prompt(raw_prompt)
     
     payload = {
-        "prompt": prompt,
+        "prompt": formatted_prompt, 
         "adapter_id": adapter,
         "max_new_tokens": MAX_NEW_TOKENS
     }
     
     start_ts = time.time()
-    ttft = 0.0 # [NEW] 初始化 TTFT
+    ttft = 0.0 
+    full_response_text = []
     
     try:
-        # 1. 發送請求 [FIX] 修正 Endpoint 為 /add_request
+        # 1. 發送請求
         resp = await client.post(f"{CONTROL_URL}/send_request", json=payload, timeout=30.0)
         resp.raise_for_status()
         data = resp.json()
         request_id = data["request_id"]
         
         stats["sent"] += 1
-        print(f"{CYAN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq}/{TOTAL_REQUESTS} SENT -> {adapter} (ID: {request_id[:8]}...){RESET}")
+        short_prompt = (raw_prompt[:30] + '..') if len(raw_prompt) > 30 else raw_prompt
+        print(f"{CYAN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq}/{TOTAL_REQUESTS} SENT -> {adapter} (ID: {request_id[:8]}...) Q: {short_prompt}{RESET}")
 
         # 2. 接收串流
         async with client.stream("GET", f"{CONTROL_URL}/stream/{request_id}", timeout=120.0) as response:
             async for line in response.aiter_lines():
                 if not line: continue
 
-                # 檢查結束訊號
                 if line.startswith("data: [DONE]"):
                     break
                 
-                # [NEW] 計算 TTFT
-                # 邏輯：如果 ttft 還沒被記錄，且收到 data 開頭的行
-                if ttft == 0.0 and line.startswith("data:"):
+                if line.startswith("data:"):
                     content = line[len("data:"):].strip()
-                    # 忽略握手訊號 "ok"，只記錄真正的 token
-                    if content and content != "ok":
-                        ttft = time.time() - start_ts
+                    # 忽略握手訊號 "ok" 與錯誤標記
+                    if content and content != "ok" and not content.startswith("[ERROR]"):
+                        if ttft == 0.0: ttft = time.time() - start_ts
+                        full_response_text.append(content)
+                    
+                    # 處理錯誤訊息
+                    if content.startswith("[ERROR]") or "Processing aborted" in content:
+                         full_response_text.append(f"{RED}{content}{RESET}")
 
         elapsed = time.time() - start_ts
         stats["finished"] += 1
         
-        # [MODIFIED] 增加 TTFT 顯示
-        # 如果 ttft 還是 0 (例如瞬間完成或只有 handshake)，就顯示為 elapsed
         final_ttft = ttft if ttft > 0 else elapsed
+        answer = "".join(full_response_text).strip()
         
         print(f"{GREEN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq} DONE <- {adapter} (Time: {elapsed:.2f}s, TTFT: {final_ttft:.2f}s){RESET}")
+        
+        if answer:
+            print(f"    {GREY}>> {answer}{RESET}")
+        else:
+            if elapsed < 0.1:
+                print(f"    {RED}>> [Request Failed Immediately - Check Server Logs]{RESET}")
+            else:
+                print(f"    {RED}>> [No Output generated]{RESET}")
 
     except Exception as e:
         stats["errors"] += 1
         print(f"{RED}[ERROR] #{req_id_seq} Failed: {repr(e)}{RESET}")
 
 async def main():
-    print(f"=== Traffic Simulator ===")
+    print(f"=== Traffic Simulator (Alpaca Format) ===")
     
     background_tasks = set()
-    # 提高連線池上限，避免在高 RPS 下塞車
     limits = httpx.Limits(max_keepalive_connections=200, max_connections=200)
     
     async with httpx.AsyncClient(limits=limits) as client:
@@ -109,7 +143,6 @@ async def main():
 
         except KeyboardInterrupt:
             print("\nStopping...")
-            # Cancel remaining tasks to exit cleanly
             for t in background_tasks: t.cancel()
 
     print(f"\n=== Summary: Sent {stats['sent']} / Fin {stats['finished']} / Err {stats['errors']} ===")

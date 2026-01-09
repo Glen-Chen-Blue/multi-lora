@@ -55,21 +55,15 @@ if ALL_CANDIDATES:
     standby_node_urls.extend(ALL_CANDIDATES[1:])      
 
 # Nodes Management
-# nodes[url] = {
-#    "metrics": dict, 
-#    "mode": "NORMAL" | "DRAINING" | "MERGED", 
-#    "target": adapter_id (for draining/merged),
-#    "last_seen": timestamp
-# }
 nodes: Dict[str, Dict[str, Any]] = {}
 
 adapter_queues = defaultdict(deque) 
 stream_queues = {}
-merged_assignment = {} # {adapter_id: node_url} 用於快速查找
+merged_assignment = {} 
 
 my_allowed_adapters = []
 
-client = httpx.AsyncClient(timeout=None)
+# 注意：這裡不建立全域 AsyncClient 用於背景任務，避免 Event Loop 衝突
 wakeup = threading.Event()
 last_scale_action_ts = 0.0
 
@@ -95,7 +89,6 @@ def _finish_stream(rid):
         if rid in stream_queues: stream_queues[rid][0].put(None)
 
 def _http_post_bg(url, path, payload):
-    """背景發送 HTTP POST，不等待回應，避免卡住 Scheduler"""
     def run():
         try:
             httpx.post(f"{url}{path}", json=payload, timeout=5.0)
@@ -104,12 +97,12 @@ def _http_post_bg(url, path, payload):
     threading.Thread(target=run, daemon=True).start()
 
 # ============================================================
-# Node State Helpers
+# Node State Helpers (保持不變)
 # ============================================================
 def _update_node_metrics(url, metrics):
     with lock:
         if url not in nodes:
-            nodes[url] = {"mode": "NORMAL", "target": None, "metrics": None, "last_seen": 0}
+            nodes[url] = {"mode": "NORMAL", "target": None, "metrics": None, "last_seen": 0, "merged_at": 0}
         nodes[url]["metrics"] = metrics
         nodes[url]["last_seen"] = time.time()
 
@@ -124,7 +117,6 @@ def _get_healthy_active_nodes():
     return res
 
 def _node_can_accept(url, adapter_id):
-    """檢查節點是否能接收該 Adapter 的請求 (考慮 Mode 和 Load)"""
     with lock:
         info = nodes.get(url)
         if not info or not info.get("metrics"): return False
@@ -133,26 +125,21 @@ def _node_can_accept(url, adapter_id):
         target = info["target"]
         m = info["metrics"]
         
-        # 1. Load Check
         running = m["load"]["running_batch"]
         max_bs = m["capacity"]["max_batch_size"]
         if running >= max_bs: return False
         
-        # 2. Mode Check
         if mode == "DRAINING": return False
         
-        # 3. Merged Check
-        # 檢查實際 GPU 狀態
         actual_merged = m["lora_state"]["merged_adapter"]
         if actual_merged and actual_merged != adapter_id: return False
         
-        # 檢查 Control Node 狀態
         if mode == "MERGED" and target != adapter_id: return False
         
         return True
 
 # ============================================================
-# Scaling & Merging Logic
+# Scaling & Merging Logic (保持不變)
 # ============================================================
 def _check_autoscaling():
     global last_scale_action_ts
@@ -164,7 +151,6 @@ def _check_autoscaling():
         n_active = len(active_node_urls)
         n_standby = len(standby_node_urls)
     
-    # Scale UP
     if n_standby > 0 and q_total > (SCALE_UP_THRESHOLD * n_active):
         with lock:
             if standby_node_urls:
@@ -174,11 +160,9 @@ def _check_autoscaling():
                 logger.info(f"🚀 [AutoScaler] Scale UP! Activated: {new_node}")
         return
 
-    # Scale DOWN
     if n_active > MIN_NODES and q_total == 0:
         candidate = None
         with lock:
-            # 從後面找閒置且模式為 NORMAL 的節點
             for i in range(len(active_node_urls) - 1, MIN_NODES - 1, -1):
                 url = active_node_urls[i]
                 info = nodes.get(url)
@@ -197,25 +181,25 @@ def _maybe_trigger_merge():
     if N == 0: return
 
     with lock:
-        # Snapshot queue counts
         counts = {a: len(q) for a, q in adapter_queues.items() if len(q) > 0}
     
     Q = sum(counts.values())
-    if Q < (QMIN_MULT * N): return # 排隊數量不夠多，不觸發 Merge
+    if Q < (QMIN_MULT * N): return 
 
-    # 找出最熱門且尚未被 Assign 的 Adapter
+    demand_threshold = Q / N
+
     hot_candidates = []
     with lock:
         assigned_adapters = set(merged_assignment.keys())
         for a, c in counts.items():
             if a not in assigned_adapters:
-                hot_candidates.append((c, a))
+                if c > demand_threshold:
+                    hot_candidates.append((c, a))
     
     if not hot_candidates: return
     hot_candidates.sort(reverse=True)
     _, target_adapter = hot_candidates[0]
 
-    # 找一個適合的節點來 Drain (通常是 NORMAL 模式且 Loading 較輕)
     target_node = None
     with lock:
         best_score = -1
@@ -224,12 +208,10 @@ def _maybe_trigger_merge():
             if info["mode"] != "NORMAL": continue
             
             m = info["metrics"]
-            # 評分標準：如果已經有載入該 adapter 最好，否則找 loading 低的
             running_adapters = m["lora_state"]["running_adapters"]
             has_adapter = 1 if target_adapter in running_adapters else 0
             load = m["load"]["running_batch"]
             
-            # 分數越高越適合：有 Adapter +100，Load 越低越好
             score = (has_adapter * 100) - load
             if score > best_score:
                 best_score = score
@@ -238,10 +220,9 @@ def _maybe_trigger_merge():
         if target_node:
             nodes[target_node]["mode"] = "DRAINING"
             nodes[target_node]["target"] = target_adapter
-            logger.info(f"🔒 [Merge] Locking {target_node} to DRAIN for {target_adapter}")
+            logger.info(f"🔒 [Merge] Locking {target_node} to DRAIN for {target_adapter} (Queue: {counts[target_adapter]}, Threshold: {demand_threshold:.1f})")
 
 def _maybe_finalize_drains():
-    # 檢查處於 DRAINING 的節點，如果 Idle 了就發送 Merge
     with lock:
         candidates = []
         for url, info in nodes.items():
@@ -251,29 +232,30 @@ def _maybe_finalize_drains():
     for url, target, is_idle in candidates:
         if is_idle:
             logger.info(f"🔗 [Merge] Node {url} is idle. Sending MERGE {target}...")
-            # 同步發送以確保狀態更新
             try:
-                # 先 Unmerge 再 Merge (雖然 API 支援 Force，但這樣更保險)
                 httpx.post(f"{url}/unmerge", json={"force": True}, timeout=2)
                 httpx.post(f"{url}/merge", json={"adapter_id": target, "force": True}, timeout=2)
                 
                 with lock:
                     nodes[url]["mode"] = "MERGED"
+                    nodes[url]["merged_at"] = time.time()
                     merged_assignment[target] = url
                 logger.info(f"✅ [Merge] Node {url} is now MERGED for {target}")
             except Exception as e:
                 logger.error(f"❌ [Merge] Failed to finalize merge on {url}: {e}")
 
 def _maybe_revert_merges():
-    # 如果 Merged 節點閒置且沒有對應 Queue，解除 Merge
     with lock:
         revert_list = []
         for adapter, url in merged_assignment.items():
-            # 檢查 Queue 是否為空
             if len(adapter_queues[adapter]) > 0: continue
             
             info = nodes.get(url)
             if info and info.get("metrics") and info["metrics"]["idle"]:
+                merged_at = info.get("merged_at", 0)
+                if time.time() - merged_at < 30.0:
+                    continue 
+
                 revert_list.append((adapter, url))
     
     for adapter, url in revert_list:
@@ -283,15 +265,15 @@ def _maybe_revert_merges():
             if url in nodes:
                 nodes[url]["mode"] = "NORMAL"
                 nodes[url]["target"] = None
+                nodes[url]["merged_at"] = 0
             if merged_assignment.get(adapter) == url:
                 del merged_assignment[adapter]
 
 def _http_post_json_bg(url, path, json_data):
     threading.Thread(target=lambda: httpx.post(f"{url}{path}", json=json_data), daemon=True).start()
 
-
 # ============================================================
-# Background Tasks
+# Background Tasks (保持不變)
 # ============================================================
 def efo_heartbeat():
     global my_allowed_adapters
@@ -311,7 +293,7 @@ def compute_poller():
                 r = httpx.get(f"{url}/metrics", timeout=1)
                 _update_node_metrics(url, r.json())
             except: 
-                pass # 失敗不清除狀態，避免閃爍，靠 last_seen 判斷
+                pass 
         wakeup.set()
         time.sleep(0.5)
 
@@ -319,14 +301,12 @@ def scheduler():
     while True:
         wakeup.wait()
         
-        # 1. 執行策略檢查
         _check_autoscaling()
         _maybe_trigger_merge()
         _maybe_finalize_drains()
         _maybe_revert_merges()
 
         with lock:
-            # 優先處理 Merged 的 Queue
             merged_queues = [a for a in merged_assignment.keys() if adapter_queues[a]]
             normal_queues = [a for a in adapter_queues if adapter_queues[a] and a not in merged_assignment]
             
@@ -348,7 +328,6 @@ def scheduler():
 
         # 2b. Dispatch Normal Queues
         for aid in normal_queues:
-            # 找任意可用節點 (NORMAL 模式)
             target_node = None
             healthy = _get_healthy_active_nodes()
             
@@ -385,40 +364,58 @@ threading.Thread(target=scheduler, daemon=True).start()
 threading.Thread(target=reaper, daemon=True).start()
 
 # ============================================================
-# Proxy Helper
+# Proxy Helper (修正 Bug 處)
 # ============================================================
 def _proxy_to_efo(req_id, prompt, adapter, tokens):
     async def run():
-        try:
-            async with client.stream("POST", f"{EFO_URL}/relay_request", 
-                                     json={"prompt": prompt, "adapter_id": adapter, "max_new_tokens": tokens}) as r:
-                async for line in r.aiter_lines():
-                    if line: 
-                        if line.startswith("data:"):
-                            content = line[len("data:"):].strip()
-                            if content: _push_data(req_id, content)
-        except Exception as e:
-            _push_data(req_id, f"[Error: {e}]")
-        finally:
-            _finish_stream(req_id)
+        # [Fix] 建立新的 client，避免 Loop 衝突
+        async with httpx.AsyncClient(timeout=None) as client:
+            try:
+                async with client.stream("POST", f"{EFO_URL}/relay_request", 
+                                         json={"prompt": prompt, "adapter_id": adapter, "max_new_tokens": tokens}) as r:
+                    async for line in r.aiter_lines():
+                        if line: 
+                            if line.startswith("data:"):
+                                content = line[len("data:"):].strip()
+                                if content: _push_data(req_id, content)
+            except Exception as e:
+                _push_data(req_id, f"[Error: {e}]")
+            finally:
+                _finish_stream(req_id)
     threading.Thread(target=lambda: asyncio.run(run()), daemon=True).start()
 
 def _dispatch_to_compute(url, req):
     async def run():
-        try:
-            async with client.stream("POST", f"{url}/add_request", 
-                                     json={"prompt": req["prompt"], "adapter_id": req["adapter_id"], "max_new_tokens": req["max_new_tokens"]}) as r:
-                async for line in r.aiter_lines():
-                    if line and line.startswith("data:"):
-                        content = line[len("data:"):].strip()
-                        if content and content != "[DONE]": _push_data(req["rid"], content)
-        except Exception: pass
-        finally:
-            _finish_stream(req["rid"])
+        # [Fix] 建立新的 client，避免 Loop 衝突
+        async with httpx.AsyncClient(timeout=None) as client:
+            try:
+                # 這裡要使用 Compute Node 預期的參數格式
+                payload = {
+                    "prompt": req["prompt"], 
+                    "adapter_id": req["adapter_id"], 
+                    "max_new_tokens": req["max_new_tokens"]
+                }
+                async with client.stream("POST", f"{url}/add_request", json=payload) as r:
+                    # 檢查狀態碼，如果不是 200，立刻報錯，不要繼續空轉
+                    if r.status_code != 200:
+                        logger.error(f"Compute node {url} rejected request {req['rid']} with {r.status_code}")
+                        _push_data(req["rid"], f"[ERROR] Compute node returned {r.status_code}")
+                        return
+
+                    async for line in r.aiter_lines():
+                        if line and line.startswith("data:"):
+                            content = line[len("data:"):].strip()
+                            if content and content != "[DONE]": 
+                                _push_data(req["rid"], content)
+            except Exception as e:
+                logger.error(f"Dispatch error to {url}: {e}")
+                _push_data(req["rid"], f"[ERROR] Dispatch failed: {e}")
+            finally:
+                _finish_stream(req["rid"])
     threading.Thread(target=lambda: asyncio.run(run()), daemon=True).start()
 
 # ============================================================
-# API
+# API (保持不變)
 # ============================================================
 @app.post("/send_request")
 def send_request(req: AddRequest):
@@ -465,7 +462,6 @@ async def stream(request_id: str, request: Request):
 
 @app.get("/status")
 def status():
-    # 方便 Debug
     with lock:
         return {
             "node_type": "CONTROL_NODE",
