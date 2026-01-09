@@ -9,7 +9,7 @@ from datetime import datetime
 # Configuration
 # ==========================================
 CONTROL_URL = "http://localhost:9000"
-ADAPTERS = ["chat","chat","chat", "math"] 
+ADAPTERS = ["chat","chat","chat", "chat", "chat", "math", '1', '2'] 
 TOTAL_REQUESTS = 50
 
 # 如果你的電腦出現 Reaper 誤殺，可以稍微調低 RPS (例如 2.0 或 3.0)
