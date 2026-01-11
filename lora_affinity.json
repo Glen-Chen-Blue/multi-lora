@@ -1,23 +1,24 @@
 {
     "1": [
         "1",
-        "chat"
+        "math"
     ],
     "2": [
         "2"
     ],
     "3": [
-        "3"
+        "3",
+        "math"
     ],
     "chat": [
-        "chat",
-        "3"
+        "chat"
     ],
     "code": [
-        "code"
+        "code",
+        "chat"
     ],
     "math": [
-        "code",
+        "chat",
         "math"
     ]
 }

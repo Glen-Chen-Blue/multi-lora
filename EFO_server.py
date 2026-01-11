@@ -16,7 +16,7 @@ from pydantic import BaseModel
 class EndpointFilter(logging.Filter):
     def filter(self, record):
         msg = record.getMessage()
-        return "GET /status" not in msg
+        return "GET /status" not in msg and "POST /heartbeat" not in msg
 
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -33,24 +33,19 @@ ALL_AVAILABLE_LORAS = []
 lora_affinity_table = {}  # {target_lora: [compatible_lora1, ...]}
 minimal_lora_set = []     # 最小涵蓋集合
 
-registered_nodes = {} 
+registered_nodes = {}  # {url: last_heartbeat_time}
 lora_assignment = {} 
 node_assignments = {} 
 
-client = httpx.AsyncClient(timeout=None)
+client = httpx.AsyncClient(timeout=5.0)
 
 # ============================================================
 # Affinity & Coverage Logic
 # ============================================================
 def generate_affinity_table(lora_ids: List[str]) -> Dict[str, List[str]]:
-    """
-    模擬 Embedding 計算：建立 LoRA 之間的替代關係表。
-    """
     table = {}
     for aid in lora_ids:
-        # 每個 LoRA 至少可以被自己替代
         substitutes = [aid]
-        # 隨機模擬 50% 機率存在其他語意相近的替代品
         others = [x for x in lora_ids if x != aid]
         if others and random.random() > 0.5:
             substitutes.extend(random.sample(others, min(len(others), 1)))
@@ -62,21 +57,16 @@ def generate_affinity_table(lora_ids: List[str]) -> Dict[str, List[str]]:
     return table
 
 def find_minimal_coverage(lora_ids: List[str], affinity_table: Dict[str, List[str]]) -> List[str]:
-    """
-    使用貪婪演算法求解 Set Cover 問題，找出最少專家集合。
-    """
     universe = set(lora_ids)
     covered = set()
     selected_loras = []
 
-    # 建立每個 LoRA 作為提供者能涵蓋哪些需求
     provider_coverage = {aid: set() for aid in lora_ids}
     for target, subs in affinity_table.items():
         for s in subs:
             provider_coverage[s].add(target)
 
     while covered != universe:
-        # 選擇能涵蓋最多「尚未涵蓋任務」的 LoRA
         best_provider = max(
             provider_coverage, 
             key=lambda k: len(provider_coverage[k] - covered),
@@ -108,7 +98,33 @@ def scan_available_loras(base_path: str = LORA_PATH) -> List[str]:
         logger.error(f"Error scanning LoRAs: {e}")
     return found_ids
 
-def rebalance():
+async def broadcast_updates():
+    """
+    主動將最新的分配結果推播給所有存活的 Control Nodes
+    """
+    logger.info("📡 Broadcasting updates to all control nodes...")
+    tasks = []
+    
+    for node_url in list(registered_nodes.keys()):
+        assigned = node_assignments.get(node_url, [])
+        payload = {
+            "assigned_adapters": assigned,
+            "affinity_table": lora_affinity_table,
+            "minimal_set": minimal_lora_set
+        }
+        
+        async def push(url, data):
+            try:
+                await client.post(f"{url}/update_config", json=data)
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to push config to {url}: {e}")
+
+        tasks.append(push(node_url, payload))
+    
+    if tasks:
+        await asyncio.gather(*tasks)
+
+def rebalance(broadcast: bool = True):
     global lora_assignment, node_assignments
     nodes = list(registered_nodes.keys())
     if not nodes or not ALL_AVAILABLE_LORAS:
@@ -117,13 +133,46 @@ def rebalance():
 
     new_assign = {}
     new_node_map = {n: [] for n in nodes}
-    for i, aid in enumerate(ALL_AVAILABLE_LORAS):
+    expert_nodes = {} # {expert_id: node_url}
+
+    # [MODIFIED] 1. 只分配「最小專家集合」給節點 (決定要 Load 什麼)
+    # 這樣 Control Node 收到的 assigned_adapters 就只會包含 minimal set
+    for i, aid in enumerate(minimal_lora_set):
         node = nodes[i % len(nodes)]
-        new_assign[aid] = node
         new_node_map[node].append(aid)
+        new_assign[aid] = node
+        expert_nodes[aid] = node
+        
+    # [MODIFIED] 2. 處理剩下的非 Expert Adapters (決定路由去哪)
+    # 根據 Affinity Table，將非 Expert 的請求導向擁有其替代品(Expert)的節點
+    for aid in ALL_AVAILABLE_LORAS:
+        if aid in new_assign: continue # 已經分配過了 (是 Expert)
+        
+        # 找替代品
+        substitutes = lora_affinity_table.get(aid, [])
+        target_node = None
+        
+        # 嘗試在已分配的 Experts 中找替代品
+        for sub in substitutes:
+            if sub in expert_nodes:
+                target_node = expert_nodes[sub]
+                break
+        
+        # 如果找不到 (理論上 find_minimal_coverage 保證找得到)，回退到隨機分配
+        if not target_node:
+            target_node = nodes[0] 
+        
+        new_assign[aid] = target_node
     
     lora_assignment = new_assign
     node_assignments = new_node_map
+
+    if broadcast:
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(broadcast_updates())
+        except RuntimeError:
+            logger.error("❌ Failed to schedule broadcast: No running event loop!")
 
 # Init
 ALL_AVAILABLE_LORAS = scan_available_loras()
@@ -154,17 +203,28 @@ def status():
     }
 
 @app.post("/register_node")
-def register(body: RegisterBody):
+async def register(body: RegisterBody):
     url = body.control_node_url
-    registered_nodes[url] = time.time()
-    rebalance()
-    # 每次註冊時分發親和力表格與最少集合資訊
-    return {
-        "status": "ok", 
-        "assigned_adapters": node_assignments.get(url, []),
-        "affinity_table": lora_affinity_table,
-        "minimal_set": minimal_lora_set
-    }
+    current_time = time.time()
+    
+    is_new = url not in registered_nodes
+    registered_nodes[url] = current_time
+    
+    if is_new:
+        logger.info(f"🆕 New node registered: {url}")
+        rebalance(broadcast=False) 
+        await broadcast_updates()
+    
+    return {"status": "registered", "wait_for_push": True}
+
+@app.post("/heartbeat")
+async def heartbeat(body: RegisterBody):
+    url = body.control_node_url
+    if url in registered_nodes:
+        registered_nodes[url] = time.time()
+    else:
+        await register(body)
+    return {"status": "ok"}
 
 @app.post("/relay_request")
 async def relay(req: RelayBody):
@@ -187,6 +247,25 @@ async def relay(req: RelayBody):
             yield f"event: end\ndata: [ERROR: {str(e)}]\n\n"
 
     return StreamingResponse(proxy(), media_type="text/event-stream")
+
+# ============================================================
+# Background Tasks
+# ============================================================
+async def node_monitor():
+    while True:
+        await asyncio.sleep(10)
+        now = time.time()
+        dead = [url for url, ts in registered_nodes.items() if now - ts > 30]
+        if dead:
+            logger.info(f"💀 Pruning dead nodes: {dead}")
+            for d in dead:
+                del registered_nodes[d]
+                node_assignments.pop(d, None)
+            rebalance(broadcast=True)
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(node_monitor())
 
 if __name__ == "__main__":
     import uvicorn

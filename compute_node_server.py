@@ -5,7 +5,7 @@ import time
 import logging
 import json
 from queue import Queue, Empty
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -35,7 +35,9 @@ engine = MultiLoRAEngine(
     max_batch_size=8,
     enable_monitor=True
 )
-engine.load_adapters_to_cpu(LORA_PATH)
+# [Modified] Start empty! Wait for Control Node to sync via /sync_adapters
+# engine.load_adapters_to_cpu(LORA_PATH) 
+
 engine_wakeup = threading.Event()
 
 # ============================================================
@@ -63,7 +65,6 @@ def on_token(rid, tokens_list):
             delta = full_text[start_len:]
             
             # [FIXED] 關鍵修正：檢查 Replacement Character (\ufffd)
-            # 只有當字串結尾是 \ufffd 時，才代表 Unicode 被切斷，需要等待下一個 token
             if delta.endswith("\ufffd"):
                 return 
                 
@@ -116,6 +117,9 @@ class MergeRequest(BaseModel):
 class UnmergeRequest(BaseModel):
     force: bool = False
 
+class SyncAdaptersRequest(BaseModel):
+    adapters: List[str]
+
 # ============================================================
 # API Endpoints
 # ============================================================
@@ -131,12 +135,29 @@ def metrics():
         },
         "lora_state": {
             "merged_adapter": engine.current_merged_adapter,
-            "running_adapters": list({str(r["adapter_id"]) for r in engine.running_queue})
+            "running_adapters": list({str(r["adapter_id"]) for r in engine.running_queue}),
+            "loaded_adapters": list(engine.cpu_cache.keys())
         },
         "capacity": {"max_batch_size": engine.max_batch_size},
         "idle": engine.is_idle(),
         "draining": engine.is_draining
     }
+
+@app.post("/sync_adapters")
+def sync_adapters(req: SyncAdaptersRequest):
+    """
+    [NEW] Control Node 呼叫此接口，強制 Compute Node 只加載指定的 Adapters
+    """
+    try:
+        # Reload with whitelist
+        engine.load_adapters_to_cpu(LORA_PATH, allowed_adapters=req.adapters)
+        return {
+            "status": "ok", 
+            "loaded_count": len(engine.cpu_cache),
+            "loaded_ids": list(engine.cpu_cache.keys())
+        }
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 @app.post("/add_request")
 def add_request(req: AddRequest):
@@ -150,10 +171,11 @@ def add_request(req: AddRequest):
         engine.add_request(req.prompt, req.adapter_id, rid, req.max_new_tokens)
         engine_wakeup.set()
     except KeyError as e:
+        # 這裡會捕捉到因為 pruning 導致找不到 adapter 的錯誤
         with stream_lock: 
             del stream_queues[rid]
             decoding_state.pop(rid, None)
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, f"Adapter Error: {str(e)}")
 
     def generator():
         try:
@@ -167,11 +189,10 @@ def add_request(req: AddRequest):
                     if item.get("type") == "error":
                         yield f"event: error\ndata: {json.dumps(item['message'])}\n\n"
                         break
-                    # Final event with reason (optional to send)
+                    # Final event with reason
                     if item.get("type") == "final":
                          continue
 
-                # [FIXED] 使用 JSON 傳輸以確保換行符號正確傳遞
                 yield f"data: {json.dumps(item)}\n\n"
         finally:
             with stream_lock: 

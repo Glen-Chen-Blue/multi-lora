@@ -185,33 +185,91 @@ class MultiLoRAEngine:
                 replaced += 1
         print(f"🔧 Replaced {replaced} layers with DynamicLoRALinear.")
 
-    def load_adapters_to_cpu(self, base_path: str = "./testLoRA"):
+    def load_adapters_to_cpu(self, base_path: str = "./testLoRA", allowed_adapters: Optional[List[str]] = None):
+        """
+        [MODIFIED] 支援「多退少補 (Incremental Update)」的載入機制。
+        1. 卸載：移除不在 allowed_adapters 白名單中的 LoRA。
+        2. 載入：只讀取白名單中且尚未在記憶體內的 LoRA。
+        """
         if not os.path.exists(base_path):
             print(f"⚠️ Path {base_path} not found.")
             return
-        adapters = sorted([d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d))])
-        self.cpu_cache.clear()
 
-        for folder in adapters:
+        whitelist = set(allowed_adapters) if allowed_adapters is not None else None
+        
+        # ==========================================
+        # 1. Unload Phase (卸載)
+        # ==========================================
+        if whitelist is not None:
+            # 找出目前在 Cache 中，但不在白名單的 Adapters
+            current_loaded = list(self.cpu_cache.keys())
+            for aid in current_loaded:
+                if aid not in whitelist:
+                    print(f"🗑️ [Pruning] Unloading adapter: {aid}")
+                    
+                    # A. 從 CPU Cache 移除
+                    del self.cpu_cache[aid]
+                    
+                    # B. 如果它正在 GPU 上，強制移除
+                    if aid in self.adapter_to_slot:
+                        slot_id = self.adapter_to_slot.pop(aid)
+                        if slot_id in self.gpu_slots:
+                            del self.gpu_slots[slot_id]
+                        # 更新 LRU: 讓被釋放的 Slot 保持在 LRU 隊列中
+                        self.slot_lru.move_to_end(slot_id, last=False)
+        
+        # ==========================================
+        # 2. Load Phase (載入)
+        # ==========================================
+        # 掃描硬碟上的 Adapter
+        try:
+            adapters_on_disk = sorted([d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d))])
+        except Exception as e:
+            print(f"❌ Error listing directories: {e}")
+            return
+
+        loaded_count = 0
+        skipped_count = 0
+
+        for folder in adapters_on_disk:
             aid = str(folder.split("_")[-1]) if "_" in folder else str(folder)
+            
+            # [Filter 1] 白名單過濾
+            if whitelist is not None and aid not in whitelist:
+                continue
+
+            # [Filter 2] 增量檢查：如果已經載入，就跳過
+            if aid in self.cpu_cache:
+                skipped_count += 1
+                continue
+
+            # 準備載入
             st_path = os.path.join(base_path, folder, "adapter_model.safetensors")
             if not os.path.exists(st_path):
                 continue
             
-            weights = load_file(st_path, device="cpu")
-            self.cpu_cache[aid] = {}
-            
-            # 使用 model.named_modules 匹配權重
-            for n, m in self.model.named_modules():
-                if isinstance(m, DynamicLoRALinear):
-                    a_key = f"base_model.model.{n}.lora_A.weight"
-                    b_key = f"base_model.model.{n}.lora_B.weight"
-                    if a_key in weights and b_key in weights:
-                        self.cpu_cache[aid][n] = {
-                            "A": weights[a_key].T.contiguous().to(torch.float32).pin_memory(),
-                            "B": weights[b_key].T.contiguous().to(torch.float32).pin_memory(),
-                        }
-        print(f"✅ Loaded {len(self.cpu_cache)} adapters. IDs: {list(self.cpu_cache.keys())}")
+            try:
+                # print(f"📥 Loading new adapter: {aid}...")
+                weights = load_file(st_path, device="cpu")
+                self.cpu_cache[aid] = {}
+                
+                # 使用 model.named_modules 匹配權重
+                for n, m in self.model.named_modules():
+                    if isinstance(m, DynamicLoRALinear):
+                        a_key = f"base_model.model.{n}.lora_A.weight"
+                        b_key = f"base_model.model.{n}.lora_B.weight"
+                        if a_key in weights and b_key in weights:
+                            self.cpu_cache[aid][n] = {
+                                "A": weights[a_key].T.contiguous().to(torch.float32).pin_memory(),
+                                "B": weights[b_key].T.contiguous().to(torch.float32).pin_memory(),
+                            }
+                loaded_count += 1
+            except Exception as e:
+                print(f"❌ Failed to load {aid}: {e}")
+
+        total_now = len(self.cpu_cache)
+        print(f"✅ Incremental update done. Loaded: {loaded_count}, Skipped (Already Cached): {skipped_count}, Total Cached: {total_now}")
+        print(f"   Current Adapters: {list(self.cpu_cache.keys())}")
 
     def _evict_slot(self, slot_id):
         if slot_id in self.gpu_slots:
@@ -259,9 +317,6 @@ class MultiLoRAEngine:
     def merge_adapter(self, adapter_id, force: bool = False):
         """
         Merge 指定的 Adapter 到模型權重中。
-        :param force: 
-            True  -> 強制中斷不相容的請求 (Abort)
-            False -> 優雅等待所有請求完成 (Drain)
         """
         if adapter_id not in self.cpu_cache: 
             raise KeyError(f"Unknown adapter {adapter_id}")
@@ -269,22 +324,18 @@ class MultiLoRAEngine:
         # 1. Graceful Draining (非強制模式)
         if not force:
             with self.lock:
-                self.is_draining = True # 通知 step() 停止接新客
+                self.is_draining = True 
             
             print(f"⏳ [Merge] Draining requests for merge {adapter_id}...")
-            
-            # 等待 Running Queue 清空
             while True:
                 with self.lock:
                     if len(self.running_queue) == 0:
                         break
-                time.sleep(0.1) # 讓出 CPU/Lock 給 step() 執行
-                
+                time.sleep(0.1) 
             print(f"✅ [Merge] Drained. Proceeding to merge.")
 
         # 2. 執行 Merge (加鎖)
         with self.lock:
-            # 如果是 Force 模式，清除殘留的不相容請求
             if force:
                 new_running = []
                 aborted = 0
@@ -300,7 +351,6 @@ class MultiLoRAEngine:
                 if aborted > 0: 
                     print(f"⚠️ [Merge] Force aborted {aborted} requests.")
 
-            # 設定完成，解除 Draining 狀態
             self.is_draining = False 
 
             if adapter_id not in self.adapter_to_slot:
@@ -324,7 +374,8 @@ class MultiLoRAEngine:
             self.current_merged_adapter = None
 
     def add_request(self, prompt, adapter_id, request_id, max_new_tokens=128):
-        if adapter_id not in self.cpu_cache: raise KeyError(f"Adapter {adapter_id} not available")
+        if adapter_id not in self.cpu_cache: 
+            raise KeyError(f"Adapter {adapter_id} not available (Filtered or Not Found)")
         inputs = self.tokenizer(prompt, return_tensors="pt")
         self.request_queue.append({
             "request_id": str(request_id),
@@ -342,12 +393,10 @@ class MultiLoRAEngine:
 
     @torch.no_grad()
     def step(self):
-        # [Critical] 加鎖保護 Step，防止與 Merge 動作衝突
         with self.lock:
             # Scheduler
             self.running_queue = [r for r in self.running_queue if not r["done"]]
             
-            # [Modified] 如果正在 Draining，禁止從 request_queue 加入新請求到 running_queue
             if not self.is_draining:
                 if self.current_merged_adapter:
                     pass 
@@ -411,7 +460,7 @@ class MultiLoRAEngine:
                 max_past = max(p[0][0].shape[2] for p in past_list)
                 batched_past = _to_model_cache(_batch_past(past_list, max_past))
                 inputs = torch.cat([r["input_ids"][:, -1:] for r in decode], dim=0)
-                attn = torch.ones((len(decode), max_past + 1), device=self.device) # Simplified mask
+                attn = torch.ones((len(decode), max_past + 1), device=self.device)
 
                 out = self.model(input_ids=inputs, attention_mask=attn, past_key_values=batched_past, use_cache=True)
                 self._process_logits(out, decode)
@@ -429,7 +478,6 @@ class MultiLoRAEngine:
             tok = tokens[i].item()
             req["tokens_gen"].append(tok)
             
-            # [修改] 傳送完整的 tokens_gen 列表，而不是只有 tok，讓 Server 端能做正確的 Context Decode
             if self.on_token: 
                 self.on_token(req["request_id"], req["tokens_gen"])
             

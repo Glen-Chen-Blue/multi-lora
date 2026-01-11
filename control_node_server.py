@@ -77,6 +77,11 @@ class AddRequest(BaseModel):
     adapter_id: str
     max_new_tokens: int = 128
 
+class ConfigUpdate(BaseModel):
+    assigned_adapters: List[str]
+    affinity_table: Dict[str, List[str]]
+    minimal_set: List[str]
+
 # ============================================================
 # Helpers
 # ============================================================
@@ -94,12 +99,41 @@ def _finish_stream(rid):
         if rid in stream_queues: stream_queues[rid][0].put(None)
 
 def _http_post_bg(url, path, payload):
+    """
+    [MODIFIED] 加入重試機制，解決 Compute Node 啟動較慢導致連線被拒的問題。
+    """
     def run():
-        try:
-            httpx.post(f"{url}{path}", json=payload, timeout=5.0)
-        except Exception as e:
-            logger.error(f"Failed to post to {url}{path}: {e}")
+        # 嘗試 30 次，每次間隔 2 秒，共等待 60 秒
+        max_retries = 30
+        for i in range(max_retries):
+            try:
+                r = httpx.post(f"{url}{path}", json=payload, timeout=5.0)
+                if r.status_code == 200:
+                    logger.info(f"✅ Successfully synced to {url}")
+                    return
+                else:
+                    logger.warning(f"⚠️ Sync to {url} returned {r.status_code}. Retrying...")
+            except Exception as e:
+                # 只有在前幾次失敗時印出 Log，避免洗版
+                if i < 3 or i % 10 == 0:
+                    logger.info(f"⏳ Waiting for {url} to become available... (Attempt {i+1}/{max_retries})")
+            
+            time.sleep(2.0)
+        
+        logger.error(f"❌ Failed to post to {url}{path} after {max_retries} retries.")
+
     threading.Thread(target=run, daemon=True).start()
+
+def sync_compute_nodes_adapters():
+    """
+    [NEW] 將當前的 my_allowed_adapters 同步給所有活躍的 Compute Nodes
+    """
+    logger.info(f"🔄 Syncing adapters to Compute Nodes: {my_allowed_adapters}")
+    with lock:
+        targets = list(active_node_urls)
+    
+    for url in targets:
+        _http_post_bg(url, "/sync_adapters", {"adapters": my_allowed_adapters})
 
 # ============================================================
 # Node State Helpers (Affinity Aware)
@@ -143,7 +177,6 @@ def _node_can_accept(url, adapter_id):
         
         # 0. 如果節點被鎖定在 MERGED 模式但還沒完成 Merge，檢查 Target
         if mode == "MERGED" and target != adapter_id:
-             # 如果 Target 是 adapter_id 的替代品，也可以接受 (預期它即將 Merge 完成)
              substitutes = affinity_table.get(adapter_id, [])
              if target not in substitutes:
                  return False
@@ -152,14 +185,11 @@ def _node_can_accept(url, adapter_id):
         if actual_merged == adapter_id: return True
         
         # 2. 語意親和力匹配 (Fuzzy Match)
-        # 如果節點已 Merge 了某個 Adapter，且該 Adapter 是請求 Adapter 的替代品
         substitutes = affinity_table.get(adapter_id, [])
         if actual_merged and (actual_merged in substitutes):
-            # logger.info(f"🤝 Affinity Hit: Can serve {adapter_id} using merged {actual_merged} on {url}")
             return True
             
         # 3. 節點未 Merge 且為 Normal 模式 (可以自由加載)
-        # 注意：如果實際 Merge 了其他不相關的 Adapter，這裡會回傳 False (因為 actual_merged != None)
         if not actual_merged and mode == "NORMAL":
              return True
         
@@ -185,6 +215,9 @@ def _check_autoscaling():
                 active_node_urls.append(new_node)
                 last_scale_action_ts = now
                 logger.info(f"🚀 [AutoScaler] Scale UP! Activated: {new_node}")
+                
+                # [ADDED] 新節點加入時，立刻同步 Adapter 允許清單
+                _http_post_bg(new_node, "/sync_adapters", {"adapters": my_allowed_adapters})
         return
 
     if n_active > MIN_NODES and q_total == 0:
@@ -208,6 +241,7 @@ def _maybe_trigger_merge():
     if N == 0: return
 
     with lock:
+        # 因為我們在 send_request 就已經合併了 ID，這裡的 counts 就是已經歸類過的
         counts = {a: len(q) for a, q in adapter_queues.items() if len(q) > 0}
     
     Q = sum(counts.values())
@@ -304,20 +338,27 @@ def _http_post_json_bg(url, path, json_data):
 # ============================================================
 def efo_heartbeat():
     """
-    [Modified] Heartbeat now fetches affinity table and minimal set from EFO
+    [Modified] Heartbeat now just pings EFO. Config comes via Push (/update_config).
     """
-    global my_allowed_adapters, affinity_table, minimal_set
+    # 1. Loop until registered
     while True:
         try:
-            r = httpx.post(f"{EFO_URL}/register_node", json={"control_node_url": MY_NODE_URL}, timeout=2)
+            logger.info("Registering to EFO...")
+            r = httpx.post(f"{EFO_URL}/register_node", json={"control_node_url": MY_NODE_URL}, timeout=5)
             if r.status_code == 200:
-                data = r.json()
-                with lock: 
-                    my_allowed_adapters = data.get("assigned_adapters", [])
-                    affinity_table = data.get("affinity_table", {}) 
-                    minimal_set = data.get("minimal_set", [])       
-        except: pass
+                logger.info("✅ Registered to EFO.")
+                break
+        except Exception as e:
+            logger.warning(f"EFO registration failed: {e}. Retrying...")
+            time.sleep(5)
+    
+    # 2. Simple Heartbeat
+    while True:
         time.sleep(10)
+        try:
+            httpx.post(f"{EFO_URL}/heartbeat", json={"control_node_url": MY_NODE_URL}, timeout=2)
+        except Exception:
+            pass
 
 def compute_poller():
     while True:
@@ -341,7 +382,6 @@ def scheduler():
         _maybe_revert_merges()
 
         with lock:
-            # 只處理非空 Queue
             merged_queues = [a for a in merged_assignment.keys() if adapter_queues[a]]
             normal_queues = [a for a in adapter_queues if adapter_queues[a] and a not in merged_assignment]
             
@@ -376,23 +416,26 @@ def scheduler():
                 with lock:
                     if adapter_queues[aid]: req = adapter_queues[aid].popleft()
                 if req:
-                    # [Affinity Logic] 
-                    # 檢查是否因為 Fuzzy Match 才選中這個節點
-                    # 如果是，我們必須把 request 中的 adapter_id 換成節點上實際有的替代品
+                    # 注意: 這裡已經在 send_request 做過一次 ID Rewrite
+                    # 所以 req['adapter_id'] 已經是 Compute Node 擁有的 ID (例如 '1')
+                    # 但如果目標節點剛好是被 Merge 在某個相容的 adapter 上 (例如也 Merge 成了 '1' 或者是 '5'?)
+                    # 一般情況下直接送出即可。
+                    
+                    # 再次確認: 如果目標節點是被鎖定在某個 merged adapter，且與當前 req 相容，
+                    # 我們要確保送出的 ID 是那個 merged ID。
+                    
                     target_adapter_to_use = req["adapter_id"]
                     
                     with lock:
                         info = nodes.get(target_node)
                         if info and info.get("metrics"):
                             merged = info["metrics"]["lora_state"].get("merged_adapter")
-                            # 若已 Merge 的不是原始請求的 ID，但在替代清單中，則使用已 Merge 的 ID
                             if merged and merged != req["adapter_id"]:
                                 substitutes = affinity_table.get(req["adapter_id"], [])
                                 if merged in substitutes:
                                     logger.info(f"🔄 [Scheduler] Swapping {req['adapter_id']} -> {merged} for dispatch to {target_node}")
                                     target_adapter_to_use = merged
                     
-                    # 建立發送用的 Request 副本 (避免修改原始 Queue 物件)
                     req_to_send = req.copy()
                     req_to_send["adapter_id"] = target_adapter_to_use
                     
@@ -438,15 +481,12 @@ def _proxy_to_efo(req_id, prompt, adapter, tokens):
     threading.Thread(target=lambda: asyncio.run(run()), daemon=True).start()
 
 def _dispatch_to_compute(url, req):
-    """
-    req: Dictionary containing 'prompt', 'adapter_id', 'max_new_tokens', 'rid'
-    """
     async def run():
         async with httpx.AsyncClient(timeout=None) as client:
             try:
                 payload = {
                     "prompt": req["prompt"], 
-                    "adapter_id": req["adapter_id"], # 這裡的 adapter_id 可能已經被換成替代品了
+                    "adapter_id": req["adapter_id"],
                     "max_new_tokens": req["max_new_tokens"]
                 }
                 async with client.stream("POST", f"{url}/add_request", json=payload) as r:
@@ -470,38 +510,81 @@ def _dispatch_to_compute(url, req):
 # ============================================================
 # API
 # ============================================================
+@app.post("/update_config")
+def update_config(cfg: ConfigUpdate):
+    """
+    [NEW] 接收 EFO 的廣播配置
+    """
+    global my_allowed_adapters, affinity_table, minimal_set
+    
+    changed = (set(my_allowed_adapters) != set(cfg.assigned_adapters))
+    
+    with lock:
+        my_allowed_adapters = cfg.assigned_adapters
+        affinity_table = cfg.affinity_table
+        minimal_set = cfg.minimal_set
+    
+    logger.info(f"📥 Received config update from EFO. Assigned: {len(my_allowed_adapters)} adapters.")
+    
+    # 如果分配的 Adapter 變了，通知 Compute Nodes 重新加載
+    if changed:
+        sync_compute_nodes_adapters()
+
+    return {"status": "updated"}
+
 @app.post("/send_request")
 def send_request(req: AddRequest):
     rid = str(uuid.uuid4())
     _ensure_stream(rid)
     
     is_local = False
+    # [NEW] 用來存儲最終要使用的 ID (可能是原始 ID，也可能是替代品 ID)
+    final_adapter_id = req.adapter_id 
+
     with lock:
-        # 如果請求的 LoRA 在本地允許清單中，或者它是核心專家集合的一部分(視策略而定)，則本地處理
-        # 這裡簡單判斷：若沒被限制，或在允許清單內
+        # Check 1: 本地直接有 (Exact Match)
         if not my_allowed_adapters or req.adapter_id in my_allowed_adapters:
             is_local = True
         
-        # [Strategy] 如果本地已經有替代品 (Affinity Match)，也強制留在本地
-        # 即使它不在 my_allowed_adapters (因為 allowed adapters 通常是 partition 結果)
-        # 但為了效能，若本地已 merge 替代品，應優先使用
+        # Check 2: 本地有替代品 (Affinity Match in Allowed List)
+        # 如果我沒有這個 Adapter，但我有它的 Expert (替代品) 且 Expert 在允許清單中 -> 我可以處理
+        if not is_local:
+             substitutes = affinity_table.get(req.adapter_id, [])
+             for sub in substitutes:
+                 if sub in my_allowed_adapters:
+                     is_local = True
+                     final_adapter_id = sub # [REWRITE] 改寫為替代品 ID
+                     break
+        
+        # Check 3: Affinity Match in Merged State
+        # 檢查是否有節點已經 Merge 了某個替代品
         if not is_local:
              substitutes = affinity_table.get(req.adapter_id, [])
              for url in active_node_urls:
                  info = nodes.get(url)
                  if info and info.get("metrics"):
                      merged = info["metrics"]["lora_state"]["merged_adapter"]
+                     # 如果某個節點 Merge 了我的替代品，那也可以送過去
                      if merged and merged in substitutes:
                          is_local = True
+                         # 注意：這裡不改寫 final_adapter_id，
+                         # 因為 scheduler 會再做一次針對 Merged Node 的檢查並改寫
+                         # 或者我們也可以在這裡改寫，但為了邏輯一致性，讓 scheduler 處理動態的 merged 狀態比較好
                          break
     
     if is_local:
         with lock:
-            adapter_queues[req.adapter_id].append({
-                "rid": rid, "prompt": req.prompt, "adapter_id": req.adapter_id, "max_new_tokens": req.max_new_tokens
+            # [MODIFIED] 使用 final_adapter_id 入隊列
+            # 這樣給 5 的請求就會進入 '1' 的隊列，計數會合併，Merge 也會正確觸發 '1'
+            adapter_queues[final_adapter_id].append({
+                "rid": rid, 
+                "prompt": req.prompt, 
+                "adapter_id": final_adapter_id, # [IMPORTANT] 使用改寫後的 ID
+                "max_new_tokens": req.max_new_tokens
             })
             wakeup.set()
     else:
+        # Proxy 邏輯維持原樣 (送原始 ID 給 EFO 重新分配)
         _proxy_to_efo(rid, req.prompt, req.adapter_id, req.max_new_tokens)
         
     return {"request_id": rid}
