@@ -4,103 +4,119 @@ import threading
 import time
 import logging
 import json
+import asyncio
 from queue import Queue, Empty
-from typing import Dict, Any, Optional, List
+from contextlib import asynccontextmanager
+from typing import Dict, List, Optional
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
 from multilora_system import MultiLoRAEngine
 
 # ============================================================
-# Logging Setup
+# Logging
 # ============================================================
 class MetricsFilter(logging.Filter):
     def filter(self, record):
         return "GET /metrics" not in record.getMessage()
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logging.getLogger("uvicorn.access").addFilter(MetricsFilter())
+logger = logging.getLogger("ComputeNode")
 
 # ============================================================
-# Config & Init
+# Global State & Engine
 # ============================================================
 NODE_ID = os.environ.get("NODE_ID", "cn-1")
 MODEL_ID = os.environ.get("MODEL_ID", "unsloth/Meta-Llama-3.1-8B")
 LORA_PATH = os.environ.get("LORA_PATH", "./testLoRA")
 
-print(f"[{NODE_ID}] Initializing Engine...")
-engine = MultiLoRAEngine(
-    model_id=MODEL_ID,
-    adapter_slots=4,
-    max_batch_size=8,
-    enable_monitor=True
-)
-# [Modified] Start empty! Wait for Control Node to sync via /sync_adapters
-# engine.load_adapters_to_cpu(LORA_PATH) 
-
+engine: Optional[MultiLoRAEngine] = None
 engine_wakeup = threading.Event()
+shutdown_event = threading.Event()
 
-# ============================================================
-# Streaming & Decoding State
-# ============================================================
+# Streaming state
 stream_queues: Dict[str, Queue] = {}
-decoding_state: Dict[str, int] = {} 
+decoding_state: Dict[str, int] = {}
 stream_lock = threading.Lock()
 
-def on_token(rid, tokens_list):
-    """
-    接收完整的 tokens_list，進行增量解碼
-    """
+# [NEW] Config Versioning State
+last_config_version: int = -1
+config_lock = threading.Lock()
+
+# ============================================================
+# Callbacks
+# ============================================================
+def on_token(rid: str, tokens_list: List[int]):
     with stream_lock:
         if rid not in stream_queues: return
+        q = stream_queues[rid]
         
-        # 取得上一次解碼的長度
         start_len = decoding_state.get(rid, 0)
-        
-        # 解碼全部
         full_text = engine.tokenizer.decode(tokens_list, skip_special_tokens=True)
         
-        # 取出新增的部分 (Delta)
         if len(full_text) > start_len:
             delta = full_text[start_len:]
-            
-            # [FIXED] 關鍵修正：檢查 Replacement Character (\ufffd)
-            if delta.endswith("\ufffd"):
-                return 
-                
-            stream_queues[rid].put(delta)
+            if delta.endswith("\ufffd"): return
+            q.put(delta)
             decoding_state[rid] = len(full_text)
 
-def on_finish(rid, reason):
+def on_finish(rid: str, reason: str):
     with stream_lock:
         if rid in stream_queues:
-            # 針對被強制中止的請求提供錯誤訊息
+            q = stream_queues[rid]
             if reason == "aborted_by_merge":
-                stream_queues[rid].put({
-                    "type": "error",
-                    "message": "Processing aborted due to forced model merge."
-                })
+                q.put({"type": "error", "message": "Request aborted by system merge."})
             else:
-                stream_queues[rid].put({"type": "final", "reason": reason})
-            stream_queues[rid].put(None) # Sentinel to stop generator
-            
-        # 清理狀態
+                q.put({"type": "final", "reason": reason})
+            q.put(None) 
         decoding_state.pop(rid, None)
 
-engine.on_token = on_token
-engine.on_finish = on_finish
+# ============================================================
+# Engine Loop
+# ============================================================
+def engine_loop_thread():
+    logger.info("🚀 Engine loop started.")
+    while not shutdown_event.is_set():
+        engine_wakeup.wait(timeout=1.0)
+        if shutdown_event.is_set(): break
+        try:
+            did_work = engine.step()
+            if not did_work:
+                if engine.is_idle(): engine_wakeup.clear()
+                else: time.sleep(0.001) 
+        except Exception as e:
+            logger.error(f"❌ Engine step error: {e}", exc_info=True)
+            time.sleep(1)
 
-def engine_loop():
-    while True:
-        engine_wakeup.wait()
-        did_work = engine.step()
-        if not did_work:
-            if engine.is_idle():
-                engine_wakeup.clear()
-            else:
-                time.sleep(0.001)
+# ============================================================
+# Lifecycle
+# ============================================================
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global engine
+    logger.info(f"Initializing Compute Node {NODE_ID}...")
+    
+    engine = MultiLoRAEngine(
+        model_id=MODEL_ID,
+        adapter_slots=4,
+        max_batch_size=8,
+        enable_monitor=True
+    )
+    engine.on_token = on_token
+    engine.on_finish = on_finish
+    
+    t = threading.Thread(target=engine_loop_thread, daemon=True)
+    t.start()
+    yield
+    logger.info("Shutting down...")
+    shutdown_event.set()
+    engine_wakeup.set()
+    t.join(timeout=5)
 
-threading.Thread(target=engine_loop, daemon=True).start()
+app = FastAPI(title=f"Compute Node {NODE_ID}", lifespan=lifespan)
 
 # ============================================================
 # API Models
@@ -119,14 +135,14 @@ class UnmergeRequest(BaseModel):
 
 class SyncAdaptersRequest(BaseModel):
     adapters: List[str]
+    version_id: int # [NEW]
 
 # ============================================================
-# API Endpoints
+# Endpoints
 # ============================================================
-app = FastAPI(title=f"Compute Node {NODE_ID}")
-
 @app.get("/metrics")
 def metrics():
+    if not engine: return {}
     return {
         "node_id": NODE_ID,
         "load": {
@@ -140,30 +156,43 @@ def metrics():
         },
         "capacity": {"max_batch_size": engine.max_batch_size},
         "idle": engine.is_idle(),
-        "draining": engine.is_draining
+        "draining": engine.is_draining,
+        "config_version": last_config_version
     }
 
 @app.post("/sync_adapters")
 def sync_adapters(req: SyncAdaptersRequest):
-    """
-    [NEW] Control Node 呼叫此接口，強制 Compute Node 只加載指定的 Adapters
-    """
+    global last_config_version
+    
+    with config_lock:
+        # [NEW] Check against local version
+        if req.version_id <= last_config_version:
+            logger.warning(f"⚠️ Ignoring stale config v{req.version_id} (Current: v{last_config_version})")
+            return {
+                "status": "ignored", 
+                "reason": "stale_version",
+                "loaded": list(engine.cpu_cache.keys())
+            }
+        
+        last_config_version = req.version_id
+
     try:
-        # Reload with whitelist
         engine.load_adapters_to_cpu(LORA_PATH, allowed_adapters=req.adapters)
         return {
             "status": "ok", 
-            "loaded_count": len(engine.cpu_cache),
-            "loaded_ids": list(engine.cpu_cache.keys())
+            "version_applied": req.version_id,
+            "loaded": list(engine.cpu_cache.keys())
         }
     except Exception as e:
+        logger.error(f"Sync failed: {e}")
         raise HTTPException(500, str(e))
 
 @app.post("/add_request")
 def add_request(req: AddRequest):
     rid = str(uuid.uuid4())
     q = Queue()
-    with stream_lock: 
+    
+    with stream_lock:
         stream_queues[rid] = q
         decoding_state[rid] = 0
     
@@ -171,52 +200,55 @@ def add_request(req: AddRequest):
         engine.add_request(req.prompt, req.adapter_id, rid, req.max_new_tokens)
         engine_wakeup.set()
     except KeyError as e:
-        # 這裡會捕捉到因為 pruning 導致找不到 adapter 的錯誤
-        with stream_lock: 
-            del stream_queues[rid]
+        with stream_lock:
+            stream_queues.pop(rid, None)
             decoding_state.pop(rid, None)
-        raise HTTPException(400, f"Adapter Error: {str(e)}")
+        raise HTTPException(400, f"Adapter {req.adapter_id} not available: {e}")
 
-    def generator():
+    def event_generator():
         try:
             while True:
-                item = q.get()
+                try:
+                    item = q.get(timeout=60) 
+                except Empty:
+                    yield ": keep-alive\n\n"
+                    continue
+
                 if item is None:
                     yield "event: end\ndata: [DONE]\n\n"
                     break
                 
-                if isinstance(item, dict): 
+                if isinstance(item, dict):
                     if item.get("type") == "error":
                         yield f"event: error\ndata: {json.dumps(item['message'])}\n\n"
                         break
-                    # Final event with reason
-                    if item.get("type") == "final":
-                         continue
+                    continue
 
                 yield f"data: {json.dumps(item)}\n\n"
+        except Exception as e:
+            logger.warning(f"Stream broken for {rid}: {e}")
         finally:
-            with stream_lock: 
+            with stream_lock:
                 stream_queues.pop(rid, None)
                 decoding_state.pop(rid, None)
 
-    return StreamingResponse(generator(), media_type="text/event-stream")
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.post("/merge")
 def merge(req: MergeRequest):
     try:
         engine.merge_adapter(req.adapter_id, force=req.force)
-        return {
-            "status": "merged", 
-            "adapter": req.adapter_id, 
-            "mode": "force" if req.force else "graceful"
-        }
+        return {"status": "merged", "adapter": req.adapter_id}
     except Exception as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, f"Merge failed: {e}")
 
 @app.post("/unmerge")
 def unmerge(req: UnmergeRequest):
     if not req.force and not engine.is_idle():
         raise HTTPException(409, "Engine not idle")
-    
     engine.unmerge_all()
     return {"status": "unmerged"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8001)))
