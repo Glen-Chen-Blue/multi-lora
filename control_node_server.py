@@ -4,7 +4,7 @@ import uuid
 import threading
 import asyncio
 import httpx
-import json # [Added] Import json
+import json
 from queue import Queue, Empty
 from typing import Dict, List, Deque, Optional, Tuple, Any
 from collections import deque, defaultdict
@@ -44,7 +44,7 @@ QMIN_MULT = int(os.environ.get("QMIN_MULT", "4")) # Queue > 4 * NodeCount 時觸
 # ============================================================
 # State
 # ============================================================
-app = FastAPI(title="Control Node")
+app = FastAPI(title="Control Node with Affinity")
 lock = threading.Lock()
 
 # Resource Pools
@@ -63,6 +63,10 @@ stream_queues = {}
 merged_assignment = {} 
 
 my_allowed_adapters = []
+
+# [New] Affinity & Minimal Set from EFO
+affinity_table = {} 
+minimal_set = []
 
 # 注意：這裡不建立全域 AsyncClient 用於背景任務，避免 Event Loop 衝突
 wakeup = threading.Event()
@@ -98,7 +102,7 @@ def _http_post_bg(url, path, payload):
     threading.Thread(target=run, daemon=True).start()
 
 # ============================================================
-# Node State Helpers (保持不變)
+# Node State Helpers (Affinity Aware)
 # ============================================================
 def _update_node_metrics(url, metrics):
     with lock:
@@ -118,6 +122,9 @@ def _get_healthy_active_nodes():
     return res
 
 def _node_can_accept(url, adapter_id):
+    """
+    擴展原有的檢查邏輯，加入語意親和力判斷 (Fuzzy Matching)。
+    """
     with lock:
         info = nodes.get(url)
         if not info or not info.get("metrics"): return False
@@ -133,14 +140,33 @@ def _node_can_accept(url, adapter_id):
         if mode == "DRAINING": return False
         
         actual_merged = m["lora_state"]["merged_adapter"]
-        if actual_merged and actual_merged != adapter_id: return False
         
-        if mode == "MERGED" and target != adapter_id: return False
+        # 0. 如果節點被鎖定在 MERGED 模式但還沒完成 Merge，檢查 Target
+        if mode == "MERGED" and target != adapter_id:
+             # 如果 Target 是 adapter_id 的替代品，也可以接受 (預期它即將 Merge 完成)
+             substitutes = affinity_table.get(adapter_id, [])
+             if target not in substitutes:
+                 return False
+
+        # 1. 精確匹配 (Exact Match)
+        if actual_merged == adapter_id: return True
         
-        return True
+        # 2. 語意親和力匹配 (Fuzzy Match)
+        # 如果節點已 Merge 了某個 Adapter，且該 Adapter 是請求 Adapter 的替代品
+        substitutes = affinity_table.get(adapter_id, [])
+        if actual_merged and (actual_merged in substitutes):
+            # logger.info(f"🤝 Affinity Hit: Can serve {adapter_id} using merged {actual_merged} on {url}")
+            return True
+            
+        # 3. 節點未 Merge 且為 Normal 模式 (可以自由加載)
+        # 注意：如果實際 Merge 了其他不相關的 Adapter，這裡會回傳 False (因為 actual_merged != None)
+        if not actual_merged and mode == "NORMAL":
+             return True
+        
+        return False
 
 # ============================================================
-# Scaling & Merging Logic (保持不變)
+# Scaling & Merging Logic
 # ============================================================
 def _check_autoscaling():
     global last_scale_action_ts
@@ -274,15 +300,22 @@ def _http_post_json_bg(url, path, json_data):
     threading.Thread(target=lambda: httpx.post(f"{url}{path}", json=json_data), daemon=True).start()
 
 # ============================================================
-# Background Tasks (保持不變)
+# Background Tasks
 # ============================================================
 def efo_heartbeat():
-    global my_allowed_adapters
+    """
+    [Modified] Heartbeat now fetches affinity table and minimal set from EFO
+    """
+    global my_allowed_adapters, affinity_table, minimal_set
     while True:
         try:
             r = httpx.post(f"{EFO_URL}/register_node", json={"control_node_url": MY_NODE_URL}, timeout=2)
             if r.status_code == 200:
-                with lock: my_allowed_adapters = r.json().get("assigned_adapters", [])
+                data = r.json()
+                with lock: 
+                    my_allowed_adapters = data.get("assigned_adapters", [])
+                    affinity_table = data.get("affinity_table", {}) 
+                    minimal_set = data.get("minimal_set", [])       
         except: pass
         time.sleep(10)
 
@@ -308,12 +341,13 @@ def scheduler():
         _maybe_revert_merges()
 
         with lock:
+            # 只處理非空 Queue
             merged_queues = [a for a in merged_assignment.keys() if adapter_queues[a]]
             normal_queues = [a for a in adapter_queues if adapter_queues[a] and a not in merged_assignment]
             
         did_work = False
 
-        # 2a. Dispatch Merged Queues
+        # 2a. Dispatch Merged Queues (Priority)
         for aid in merged_queues:
             target_node = None
             with lock: target_node = merged_assignment.get(aid)
@@ -342,7 +376,27 @@ def scheduler():
                 with lock:
                     if adapter_queues[aid]: req = adapter_queues[aid].popleft()
                 if req:
-                    _dispatch_to_compute(target_node, req)
+                    # [Affinity Logic] 
+                    # 檢查是否因為 Fuzzy Match 才選中這個節點
+                    # 如果是，我們必須把 request 中的 adapter_id 換成節點上實際有的替代品
+                    target_adapter_to_use = req["adapter_id"]
+                    
+                    with lock:
+                        info = nodes.get(target_node)
+                        if info and info.get("metrics"):
+                            merged = info["metrics"]["lora_state"].get("merged_adapter")
+                            # 若已 Merge 的不是原始請求的 ID，但在替代清單中，則使用已 Merge 的 ID
+                            if merged and merged != req["adapter_id"]:
+                                substitutes = affinity_table.get(req["adapter_id"], [])
+                                if merged in substitutes:
+                                    logger.info(f"🔄 [Scheduler] Swapping {req['adapter_id']} -> {merged} for dispatch to {target_node}")
+                                    target_adapter_to_use = merged
+                    
+                    # 建立發送用的 Request 副本 (避免修改原始 Queue 物件)
+                    req_to_send = req.copy()
+                    req_to_send["adapter_id"] = target_adapter_to_use
+                    
+                    _dispatch_to_compute(target_node, req_to_send)
                     did_work = True
 
         if not did_work:
@@ -375,48 +429,46 @@ def _proxy_to_efo(req_id, prompt, adapter, tokens):
                                          json={"prompt": prompt, "adapter_id": adapter, "max_new_tokens": tokens}) as r:
                     async for line in r.aiter_lines():
                         if line and line.startswith("data:"):
-                            # [Modified] 改用 rstrip("\n") 避免刪除空白 token
                             content = line[len("data:"):].rstrip("\n")
                             if content: _push_data(req_id, content)
             except Exception as e:
-                # [Modified] Error 也轉為 JSON 格式
                 _push_data(req_id, json.dumps(f"[Error: {e}]"))
             finally:
                 _finish_stream(req_id)
     threading.Thread(target=lambda: asyncio.run(run()), daemon=True).start()
 
 def _dispatch_to_compute(url, req):
+    """
+    req: Dictionary containing 'prompt', 'adapter_id', 'max_new_tokens', 'rid'
+    """
     async def run():
         async with httpx.AsyncClient(timeout=None) as client:
             try:
                 payload = {
                     "prompt": req["prompt"], 
-                    "adapter_id": req["adapter_id"], 
+                    "adapter_id": req["adapter_id"], # 這裡的 adapter_id 可能已經被換成替代品了
                     "max_new_tokens": req["max_new_tokens"]
                 }
                 async with client.stream("POST", f"{url}/add_request", json=payload) as r:
                     if r.status_code != 200:
                         logger.error(f"Compute node {url} rejected request {req['rid']} with {r.status_code}")
-                        # [Modified] Error 也轉為 JSON 格式
                         _push_data(req["rid"], json.dumps(f"[ERROR] Compute node returned {r.status_code}"))
                         return
 
                     async for line in r.aiter_lines():
                         if line and line.startswith("data:"):
-                             # [Modified] 改用 rstrip("\n") 避免刪除空白 token，並使用 JSON 字串
                             content = line[len("data:"):].rstrip("\n")
                             if content and content != "[DONE]": 
                                 _push_data(req["rid"], content)
             except Exception as e:
                 logger.error(f"Dispatch error to {url}: {e}")
-                # [Modified] Error 也轉為 JSON 格式
                 _push_data(req["rid"], json.dumps(f"[ERROR] Dispatch failed: {e}"))
             finally:
                 _finish_stream(req["rid"])
     threading.Thread(target=lambda: asyncio.run(run()), daemon=True).start()
 
 # ============================================================
-# API (保持不變)
+# API
 # ============================================================
 @app.post("/send_request")
 def send_request(req: AddRequest):
@@ -425,15 +477,26 @@ def send_request(req: AddRequest):
     
     is_local = False
     with lock:
+        # 如果請求的 LoRA 在本地允許清單中，或者它是核心專家集合的一部分(視策略而定)，則本地處理
+        # 這裡簡單判斷：若沒被限制，或在允許清單內
         if not my_allowed_adapters or req.adapter_id in my_allowed_adapters:
             is_local = True
+        
+        # [Strategy] 如果本地已經有替代品 (Affinity Match)，也強制留在本地
+        # 即使它不在 my_allowed_adapters (因為 allowed adapters 通常是 partition 結果)
+        # 但為了效能，若本地已 merge 替代品，應優先使用
+        if not is_local:
+             substitutes = affinity_table.get(req.adapter_id, [])
+             for url in active_node_urls:
+                 info = nodes.get(url)
+                 if info and info.get("metrics"):
+                     merged = info["metrics"]["lora_state"]["merged_adapter"]
+                     if merged and merged in substitutes:
+                         is_local = True
+                         break
     
     if is_local:
         with lock:
-            # Local adapter, 轉成 JSON 格式放入 queue，以與遠端一致
-            # 這裡要注意: 之前是直接放 dict，scheduler pop 出來後再 call _dispatch_to_compute
-            # 而 _dispatch_to_compute 會 call remote API, 該 API 會回傳 JSON-encoded stream
-            # 所以這裡是 "任務" queue, 不需要 JSON encode。
             adapter_queues[req.adapter_id].append({
                 "rid": rid, "prompt": req.prompt, "adapter_id": req.adapter_id, "max_new_tokens": req.max_new_tokens
             })
@@ -458,9 +521,6 @@ async def stream(request_id: str, request: Request):
                 if data is None:
                     yield "event: end\ndata: [DONE]\n\n"
                     break
-                # Control node 的 Queue 裡現在存放的是已經 JSON encoded 的 string (來自 compute node)
-                # 或者 JSON encoded 的 Error string
-                # 所以直接送出即可
                 yield f"data: {data}\n\n"
             except Empty:
                 await asyncio.sleep(0.01)
@@ -474,6 +534,10 @@ def status():
         return {
             "node_type": "CONTROL_NODE",
             "allowed": my_allowed_adapters,
+            "affinity_data": {
+                "table_size": len(affinity_table),
+                "minimal_set": minimal_set
+            },
             "active_nodes": active_node_urls,
             "merged": merged_assignment,
             "queues": {k: len(v) for k, v in adapter_queues.items()},
