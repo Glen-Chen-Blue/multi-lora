@@ -209,23 +209,29 @@ async def relay_request(req: RelayBody):
 
     async def proxy():
         try:
-            async with client.stream("POST", f"{target_node}/send_request", json=req.dict()) as r:
-                if r.status_code != 200:
-                    yield f"event: error\ndata: {json.dumps('Relay failed')}\n\n"
-                    return
-                
-                resp_json = json.loads(await r.read())
-                rid = resp_json.get("request_id")
-                
-                if not rid:
-                    yield "event: error\ndata: \"No Request ID\"\n\n"
-                    return
-                
-                async with client.stream("GET", f"{target_node}/stream/{rid}") as s:
-                     async for line in s.aiter_lines():
-                         if line: yield f"{line}\n"
+            # [修正] 改用 client.post 取代 client.stream，因為 send_request 不是串流接口
+            # 原始錯誤的寫法: async with client.stream("POST", ... ) as r: ...
+            
+            r = await client.post(f"{target_node}/send_request", json=req.dict())
+            
+            if r.status_code != 200:
+                yield f"event: error\ndata: {json.dumps('Relay failed')}\n\n"
+                return
+            
+            resp_json = r.json()
+            rid = resp_json.get("request_id")
+            
+            if not rid:
+                yield "event: error\ndata: \"No Request ID\"\n\n"
+                return
+            
+            # 這裡保持用 stream，因為 /stream/{rid} 是真正的串流接口
+            async with client.stream("GET", f"{target_node}/stream/{rid}") as s:
+                 async for line in s.aiter_lines():
+                     if line: yield f"{line}\n"
 
         except Exception as e:
+            # 這裡就是原本捕捉到 "Attempted to call a sync iterator..." 的地方
             yield f"event: error\ndata: {json.dumps(str(e))}\n\n"
 
     return StreamingResponse(proxy(), media_type="text/event-stream")

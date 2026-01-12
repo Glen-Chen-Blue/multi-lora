@@ -1,0 +1,113 @@
+INFO:     Started server process [3381916]
+INFO:     Waiting for application startup.
+2026-01-12 11:54:12,161 [INFO] ControlNode: 📅 Scheduler loop started.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:9000 (Press CTRL+C to quit)
+2026-01-12 11:54:12,170 [INFO] ControlNode: 📥 Config updated to v1768190052166. Allowed: 5
+INFO:     127.0.0.1:57398 - "POST /update_config HTTP/1.1" 200 OK
+2026-01-12 11:54:22,172 [ERROR] ControlNode: ❌ Failed to sync adapters to http://127.0.0.1:8001
+INFO:     127.0.0.1:34978 - "GET /status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34978 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34978 - "GET /stream/07f15ed0-552a-4f94-b373-88be02ed728b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34988 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34988 - "GET /stream/7618ea88-0bcf-4e4e-a14a-8192423730d8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35002 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35002 - "GET /stream/ffba52b9-dcbb-4310-8403-e4c5ff88722f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35016 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35016 - "GET /stream/5d94014e-c808-48c2-9d9d-c6afd87e89ff HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35028 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35028 - "GET /stream/5605a5b0-9c12-4589-98f7-81a4f1d20a31 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35044 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35044 - "GET /stream/d58c1467-7efd-421b-a610-c1d5191e4e91 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35058 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35058 - "GET /stream/69ac6fc2-bb7d-44a4-93c5-f7eba88f67cf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35074 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35074 - "GET /stream/21a211d8-1134-4e29-b46e-a705891163b4 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35078 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35078 - "GET /stream/6ab17c67-56e8-4ac5-8f5c-b5844c189e65 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35086 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35086 - "GET /stream/c984151a-07d1-47be-86a5-3ca21f0aa0f7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35098 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35098 - "GET /stream/fcc773ab-e542-4f34-8b92-7ffa1180191d HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35114 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35114 - "GET /stream/5d4e1129-7d75-4b9a-8bf5-b1346a5441ee HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35120 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35120 - "GET /stream/89e5fda6-aa36-4ad2-be79-cf48c0af8e83 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35128 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35128 - "GET /stream/46cc450f-7b53-4624-b59c-a67f65f0945d HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35130 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35130 - "GET /stream/77020b67-ce75-4b60-bd1c-8240c086d03b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35134 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35134 - "GET /stream/29c2df68-1d2c-4bed-9da7-a6ba6522e6af HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35148 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35148 - "GET /stream/aa5f5a1b-9c93-4961-ac37-6456cac428bc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35154 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35154 - "GET /stream/0056e2fb-fd4d-4497-a945-62644df984d0 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35168 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35168 - "GET /stream/573f751a-ad5d-488d-85a0-1ce3cb52dca4 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35180 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35180 - "GET /stream/9e3bafc6-4888-48e6-91ae-ab8b4d7113ea HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35182 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35182 - "GET /stream/ee8053bd-d593-4257-84f4-2371d9976cf9 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35186 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35186 - "GET /stream/16029528-7cd7-4d89-99ac-c6074f6c30bd HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35200 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35200 - "GET /stream/3ab012f9-b962-471f-8f00-eb7b7e54ef92 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35212 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35212 - "GET /stream/526f23ae-ef9c-487c-828e-16d645addef4 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35222 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35222 - "GET /stream/770d3e44-a5ba-4b71-8cd2-3c9e4a0d5dba HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35238 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35240 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35238 - "GET /stream/2a4c3a69-fc4c-4500-8c5b-1ff4e7c32b11 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35240 - "GET /stream/84ae1c18-a364-452a-b5ae-8c1adca24eaf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35250 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35250 - "GET /stream/3f8e6561-1102-4fa3-874a-63dde8ae5cef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35262 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35262 - "GET /stream/8dc2841d-afb8-4a89-8cfb-72d38e700463 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35264 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35264 - "GET /stream/15e12f24-f0aa-453f-ad34-929a5abff051 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35270 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35270 - "GET /stream/a359e282-494f-4627-a532-1c9092ca5838 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35284 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35284 - "GET /stream/1bd71c5e-30f5-4532-a7a5-e2ad83507ba3 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35294 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35294 - "GET /stream/5a21daf5-02e6-4599-bb65-29707c4af016 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35306 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35306 - "GET /stream/3bb494aa-ffae-4488-8664-525d6fefc698 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35322 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35322 - "GET /stream/6ab59889-56a6-4fea-8e60-2039e93bc2c8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35338 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35338 - "GET /stream/7539f4dc-7be5-416d-849b-6e8d484fc71a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35342 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35342 - "GET /stream/f91a7a52-48e4-4077-8e3b-9fd4f36fd600 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35354 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35354 - "GET /stream/498a9a0e-58c5-453c-812c-a04a6c4f67f3 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35364 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35364 - "GET /stream/dd92d612-5282-4cf0-8e58-c788380f8223 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35374 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35374 - "GET /stream/c76c0d23-a6b8-4c99-8d6a-2a67875a26d5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35378 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35394 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35378 - "GET /stream/02d51ff2-c98a-42b9-8ad7-0eeafa83585a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35394 - "GET /stream/e25ff57c-4300-4a5f-bfcf-f8862d7bcdae HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35406 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35406 - "GET /stream/b96eafef-a443-4423-970f-9446569dddb4 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35416 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35416 - "GET /stream/243c5983-619c-473a-9dee-ae60f6e158dc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35430 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35430 - "GET /stream/053b41a0-eabc-4c11-a94f-f7f33c5cdbf4 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35436 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35448 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35436 - "GET /stream/805ae40e-3dcb-4a7a-9a08-9ee50afadeca HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35448 - "GET /stream/71f175fd-1aa0-4078-851d-d4c18590ab9b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35462 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35462 - "GET /stream/043fc441-03f4-443e-b33a-df0365f7fc76 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35468 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35468 - "GET /stream/bf47aa1c-0f87-4057-939f-05c97300b9f4 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35476 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35476 - "GET /stream/fbf938f7-b6a3-4391-9357-8b34cbddb236 HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [3381916]

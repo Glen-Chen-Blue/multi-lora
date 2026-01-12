@@ -9,9 +9,9 @@ from datetime import datetime
 # ==========================================
 # Configuration
 # ==========================================
-CONTROL_URL = "http://localhost:9001"
+CONTROL_URL = "http://localhost:9000"
 # 請確認這些 Adapter ID 與資料夾名稱一致 (大小寫敏感)
-ADAPTERS = ["chat",] 
+ADAPTERS = ["2","chat"] 
 TOTAL_REQUESTS = 50
 AVG_RPS = 10.0 
 MAX_NEW_TOKENS = 128

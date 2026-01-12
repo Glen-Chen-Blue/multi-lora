@@ -23,7 +23,7 @@ class LoRAContext:
         return cls._current_mapping
 
 # ============================================================
-# Dynamic LoRA Layer
+# Dynamic LoRA Layer (Optimized)
 # ============================================================
 class DynamicLoRALinear(nn.Module):
     def __init__(self, base_layer: nn.Linear, adapter_slots: int, r: int, alpha: int):
@@ -37,7 +37,9 @@ class DynamicLoRALinear(nn.Module):
         device = base_layer.weight.device
         dtype = base_layer.weight.dtype
 
+        # lora_As: (slots, in, r)
         self.lora_As = nn.Parameter(torch.zeros(adapter_slots, base_layer.in_features, r, device=device, dtype=dtype))
+        # lora_Bs: (slots, r, out)
         self.lora_Bs = nn.Parameter(torch.zeros(adapter_slots, r, base_layer.out_features, device=device, dtype=dtype))
 
         self.is_merged = False
@@ -48,6 +50,7 @@ class DynamicLoRALinear(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         base_out = self.base_layer(x)
+        # 如果已經合併，直接回傳 Base Output (因為權重已經包含 LoRA)
         if self.is_merged:
             return base_out
 
@@ -55,6 +58,7 @@ class DynamicLoRALinear(nn.Module):
         if adapter_mapping is None:
             return base_out
 
+        # 標準 LoRA 計算路徑 (未合併時使用)
         x_lora = x.to(self.lora_As.dtype)
         A_selected = self.lora_As.index_select(0, adapter_mapping)
         B_selected = self.lora_Bs.index_select(0, adapter_mapping)
@@ -70,24 +74,42 @@ class DynamicLoRALinear(nn.Module):
 
     @torch.no_grad()
     def manual_merge(self, slot_id: int):
+        """
+        [Optimized] 使用 addmm_ 進行原地合併，避免產生中間矩陣 delta。
+        W_new = W + scaling * (A @ B)^T
+              = W + scaling * (B^T @ A^T)
+        """
         if self.is_merged: self.manual_unmerge()
         slot_id = int(slot_id)
+        
         W = self.base_layer.weight.data
-        A = self.lora_As.data[slot_id]
-        B = self.lora_Bs.data[slot_id]
-        delta = (A @ B) * self.scaling
-        W.add_(delta.T.to(W.dtype))
+        A = self.lora_As.data[slot_id] # (in, r)
+        B = self.lora_Bs.data[slot_id] # (r, out)
+        
+        # W shape: (out, in)
+        # B.T shape: (out, r)
+        # A.T shape: (r, in)
+        # addmm_ 執行: W = 1*W + alpha*(B.T @ A.T)
+        W.addmm_(B.T, A.T, alpha=self.scaling)
+        
         self.is_merged = True
         self.merged_idx = slot_id
 
     @torch.no_grad()
     def manual_unmerge(self):
+        """
+        [Optimized] 使用 addmm_ 進行原地還原。
+        W_orig = W_merged - scaling * (B^T @ A^T)
+        """
         if not self.is_merged: return
+        
         W = self.base_layer.weight.data
         A = self.lora_As.data[self.merged_idx]
         B = self.lora_Bs.data[self.merged_idx]
-        delta = (A @ B) * self.scaling
-        W.sub_(delta.T.to(W.dtype))
+        
+        # alpha 設為負值即為減法
+        W.addmm_(B.T, A.T, alpha=-self.scaling)
+        
         self.is_merged = False
         self.merged_idx = -1
 
@@ -356,17 +378,14 @@ class MultiLoRAEngine:
                 required = sorted(list({r["adapter_id"] for r in self.running_queue}))
                 self._ensure_adapters_resident(required)
 
-            # 3. 執行策略：[CRITICAL FIX] 優先處理 Prefill
-            # 讓新加入的請求先處理一遍 (轉為 Decode 狀態)，這樣下一輪大家就可以一起 Decode (並行)
+            # 3. 執行策略：優先處理 Prefill
             prefill_reqs = [r for r in self.running_queue if r["past_key_values"] is None]
             decode_reqs = [r for r in self.running_queue if r["past_key_values"] is not None]
 
             if prefill_reqs:
                 # --- Prefill Phase (Batch Processing) ---
                 target_group = prefill_reqs
-                is_prefill = True
                 
-                # 建立 Mapping
                 if not self.current_merged_adapter:
                     mapping = torch.tensor([self.adapter_to_slot[r["adapter_id"]] for r in target_group], device=self.device)
                     LoRAContext.set_mapping(mapping)
@@ -386,7 +405,6 @@ class MultiLoRAEngine:
             elif decode_reqs:
                 # --- Decode Phase ---
                 target_group = decode_reqs
-                is_prefill = False
                 
                 if not self.current_merged_adapter:
                     mapping = torch.tensor([self.adapter_to_slot[r["adapter_id"]] for r in target_group], device=self.device)
