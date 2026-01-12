@@ -7,20 +7,22 @@ PIDS=()
 start() {
   echo "=== Mode 1: 1 EFO -> 1 Control -> 2 Compute ==="
 
-  # 1. 啟動 EFO Server (Port 9090)
+  # 1. 啟動 EFO Server (Port 9080)
   echo "Starting EFO Server..."
   uvicorn EFO_server:app --host 0.0.0.0 --port 9080 &
   PIDS+=($!)
   sleep 2
 
   # 2. 啟動 Compute Node 1 (Port 8001)
+  # [Modified] 加入 MAX_BATCH_SIZE 設定動態調整上限
   echo "Starting Compute Node 1..."
-  CUDA_VISIBLE_DEVICES=0 NODE_ID=cn-1 uvicorn compute_node_server:app --port 8001 &
+  CUDA_VISIBLE_DEVICES=0 NODE_ID=cn-1 MAX_BATCH_SIZE=32 uvicorn compute_node_server:app --port 8001 &
   PIDS+=($!)
 
   # 3. 啟動 Compute Node 2 (Port 8002)
+  # [Modified] 加入 MAX_BATCH_SIZE 設定動態調整上限
   echo "Starting Compute Node 2..."
-  CUDA_VISIBLE_DEVICES=1 NODE_ID=cn-2 uvicorn compute_node_server:app --port 8002 &
+  CUDA_VISIBLE_DEVICES=1 NODE_ID=cn-2 MAX_BATCH_SIZE=32 uvicorn compute_node_server:app --port 8002 &
   PIDS+=($!)
 
   echo "Waiting 5 seconds for compute nodes to warm up..."

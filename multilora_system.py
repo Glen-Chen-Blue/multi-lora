@@ -50,7 +50,6 @@ class DynamicLoRALinear(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         base_out = self.base_layer(x)
-        # 如果已經合併，直接回傳 Base Output (因為權重已經包含 LoRA)
         if self.is_merged:
             return base_out
 
@@ -58,7 +57,6 @@ class DynamicLoRALinear(nn.Module):
         if adapter_mapping is None:
             return base_out
 
-        # 標準 LoRA 計算路徑 (未合併時使用)
         x_lora = x.to(self.lora_As.dtype)
         A_selected = self.lora_As.index_select(0, adapter_mapping)
         B_selected = self.lora_Bs.index_select(0, adapter_mapping)
@@ -74,42 +72,22 @@ class DynamicLoRALinear(nn.Module):
 
     @torch.no_grad()
     def manual_merge(self, slot_id: int):
-        """
-        [Optimized] 使用 addmm_ 進行原地合併，避免產生中間矩陣 delta。
-        W_new = W + scaling * (A @ B)^T
-              = W + scaling * (B^T @ A^T)
-        """
         if self.is_merged: self.manual_unmerge()
         slot_id = int(slot_id)
-        
         W = self.base_layer.weight.data
-        A = self.lora_As.data[slot_id] # (in, r)
-        B = self.lora_Bs.data[slot_id] # (r, out)
-        
-        # W shape: (out, in)
-        # B.T shape: (out, r)
-        # A.T shape: (r, in)
-        # addmm_ 執行: W = 1*W + alpha*(B.T @ A.T)
+        A = self.lora_As.data[slot_id]
+        B = self.lora_Bs.data[slot_id]
         W.addmm_(B.T, A.T, alpha=self.scaling)
-        
         self.is_merged = True
         self.merged_idx = slot_id
 
     @torch.no_grad()
     def manual_unmerge(self):
-        """
-        [Optimized] 使用 addmm_ 進行原地還原。
-        W_orig = W_merged - scaling * (B^T @ A^T)
-        """
         if not self.is_merged: return
-        
         W = self.base_layer.weight.data
         A = self.lora_As.data[self.merged_idx]
         B = self.lora_Bs.data[self.merged_idx]
-        
-        # alpha 設為負值即為減法
         W.addmm_(B.T, A.T, alpha=-self.scaling)
-        
         self.is_merged = False
         self.merged_idx = -1
 
@@ -166,15 +144,26 @@ def _batch_past(past_list: List[Tuple], target_len: int) -> Tuple:
     return tuple(batched)
 
 # ============================================================
-# Multi-LoRA Engine Core
+# Multi-LoRA Engine Core (With Dynamic Batch Sizing)
 # ============================================================
 class MultiLoRAEngine:
     def __init__(self, model_id: str, r: int = 16, alpha: int = 64, adapter_slots: int = 2, max_batch_size: int = 4, device: Optional[str] = None, torch_dtype: torch.dtype = torch.bfloat16, enable_monitor: bool = True):
         self.device = torch.device(device) if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.dtype = torch_dtype if self.device.type == "cuda" else torch.float32
         self.enable_monitor = enable_monitor
-        self.max_batch_size = int(max_batch_size)
+        
+        # [Auto-Scale] Configuration
+        self.limit_max_batch_size = int(max_batch_size) # 硬上限 (使用者在 Server 端設定的值)
+        # 初始 Batch Size: 設為 8 或 limit 的較小值，避免一啟動就 OOM
+        self.max_batch_size = min(8, self.limit_max_batch_size)
+        self.min_batch_size = 1
         self.adapter_slots = int(adapter_slots)
+        
+        # [Auto-Scale] Tracking vars
+        self.last_adjust_time = time.time()
+        self.adjust_interval = 2.0  # 冷卻時間：2秒
+        self.vram_high_threshold = 0.9 # >85% 視為危險，減少
+        self.vram_safe_threshold = 0.8 # <65% 視為安全，若飽和則增加
 
         print(f"⏳ [Engine] Loading base model: {model_id} on {self.device}...")
         self.tokenizer = AutoTokenizer.from_pretrained(model_id, use_fast=True)
@@ -342,15 +331,67 @@ class MultiLoRAEngine:
     def is_idle(self) -> bool:
         with self.lock: return len(self.request_queue) == 0 and len(self.running_queue) == 0
 
+    # ============================================================
+    # [Auto-Scale] Dynamic Batch Logic
+    # ============================================================
+    def _auto_tune_batch_size(self):
+        """
+        AIMD 演算法:
+        1. VRAM 過高 -> 快速乘法減少 (避免崩潰)
+        2. VRAM 安全 且 負載飽和 -> 慢速加法增加 (提升吞吐)
+           注意：因為 Control Node 會限制輸入，所以「飽和」定義為：
+           (執行中 + 等待中) >= 目前的 Max Batch Size
+        """
+        if self.device.type != "cuda": return
+        
+        now = time.time()
+        if now - self.last_adjust_time < self.adjust_interval: return
+        
+        total = torch.cuda.get_device_properties(self.device).total_memory
+        reserved = torch.cuda.memory_reserved(self.device)
+        ratio = reserved / total
+        
+        # 計算當前負載 (Running + Waiting)
+        # 如果 Control Node 運作正常，Waiting 應該很小，但 Running 會頂到 Max
+        current_load = len(self.running_queue) + len(self.request_queue)
+        changed = False
+        
+        # 1. Scale Down (Safety First)
+        if ratio > self.vram_high_threshold:
+            if self.max_batch_size > self.min_batch_size:
+                # 每次減少 20%
+                new_size = max(self.min_batch_size, int(self.max_batch_size * 0.8))
+                if new_size != self.max_batch_size:
+                    print(f"📉 [Auto-Scale] VRAM {ratio:.1%} > {self.vram_high_threshold:.1%}. Batch {self.max_batch_size}->{new_size}")
+                    self.max_batch_size = new_size
+                    torch.cuda.empty_cache() # 既然太高，主動清快取
+                    changed = True
+
+        # 2. Scale Up (Capacity Signal)
+        # 條件：VRAM 低於安全水位 且 系統已經吃滿目前的額度 (代表外面可能還有單)
+        elif ratio < self.vram_safe_threshold and current_load >= self.max_batch_size:
+            if self.max_batch_size < self.limit_max_batch_size:
+                # 線性增加
+                new_size = self.max_batch_size + 4
+                print(f"📈 [Auto-Scale] Saturation detected ({current_load}/{self.max_batch_size}). VRAM {ratio:.1%} OK. Batch -> {new_size}")
+                self.max_batch_size = new_size
+                changed = True
+        
+        if changed:
+            self.last_adjust_time = now
+
     @torch.no_grad()
     def step(self) -> bool:
         with self.lock:
+            # [Auto-Scale] 1. 每次 step 前調整 Batch Size
+            self._auto_tune_batch_size()
+            
             self.running_queue = [r for r in self.running_queue if not r["done"]]
 
-            # 1. 調度：將新請求加入運行隊列 (Batching)
+            # 2. 調度邏輯：依照新的 self.max_batch_size 放入請求
             if not self.is_draining:
-                # Merged Mode
                 if self.current_merged_adapter:
+                    # Merged Mode: 只收同一種 Adapter
                     while len(self.running_queue) < self.max_batch_size and self.request_queue:
                         cand_idx = -1
                         for i, req in enumerate(self.request_queue):
@@ -359,72 +400,104 @@ class MultiLoRAEngine:
                                 break
                         if cand_idx != -1: self.running_queue.append(self.request_queue.pop(cand_idx))
                         else: break
-                # Normal Mode
                 else:
+                    # Mixed Mode: 依照 Slot 限制放入
                     while len(self.running_queue) < self.max_batch_size and self.request_queue:
                         req = self.request_queue[0]
                         current_aids = {r["adapter_id"] for r in self.running_queue}
-                        # Slot Check
+                        # 若該請求的 Adapter 還沒載入，且 Slot 已滿，就不能進
                         if req["adapter_id"] not in current_aids and len(current_aids) >= self.adapter_slots:
                             break 
                         self.running_queue.append(self.request_queue.pop(0))
 
             if not self.running_queue: return False
 
-            # 2. 準備資源
+            # 3. 準備資源 (LoRA loading)
             if self.current_merged_adapter:
                 LoRAContext.set_mapping(None)
             else:
                 required = sorted(list({r["adapter_id"] for r in self.running_queue}))
                 self._ensure_adapters_resident(required)
 
-            # 3. 執行策略：優先處理 Prefill
-            prefill_reqs = [r for r in self.running_queue if r["past_key_values"] is None]
-            decode_reqs = [r for r in self.running_queue if r["past_key_values"] is not None]
+            # 4. 執行模型與 OOM 防護
+            try:
+                # 優先處理 Prefill
+                prefill_reqs = [r for r in self.running_queue if r["past_key_values"] is None]
+                decode_reqs = [r for r in self.running_queue if r["past_key_values"] is not None]
 
-            if prefill_reqs:
-                # --- Prefill Phase (Batch Processing) ---
-                target_group = prefill_reqs
-                
-                if not self.current_merged_adapter:
-                    mapping = torch.tensor([self.adapter_to_slot[r["adapter_id"]] for r in target_group], device=self.device)
-                    LoRAContext.set_mapping(mapping)
+                if prefill_reqs:
+                    # --- Prefill Phase ---
+                    target_group = prefill_reqs
+                    
+                    if not self.current_merged_adapter:
+                        mapping = torch.tensor([self.adapter_to_slot[r["adapter_id"]] for r in target_group], device=self.device)
+                        LoRAContext.set_mapping(mapping)
 
-                input_ids_list = [r["input_ids"] for r in target_group]
-                max_len = max(x.shape[1] for x in input_ids_list)
-                padded_input = torch.full((len(target_group), max_len), self.tokenizer.pad_token_id, device=self.device)
-                attention_mask = torch.zeros((len(target_group), max_len), device=self.device)
-                
-                for i, ids in enumerate(input_ids_list):
-                    L = ids.shape[1]
-                    padded_input[i, -L:] = ids[0]
-                    attention_mask[i, -L:] = 1
-                
-                out = self.model(input_ids=padded_input, attention_mask=attention_mask, use_cache=True)
+                    input_ids_list = [r["input_ids"] for r in target_group]
+                    max_len = max(x.shape[1] for x in input_ids_list)
+                    padded_input = torch.full((len(target_group), max_len), self.tokenizer.pad_token_id, device=self.device)
+                    attention_mask = torch.zeros((len(target_group), max_len), device=self.device)
+                    
+                    for i, ids in enumerate(input_ids_list):
+                        L = ids.shape[1]
+                        padded_input[i, -L:] = ids[0]
+                        attention_mask[i, -L:] = 1
+                    
+                    out = self.model(input_ids=padded_input, attention_mask=attention_mask, use_cache=True)
 
-            elif decode_reqs:
-                # --- Decode Phase ---
-                target_group = decode_reqs
-                
-                if not self.current_merged_adapter:
-                    mapping = torch.tensor([self.adapter_to_slot[r["adapter_id"]] for r in target_group], device=self.device)
-                    LoRAContext.set_mapping(mapping)
+                elif decode_reqs:
+                    # --- Decode Phase ---
+                    target_group = decode_reqs
+                    
+                    if not self.current_merged_adapter:
+                        mapping = torch.tensor([self.adapter_to_slot[r["adapter_id"]] for r in target_group], device=self.device)
+                        LoRAContext.set_mapping(mapping)
 
-                past_list = [r["past_key_values"] for r in target_group]
-                max_past_len = max(p[0][0].shape[2] for p in past_list)
-                batched_past = _to_model_cache(_batch_past(past_list, max_past_len))
+                    past_list = [r["past_key_values"] for r in target_group]
+                    max_past_len = max(p[0][0].shape[2] for p in past_list)
+                    batched_past = _to_model_cache(_batch_past(past_list, max_past_len))
+                    
+                    input_ids = torch.cat([r["input_ids"][:, -1:] for r in target_group], dim=0)
+                    attention_mask = torch.ones((len(target_group), max_past_len + 1), device=self.device)
+                    
+                    out = self.model(input_ids=input_ids, attention_mask=attention_mask, past_key_values=batched_past, use_cache=True)
                 
-                input_ids = torch.cat([r["input_ids"][:, -1:] for r in target_group], dim=0)
-                attention_mask = torch.ones((len(target_group), max_past_len + 1), device=self.device)
+                else:
+                    return False
                 
-                out = self.model(input_ids=input_ids, attention_mask=attention_mask, past_key_values=batched_past, use_cache=True)
-            
-            else:
-                return False
+                # 處理輸出
+                self._process_outputs(out, target_group)
+                LoRAContext.set_mapping(None)
+                return True
 
-            self._process_outputs(out, target_group)
-            LoRAContext.set_mapping(None)
-            return True
+            except RuntimeError as e:
+                # [Auto-Scale] 嚴重錯誤處理：OOM Rescue
+                if "out of memory" in str(e).lower():
+                    print(f"🚨 [OOM RESCUE] Out of memory! Reducing batch size and retrying.")
+                    
+                    # 1. 強制砍半 Batch Size
+                    self.max_batch_size = max(1, self.max_batch_size // 2)
+                    
+                    # 2. 將超量的請求踢回 Request Queue (優先處理)
+                    cutoff = self.max_batch_size
+                    if len(self.running_queue) > cutoff:
+                        excess_reqs = self.running_queue[cutoff:]
+                        self.running_queue = self.running_queue[:cutoff]
+                        
+                        # 逆序放回最前面
+                        for r in reversed(excess_reqs):
+                            self.request_queue.insert(0, r)
+                        print(f"   -> Evicted {len(excess_reqs)} requests back to queue.")
+
+                    # 3. 清理快取
+                    LoRAContext.set_mapping(None)
+                    torch.cuda.empty_cache()
+                    
+                    # 4. 回傳 False，讓下一次 Loop 用新的狀態重試
+                    return False
+                else:
+                    # 其他錯誤照常拋出
+                    raise e
 
     def _process_outputs(self, model_out, reqs):
         logits = model_out.logits[:, -1, :] 

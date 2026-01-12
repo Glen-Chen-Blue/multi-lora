@@ -33,6 +33,9 @@ NODE_ID = os.environ.get("NODE_ID", "cn-1")
 MODEL_ID = os.environ.get("MODEL_ID", "unsloth/Meta-Llama-3.1-8B")
 LORA_PATH = os.environ.get("LORA_PATH", "./testLoRA")
 
+# [Auto-Scale] 設定硬上限，預設 32。動態調整會在此範圍內運作。
+MAX_BATCH_SIZE_LIMIT = int(os.environ.get("MAX_BATCH_SIZE", "32"))
+
 engine: Optional[MultiLoRAEngine] = None
 engine_wakeup = threading.Event()
 shutdown_event = threading.Event()
@@ -42,7 +45,7 @@ stream_queues: Dict[str, Queue] = {}
 decoding_state: Dict[str, int] = {}
 stream_lock = threading.Lock()
 
-# [NEW] Config Versioning State
+# Config Versioning State
 last_config_version: int = -1
 config_lock = threading.Lock()
 
@@ -102,7 +105,7 @@ async def lifespan(app: FastAPI):
     engine = MultiLoRAEngine(
         model_id=MODEL_ID,
         adapter_slots=4,
-        max_batch_size=8,
+        max_batch_size=MAX_BATCH_SIZE_LIMIT, # 傳入硬上限
         enable_monitor=True
     )
     engine.on_token = on_token
@@ -135,7 +138,7 @@ class UnmergeRequest(BaseModel):
 
 class SyncAdaptersRequest(BaseModel):
     adapters: List[str]
-    version_id: int # [NEW]
+    version_id: int 
 
 # ============================================================
 # Endpoints
@@ -143,6 +146,8 @@ class SyncAdaptersRequest(BaseModel):
 @app.get("/metrics")
 def metrics():
     if not engine: return {}
+    # 這裡回傳的 engine.max_batch_size 是動態調整過後的當前值
+    # Control Node 會讀到這個值，發現容量變大後，就會派送更多請求
     return {
         "node_id": NODE_ID,
         "load": {
@@ -165,7 +170,6 @@ def sync_adapters(req: SyncAdaptersRequest):
     global last_config_version
     
     with config_lock:
-        # [NEW] Check against local version
         if req.version_id <= last_config_version:
             logger.warning(f"⚠️ Ignoring stale config v{req.version_id} (Current: v{last_config_version})")
             return {
@@ -173,7 +177,6 @@ def sync_adapters(req: SyncAdaptersRequest):
                 "reason": "stale_version",
                 "loaded": list(engine.cpu_cache.keys())
             }
-        
         last_config_version = req.version_id
 
     try:

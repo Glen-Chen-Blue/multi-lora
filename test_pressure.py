@@ -12,8 +12,8 @@ from datetime import datetime
 CONTROL_URL = "http://localhost:9000"
 # 請確認這些 Adapter ID 與資料夾名稱一致 (大小寫敏感)
 ADAPTERS = ["2","chat"] 
-TOTAL_REQUESTS = 50
-AVG_RPS = 10.0 
+TOTAL_REQUESTS = 150
+AVG_RPS = 30.0 
 MAX_NEW_TOKENS = 128
 
 # 真實的 Prompts
