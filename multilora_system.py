@@ -151,18 +151,18 @@ class MultiLoRAEngine:
         self.device = torch.device(device) if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.dtype = torch_dtype if self.device.type == "cuda" else torch.float32
         self.enable_monitor = enable_monitor
-        
+        self.step_counter = 0
         # [Auto-Scale] Configuration
         self.limit_max_batch_size = int(max_batch_size) # 硬上限 (使用者在 Server 端設定的值)
         # 初始 Batch Size: 設為 8 或 limit 的較小值，避免一啟動就 OOM
-        self.max_batch_size = min(16, self.limit_max_batch_size)
+        self.max_batch_size = min(32, self.limit_max_batch_size)
         self.min_batch_size = 1
         self.adapter_slots = int(adapter_slots)
         
         # [Auto-Scale] Tracking vars
         self.last_adjust_time = time.time()
         self.adjust_interval = 1.0  # 冷卻時間：1秒
-        self.vram_high_threshold = 0.9 # >85% 視為危險，減少
+        self.vram_high_threshold = 0.95 # >85% 視為危險，減少
         self.vram_safe_threshold = 0.8 # <65% 視為安全，若飽和則增加
 
         print(f"⏳ [Engine] Loading base model: {model_id} on {self.device}...")
@@ -384,7 +384,9 @@ class MultiLoRAEngine:
     def step(self) -> bool:
         with self.lock:
             # [Auto-Scale] 1. 每次 step 前調整 Batch Size
-            self._auto_tune_batch_size()
+            self.step_counter += 1
+            if self.step_counter % 5 == 0:
+                self._auto_tune_batch_size()
             
             self.running_queue = [r for r in self.running_queue if not r["done"]]
 

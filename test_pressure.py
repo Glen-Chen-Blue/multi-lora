@@ -11,21 +11,16 @@ from datetime import datetime
 # ==========================================
 CONTROL_URL = "http://localhost:9000"
 
-# 請確認這些 Adapter ID 與資料夾名稱一致 (大小寫敏感)
-# 如果您之前遇到 400 錯誤，請確保這些 ID 在 ./testLoRA 中真的存在
 ADAPTERS = ["1", "2", "3", "chat", "math", "code"] 
 
-# [新增] 流量分佈模式切換
-# "uniform" : 所有 Adapter 機率均等 (原本的模式)
-# "skewed"  : 集中流量，TARGET_ADAPTER 佔 80%，其他平分 20%
-TRAFFIC_PATTERN = "skewed"  # <--- 修改這裡切換模式
-TARGET_ADAPTER = "chat"     # <--- 設定 "skewed" 模式下的熱點 Adapter
+# 流量分佈模式
+TRAFFIC_PATTERN = "skewed"  
+TARGET_ADAPTER = "chat"     
 
-TOTAL_REQUESTS = 100
-AVG_RPS = 30.0 
+TOTAL_REQUESTS = 300
+AVG_RPS = 15.0 
 MAX_NEW_TOKENS = 128
 
-# 真實的 Prompts
 PROMPTS = [
     "Explain the theory of relativity in simple terms for a 5-year-old.",
     "Write a Python function to calculate the Fibonacci sequence using recursion.",
@@ -51,27 +46,60 @@ GREY = "\033[90m"
 stats = {"sent": 0, "finished": 0, "errors": 0}
 ttft_records = [] 
 
+# [新增] 資源監控統計
+resource_stats = {
+    "node_seconds": 0.0,      # 累積的 (節點 * 秒數)
+    "max_nodes": 0,           # 曾達到的最大節點數
+    "samples": 0              # 取樣次數
+}
+is_test_running = True        # 控制監控迴圈的旗標
+
 def format_alpaca_prompt(user_prompt):
     return (
         f"### Instruction:\n{user_prompt}\n\n"
         f"### Response:\n"
     )
 
+async def monitor_cluster_usage(client: httpx.AsyncClient):
+    """
+    [新增] 背景任務：每秒查詢一次 Control Node，計算資源消耗積分
+    """
+    print(f"{YELLOW}[Monitor] Started tracking cluster resource usage...{RESET}")
+    while is_test_running:
+        try:
+            start_check = time.time()
+            resp = await client.get(f"{CONTROL_URL}/status", timeout=2.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                active_nodes = data.get("active_nodes", 0)
+                
+                # 積分計算：假設這 1 秒內節點數維持不變 (Riemann Sum)
+                # 這裡簡單使用採樣間隔作為權重
+                resource_stats["node_seconds"] += active_nodes * 1.0 
+                
+                # 更新最大值
+                if active_nodes > resource_stats["max_nodes"]:
+                    resource_stats["max_nodes"] = active_nodes
+                
+                resource_stats["samples"] += 1
+            
+            # 補償延遲，盡量維持 1.0 秒的採樣頻率
+            elapsed = time.time() - start_check
+            sleep_time = max(0.0, 1.0 - elapsed)
+            await asyncio.sleep(sleep_time)
+            
+        except Exception:
+            # 忽略監控錯誤，不影響主測試
+            await asyncio.sleep(1)
+
 async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
-    # [修改] 根據 TRAFFIC_PATTERN 選擇 Adapter
     if TRAFFIC_PATTERN == "skewed":
-        # 80% 機率選中 TARGET_ADAPTER
         if random.random() < 0.8:
             adapter = TARGET_ADAPTER
         else:
-            # 20% 機率從剩下的裡面選
             others = [a for a in ADAPTERS if a != TARGET_ADAPTER]
-            if not others: # 防呆：如果只有一個 Adapter
-                adapter = TARGET_ADAPTER
-            else:
-                adapter = random.choice(others)
+            adapter = TARGET_ADAPTER if not others else random.choice(others)
     else:
-        # 均勻分佈
         adapter = random.choice(ADAPTERS)
 
     raw_prompt = random.choice(PROMPTS)
@@ -88,7 +116,6 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
     full_response_text = []
     
     try:
-        # 1. 發送請求
         resp = await client.post(f"{CONTROL_URL}/send_request", json=payload, timeout=30.0)
         resp.raise_for_status()
         data = resp.json()
@@ -98,13 +125,10 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
         short_prompt = (raw_prompt[:30] + '..') if len(raw_prompt) > 30 else raw_prompt
         print(f"{CYAN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq}/{TOTAL_REQUESTS} SENT -> {adapter} (ID: {request_id[:8]}...) Q: {short_prompt}{RESET}")
 
-        # 2. 接收串流
         async with client.stream("GET", f"{CONTROL_URL}/stream/{request_id}", timeout=120.0) as response:
             async for line in response.aiter_lines():
                 if not line: continue
-
-                if line.startswith("data: [DONE]"):
-                    break
+                if line.startswith("data: [DONE]"): break
                 
                 if line.startswith("data:"):
                     raw_content = line[len("data:"):].rstrip("\n")
@@ -129,23 +153,14 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
         ttft_records.append(final_ttft)
 
         answer = "".join(full_response_text).strip()
-        
         print(f"{GREEN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq} DONE <- {adapter} (Time: {elapsed:.2f}s, TTFT: {final_ttft:.2f}s){RESET}")
-        
-        if answer:
-            preview = (answer) if len(answer) > 100 else answer
-            # print(f"    {GREY}>> {preview.replace(chr(10), ' ')}{RESET}")
-        else:
-            if elapsed < 0.1:
-                print(f"    {RED}>> [Request Failed Immediately - Check Server Logs]{RESET}")
-            else:
-                print(f"    {RED}>> [No Output generated]{RESET}")
 
     except Exception as e:
         stats["errors"] += 1
         print(f"{RED}[ERROR] #{req_id_seq} Failed: {repr(e)}{RESET}")
 
 async def main():
+    global is_test_running
     print(f"=== Traffic Simulator ===")
     print(f"Mode: {TRAFFIC_PATTERN.upper()}")
     if TRAFFIC_PATTERN == "skewed":
@@ -161,7 +176,13 @@ async def main():
             print(f"{RED}Cannot connect to Control Node: {e}{RESET}")
             return
 
+        # [新增] 啟動資源監控
+        monitor_task = asyncio.create_task(monitor_cluster_usage(client))
+
         try:
+            start_time = time.time()
+            
+            # 發送請求迴圈
             for i in range(1, TOTAL_REQUESTS + 1):
                 task = asyncio.create_task(simulate_user(client, i))
                 background_tasks.add(task)
@@ -178,6 +199,11 @@ async def main():
         except KeyboardInterrupt:
             print("\nStopping...")
             for t in background_tasks: t.cancel()
+        finally:
+            # [新增] 停止資源監控
+            is_test_running = False
+            await monitor_task
+            total_duration = time.time() - start_time
 
     print(f"\n=== Summary: Sent {stats['sent']} / Fin {stats['finished']} / Err {stats['errors']} ===")
     
@@ -192,6 +218,18 @@ async def main():
         print(f"{CYAN}=== Latency Statistics ({TRAFFIC_PATTERN}) ==={RESET}")
         print(f"Average TTFT : {avg_ttft:.4f} s")
         print(f"P95 TTFT     : {p95_ttft:.4f} s")
+        
+        # [新增] 資源消耗報告
+        node_seconds = resource_stats['node_seconds']
+        avg_nodes = node_seconds / total_duration if total_duration > 0 else 0
+        
+        print(f"\n{YELLOW}=== Resource Consumption Stats ==={RESET}")
+        print(f"Test Duration        : {total_duration:.2f} s")
+        print(f"Total Resource Usage : {node_seconds:.2f} Node-Seconds")
+        print(f"Average Active Nodes : {avg_nodes:.2f}")
+        print(f"Peak Active Nodes    : {resource_stats['max_nodes']}")
+        print(f"Cost Estimate        : {node_seconds / 3600:.4f} Node-Hours")
+
     else:
         print(f"{RED}No successful requests to calculate stats.{RESET}")
 

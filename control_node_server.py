@@ -176,14 +176,19 @@ def auto_scaler():
         n_active = len(node_mgr.active_urls)
         n_standby = len(node_mgr.standby_urls)
         
-        # Scale UP Logic
-        if n_standby > 0 and q_total > (SCALE_UP_THRESHOLD * n_active):
+        total_capacity = 0
+        for url in node_mgr.active_urls:
+            info = node_mgr.nodes.get(url)
+            if info and info.get("metrics"):
+                total_capacity += info["metrics"]["capacity"]["max_batch_size"]
+        
+        threshold = total_capacity * 0.5
+        
+        if n_standby > 0 and q_total > threshold:
             new_node = node_mgr.standby_urls.pop(0)
-            # [Modified] Do NOT add to active_urls yet.
-            # We defer activation until the node is provisioned.
             
             last_scale_ts = now
-            logger.info(f"🚀 Scale UP initiated: {new_node} (Provisioning...)")
+            logger.info(f"🚀 Scale UP initiated (Q: {q_total} > 50% of Cap {total_capacity}): {new_node}")
             
             # Start provisioning in background
             asyncio.create_task(activate_node_task(
@@ -251,15 +256,53 @@ def check_merges():
                 logger.info(f"🔗 Executing MERGE {target} on {url}")
                 asyncio.create_task(do_merge_node(url, target))
                 
+        # ============================================================
+        # [MODIFIED] Unmerge Logic (Optimized for Hot Swap)
+        # ============================================================
         to_revert = []
         for adapter, url in node_mgr.merged_assignment.items():
+            # 條件 1: 該 Merged Adapter 已經沒有待處理請求了
             if len(adapter_queues[adapter]) == 0:
                 info = node_mgr.nodes.get(url)
-                if info and info["metrics"]["idle"] and (time.time() - info["merged_at"] > 5):
-                    to_revert.append(url)
+                if info and info.get("metrics"):
+                    m = info["metrics"]
+                    
+                    # 取得當前負載與容量
+                    running = m["load"]["running_batch"]
+                    limit = m["capacity"]["max_batch_size"]
+                    free_slots = limit - running
+                    
+                    # 計算「其他」Adapter 的排隊總數
+                    others_waiting = sum(len(q) for a, q in adapter_queues.items() if a != adapter)
+
+                    # 條件檢查：
+                    # A. 冷卻時間 > 5秒 (基本穩定性)
+                    cooldown_passed = (time.time() - info["merged_at"] > 5)
+                    
+                    # B. 觸發 Unmerge 的時機
+                    #    - 節點完全閒置 (m["idle"])
+                    #    - 或者：有 >2 個空位 且 有其他人在等 (free_slots > 2 and others_waiting > 0)
+                    should_revert = False
+                    
+                    if cooldown_passed:
+                        if m["idle"]:
+                            should_revert = True
+                        elif free_slots > 2 and others_waiting > 0:
+                            should_revert = True
+                            
+                    if should_revert:
+                        to_revert.append(url)
         
         for url in to_revert:
-            logger.info(f"🔓 Reverting MERGE on {url}")
+            free_info = ""
+            try:
+                limit = node_mgr.nodes[url]['metrics']['capacity']['max_batch_size']
+                curr = node_mgr.nodes[url]['metrics']['load']['running_batch']
+                free_info = f"{limit - curr}"
+            except:
+                free_info = "?"
+                
+            logger.info(f"🔓 Reverting MERGE on {url} (Free slots: {free_info}, Others waiting)")
             asyncio.create_task(do_unmerge_node(url))
 
 async def do_merge_node(url: str, adapter_id: str):
@@ -276,7 +319,8 @@ async def do_merge_node(url: str, adapter_id: str):
 
 async def do_unmerge_node(url: str):
     try:
-        await client.post(f"{url}/unmerge", json={"force": False})
+        # [MODIFIED] 使用 force=True 來允許在非 idle 狀態下解除合併
+        await client.post(f"{url}/unmerge", json={"force": True})
         with node_mgr.lock:
             if url in node_mgr.nodes:
                 node_mgr.nodes[url]["mode"] = "NORMAL"
