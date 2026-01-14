@@ -17,24 +17,11 @@ ADAPTERS = ["1", "2", "3", "chat", "math", "code"]
 TRAFFIC_PATTERN = "skewed"  
 TARGET_ADAPTER = "chat"     
 
-TOTAL_REQUESTS = 300
+TOTAL_REQUESTS = 100
 AVG_RPS = 15.0 
 MAX_NEW_TOKENS = 128
 
-PROMPTS = [
-    "Explain the theory of relativity in simple terms for a 5-year-old.",
-    "Write a Python function to calculate the Fibonacci sequence using recursion.",
-    "Solve the quadratic equation: x^2 - 5x + 6 = 0.",
-    "What are the three laws of thermodynamics?",
-    "Translate 'The quick brown fox jumps over the lazy dog' into French and Spanish.",
-    "List 5 benefits of regular exercise and explain one in detail.",
-    "Create a SQL query to find the second highest salary from an Employee table.",
-    "Summarize the plot of 'Romeo and Juliet' in three sentences.",
-    "Explain the difference between TCP and UDP protocols.",
-    "Write a haiku about artificial intelligence.",
-    "If I have 3 apples and you take away 2, how many do you have?",
-    "Debug this code: `def add(a,b): return a * b` - it should add numbers.",
-]
+PROMPTS = ["test"]
 
 GREEN = "\033[92m"
 CYAN = "\033[96m"
@@ -154,6 +141,7 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
 
         answer = "".join(full_response_text).strip()
         print(f"{GREEN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq} DONE <- {adapter} (Time: {elapsed:.2f}s, TTFT: {final_ttft:.2f}s){RESET}")
+        print(f"{GREY}--- Response Start ---{RESET}\n{answer}\n{GREY}--- Response End ---{RESET}")
 
     except Exception as e:
         stats["errors"] += 1

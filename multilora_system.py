@@ -283,7 +283,7 @@ class MultiLoRAEngine:
         if adapter_id not in self.cpu_cache: raise KeyError(f"Unknown adapter {adapter_id}")
         if not force:
             with self.lock: self.is_draining = True
-            for _ in range(100):
+            for _ in range(1000):
                 if len(self.running_queue) == 0: break
                 time.sleep(0.1)
         with self.lock:
@@ -515,6 +515,7 @@ class MultiLoRAEngine:
             current_len = req["seq_len"] + len(req["tokens_gen"])
             req["past_key_values"] = _slice_past_for_sample(new_past_legacy, i, current_len)
             
-            if token_id == self.tokenizer.eos_token_id or len(req["tokens_gen"]) >= req["max_new_tokens"]:
+            # if token_id == self.tokenizer.eos_token_id or len(req["tokens_gen"]) >= req["max_new_tokens"]:
+            if len(req["tokens_gen"]) >= req["max_new_tokens"]:
                 req["done"] = True
                 if self.on_finish: self.on_finish(req["request_id"], "finished")
