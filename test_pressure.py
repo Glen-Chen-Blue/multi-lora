@@ -3,16 +3,25 @@ import httpx
 import random
 import time
 import sys
-import json  # [Added] Import json
+import json 
 from datetime import datetime
 
 # ==========================================
 # Configuration
 # ==========================================
 CONTROL_URL = "http://localhost:9000"
+
 # 請確認這些 Adapter ID 與資料夾名稱一致 (大小寫敏感)
+# 如果您之前遇到 400 錯誤，請確保這些 ID 在 ./testLoRA 中真的存在
 ADAPTERS = ["1", "2", "3", "chat", "math", "code"] 
-TOTAL_REQUESTS = 150
+
+# [新增] 流量分佈模式切換
+# "uniform" : 所有 Adapter 機率均等 (原本的模式)
+# "skewed"  : 集中流量，TARGET_ADAPTER 佔 80%，其他平分 20%
+TRAFFIC_PATTERN = "skewed"  # <--- 修改這裡切換模式
+TARGET_ADAPTER = "chat"     # <--- 設定 "skewed" 模式下的熱點 Adapter
+
+TOTAL_REQUESTS = 100
 AVG_RPS = 10.0 
 MAX_NEW_TOKENS = 128
 
@@ -40,8 +49,8 @@ RESET = "\033[0m"
 GREY = "\033[90m"
 
 stats = {"sent": 0, "finished": 0, "errors": 0}
+ttft_records = [] 
 
-# [修改] 配合 Fine-tuning 程式碼的 Alpaca 格式
 def format_alpaca_prompt(user_prompt):
     return (
         f"### Instruction:\n{user_prompt}\n\n"
@@ -49,10 +58,23 @@ def format_alpaca_prompt(user_prompt):
     )
 
 async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
-    adapter = random.choice(ADAPTERS)
+    # [修改] 根據 TRAFFIC_PATTERN 選擇 Adapter
+    if TRAFFIC_PATTERN == "skewed":
+        # 80% 機率選中 TARGET_ADAPTER
+        if random.random() < 0.8:
+            adapter = TARGET_ADAPTER
+        else:
+            # 20% 機率從剩下的裡面選
+            others = [a for a in ADAPTERS if a != TARGET_ADAPTER]
+            if not others: # 防呆：如果只有一個 Adapter
+                adapter = TARGET_ADAPTER
+            else:
+                adapter = random.choice(others)
+    else:
+        # 均勻分佈
+        adapter = random.choice(ADAPTERS)
+
     raw_prompt = random.choice(PROMPTS)
-    
-    # [使用] 改用 Alpaca Template
     formatted_prompt = format_alpaca_prompt(raw_prompt)
     
     payload = {
@@ -85,39 +107,32 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
                     break
                 
                 if line.startswith("data:"):
-                    # [Modified] 這裡做了關鍵修改：只移除尾端換行，並解析 JSON
                     raw_content = line[len("data:"):].rstrip("\n")
-                    
-                    if raw_content.strip() == "ok": continue # Handshake
+                    if raw_content.strip() == "ok": continue 
 
                     try:
-                        # 嘗試解析 JSON Token
                         content = json.loads(raw_content)
                     except json.JSONDecodeError:
-                        # Fallback (若是舊格式或純字串錯誤)
                         content = raw_content
 
-                    # 檢查內容是否為字串並包含錯誤訊息
                     if isinstance(content, str) and (content.startswith("[ERROR]") or "Processing aborted" in content):
                          full_response_text.append(f"{RED}{content}{RESET}")
                          continue
 
-                    # 記錄首字時間 (TTFT)
                     if ttft == 0.0: ttft = time.time() - start_ts
-                    
-                    # 累積回應內容 (確保轉為字串)
                     full_response_text.append(str(content))
 
         elapsed = time.time() - start_ts
         stats["finished"] += 1
         
         final_ttft = ttft if ttft > 0 else elapsed
+        ttft_records.append(final_ttft)
+
         answer = "".join(full_response_text).strip()
         
         print(f"{GREEN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq} DONE <- {adapter} (Time: {elapsed:.2f}s, TTFT: {final_ttft:.2f}s){RESET}")
         
         if answer:
-            # 只顯示前 100 個字元避免洗版
             preview = (answer) if len(answer) > 100 else answer
             print(f"    {GREY}>> {preview.replace(chr(10), ' ')}{RESET}")
         else:
@@ -131,7 +146,10 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
         print(f"{RED}[ERROR] #{req_id_seq} Failed: {repr(e)}{RESET}")
 
 async def main():
-    print(f"=== Traffic Simulator (Alpaca Format / JSON SSE) ===")
+    print(f"=== Traffic Simulator ===")
+    print(f"Mode: {TRAFFIC_PATTERN.upper()}")
+    if TRAFFIC_PATTERN == "skewed":
+        print(f"Target: {TARGET_ADAPTER} (80%)")
     
     background_tasks = set()
     limits = httpx.Limits(max_keepalive_connections=200, max_connections=200)
@@ -162,6 +180,20 @@ async def main():
             for t in background_tasks: t.cancel()
 
     print(f"\n=== Summary: Sent {stats['sent']} / Fin {stats['finished']} / Err {stats['errors']} ===")
+    
+    if ttft_records:
+        avg_ttft = sum(ttft_records) / len(ttft_records)
+        sorted_ttft = sorted(ttft_records)
+        p95_index = int(len(sorted_ttft) * 0.95)
+        if p95_index >= len(sorted_ttft):
+            p95_index = len(sorted_ttft) - 1
+        p95_ttft = sorted_ttft[p95_index]
+
+        print(f"{CYAN}=== Latency Statistics ({TRAFFIC_PATTERN}) ==={RESET}")
+        print(f"Average TTFT : {avg_ttft:.4f} s")
+        print(f"P95 TTFT     : {p95_ttft:.4f} s")
+    else:
+        print(f"{RED}No successful requests to calculate stats.{RESET}")
 
 if __name__ == "__main__":
     asyncio.run(main())

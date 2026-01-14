@@ -161,7 +161,7 @@ class MultiLoRAEngine:
         
         # [Auto-Scale] Tracking vars
         self.last_adjust_time = time.time()
-        self.adjust_interval = 1.0  # 冷卻時間：2秒
+        self.adjust_interval = 1.0  # 冷卻時間：1秒
         self.vram_high_threshold = 0.9 # >85% 視為危險，減少
         self.vram_safe_threshold = 0.8 # <65% 視為安全，若飽和則增加
 
@@ -372,7 +372,7 @@ class MultiLoRAEngine:
         elif ratio < self.vram_safe_threshold and current_load >= self.max_batch_size:
             if self.max_batch_size < self.limit_max_batch_size:
                 # 線性增加
-                new_size = self.max_batch_size + 4
+                new_size = self.max_batch_size + 8
                 print(f"📈 [Auto-Scale] Saturation detected ({current_load}/{self.max_batch_size}). VRAM {ratio:.1%} OK. Batch -> {new_size}")
                 self.max_batch_size = new_size
                 changed = True

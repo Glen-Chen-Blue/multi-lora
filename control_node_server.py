@@ -71,7 +71,7 @@ class NodeManager:
         with self.lock:
             for url in self.active_urls:
                 info = self.nodes.get(url)
-                if info and info.get("metrics") and (now - info["last_seen"] < 5.0):
+                if info and info.get("metrics") and (now - info["last_seen"] < 2.0):
                     res.append(url)
         return res
 
@@ -190,7 +190,7 @@ def check_merges():
                 if a not in node_mgr.merged_assignment and c > max_q:
                     best_adapter, max_q = a, c
         
-        if best_adapter:
+        if best_adapter and max_q > (total_q / len(healthy)):
             target_node = None
             best_score = -9999
             with node_mgr.lock:
@@ -348,18 +348,18 @@ async def poller_task():
         with node_mgr.lock: targets = list(node_mgr.active_urls)
         for url in targets:
             try:
-                r = await client.get(f"{url}/metrics", timeout=1.0)
+                r = await client.get(f"{url}/metrics", timeout=0.3)
                 node_mgr.update_metrics(url, r.json())
             except Exception: pass
         scheduler_wakeup.set()
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(0.5)
 
 async def heartbeat_task():
     while True:
         try:
             await client.post(f"{EFO_URL}/heartbeat", json={"control_node_url": MY_NODE_URL}, timeout=3.0)
         except Exception: pass
-        await asyncio.sleep(5.0)
+        await asyncio.sleep(30.0)
 
 async def reaper_task():
     while True:
