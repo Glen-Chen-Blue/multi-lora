@@ -22,7 +22,7 @@ TRAFFIC_PATTERN = "skewed"  # <--- 修改這裡切換模式
 TARGET_ADAPTER = "chat"     # <--- 設定 "skewed" 模式下的熱點 Adapter
 
 TOTAL_REQUESTS = 100
-AVG_RPS = 10.0 
+AVG_RPS = 30.0 
 MAX_NEW_TOKENS = 128
 
 # 真實的 Prompts
@@ -134,7 +134,7 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
         
         if answer:
             preview = (answer) if len(answer) > 100 else answer
-            print(f"    {GREY}>> {preview.replace(chr(10), ' ')}{RESET}")
+            # print(f"    {GREY}>> {preview.replace(chr(10), ' ')}{RESET}")
         else:
             if elapsed < 0.1:
                 print(f"    {RED}>> [Request Failed Immediately - Check Server Logs]{RESET}")

@@ -113,8 +113,8 @@ client = httpx.AsyncClient(timeout=10.0)
 # ============================================================
 # Background Tasks
 # ============================================================
-async def sync_adapter_config(target_url: str, adapters: List[str], version_id: int):
-    """背景推送 Adapter 設定，附帶版本號"""
+async def sync_adapter_config(target_url: str, adapters: List[str], version_id: int) -> bool:
+    """背景推送 Adapter 設定，附帶版本號。回傳 True 表示成功。"""
     payload = {
         "adapters": adapters, 
         "version_id": version_id
@@ -124,11 +124,12 @@ async def sync_adapter_config(target_url: str, adapters: List[str], version_id: 
             resp = await client.post(f"{target_url}/sync_adapters", json=payload, timeout=5.0)
             if resp.status_code == 200:
                 logger.info(f"✅ Synced adapters (v{version_id}) to {target_url}")
-                return
+                return True
         except Exception:
             pass
         await asyncio.sleep(2)
     logger.error(f"❌ Failed to sync adapters to {target_url}")
+    return False
 
 def trigger_sync_all(version_id: int):
     with node_mgr.lock:
@@ -136,6 +137,29 @@ def trigger_sync_all(version_id: int):
         adapters = list(node_mgr.allowed_adapters)
     for url in targets:
         asyncio.create_task(sync_adapter_config(url, adapters, version_id))
+
+async def activate_node_task(node_url: str, adapters: List[str], version_id: int):
+    """
+    [NEW] Provisioning Task:
+    1. Sync adapters first.
+    2. Only add to active_urls if sync succeeds.
+    This prevents the scheduler from assigning tasks to a node that hasn't loaded adapters yet.
+    """
+    logger.info(f"⏳ Provisioning {node_url} (Syncing config v{version_id})...")
+    
+    # 1. 等待同步完成
+    success = await sync_adapter_config(node_url, adapters, version_id)
+    
+    if success:
+        # 2. 只有成功後，才將節點加入 active_urls
+        with node_mgr.lock:
+            node_mgr.active_urls.append(node_url)
+        logger.info(f"🚀 Node {node_url} is now ACTIVE and ready to serve.")
+    else:
+        # 3. 失敗則退回 standby
+        logger.warning(f"⚠️ Provisioning failed for {node_url}. Returning to Standby.")
+        with node_mgr.lock:
+            node_mgr.standby_urls.append(node_url)
 
 # ============================================================
 # Scaling & Scheduler Logic
@@ -152,15 +176,24 @@ def auto_scaler():
         n_active = len(node_mgr.active_urls)
         n_standby = len(node_mgr.standby_urls)
         
+        # Scale UP Logic
         if n_standby > 0 and q_total > (SCALE_UP_THRESHOLD * n_active):
             new_node = node_mgr.standby_urls.pop(0)
-            node_mgr.active_urls.append(new_node)
+            # [Modified] Do NOT add to active_urls yet.
+            # We defer activation until the node is provisioned.
+            
             last_scale_ts = now
-            logger.info(f"🚀 Scale UP: {new_node}")
-            # [NEW] Use current config version for new node
-            asyncio.create_task(sync_adapter_config(new_node, node_mgr.allowed_adapters, node_mgr.config_version))
+            logger.info(f"🚀 Scale UP initiated: {new_node} (Provisioning...)")
+            
+            # Start provisioning in background
+            asyncio.create_task(activate_node_task(
+                new_node, 
+                list(node_mgr.allowed_adapters), 
+                node_mgr.config_version
+            ))
             return
 
+        # Scale DOWN Logic
         if n_active > MIN_NODES and q_total == 0:
             candidate = None
             for i in range(len(node_mgr.active_urls) - 1, MIN_NODES - 1, -1):
