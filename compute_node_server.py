@@ -104,7 +104,7 @@ async def lifespan(app: FastAPI):
     
     engine = MultiLoRAEngine(
         model_id=MODEL_ID,
-        adapter_slots=4,
+        adapter_slots=8,
         max_batch_size=MAX_BATCH_SIZE_LIMIT, # 傳入硬上限
         enable_monitor=True
     )

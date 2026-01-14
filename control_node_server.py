@@ -222,7 +222,7 @@ def check_merges():
         for adapter, url in node_mgr.merged_assignment.items():
             if len(adapter_queues[adapter]) == 0:
                 info = node_mgr.nodes.get(url)
-                if info and info["metrics"]["idle"] and (time.time() - info["merged_at"] > 30):
+                if info and info["metrics"]["idle"] and (time.time() - info["merged_at"] > 5):
                     to_revert.append(url)
         
         for url in to_revert:

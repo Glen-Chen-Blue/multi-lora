@@ -155,13 +155,13 @@ class MultiLoRAEngine:
         # [Auto-Scale] Configuration
         self.limit_max_batch_size = int(max_batch_size) # 硬上限 (使用者在 Server 端設定的值)
         # 初始 Batch Size: 設為 8 或 limit 的較小值，避免一啟動就 OOM
-        self.max_batch_size = min(8, self.limit_max_batch_size)
+        self.max_batch_size = min(16, self.limit_max_batch_size)
         self.min_batch_size = 1
         self.adapter_slots = int(adapter_slots)
         
         # [Auto-Scale] Tracking vars
         self.last_adjust_time = time.time()
-        self.adjust_interval = 2.0  # 冷卻時間：2秒
+        self.adjust_interval = 1.0  # 冷卻時間：2秒
         self.vram_high_threshold = 0.9 # >85% 視為危險，減少
         self.vram_safe_threshold = 0.8 # <65% 視為安全，若飽和則增加
 
