@@ -37,6 +37,11 @@ SCALE_UP_THRESHOLD = int(os.environ.get("SCALE_UP_THRESHOLD", "4"))
 SCALE_COOLDOWN_SEC = float(os.environ.get("SCALE_COOLDOWN_SEC", "5.0"))
 MIN_NODES = 1
 
+# Merge Strategy Config
+TTFT_THRESHOLD = 6.0  # 秒 (預期排隊時間超過此值觸發 Merge)
+EST_PREFILL_TIME = 0.12 # 秒 (預估處理一個請求的時間，視硬體調整)
+DOMINANCE_THRESHOLD = 0.6 # 佔比門檻 (超過 60% 流量)
+
 # ============================================================
 # Node State Manager
 # ============================================================
@@ -116,15 +121,18 @@ class NodeManager:
             merged_on_node = m["lora_state"]["merged_adapter"]
             substitutes = self.affinity_table.get(adapter_id, [])
 
+            # [策略] PRE_MERGE 階段：只允許 Target Adapter 進入 (Gating)
             if mode == "PRE_MERGE":
                 if target == adapter_id or target in substitutes: return True
-                return False
+                return False # 拒絕其他 Adapter，讓其自然 Drain 掉
 
+            # [策略] MERGED 階段：只允許 Target Adapter 進入
             if mode == "MERGED":
                 if target == adapter_id or target in substitutes: return True
-                if merged_on_node and (merged_on_node == adapter_id or merged_on_node in substitutes): return True
+                # 即使已經 Merge 了，理論上不該接受其他 Adapter，因為會導致 Unmerge
                 return False
 
+            # NORMAL 階段：如果有殘留的 Merge 狀態，優先匹配
             if merged_on_node == adapter_id: return True
             if merged_on_node and merged_on_node in substitutes: return True
             if not merged_on_node: return True
@@ -215,124 +223,142 @@ def auto_scaler():
                 last_scale_ts = now
                 logger.info(f"💤 Scale DOWN: {candidate}")
 
-def check_merges():
+# ============================================================
+# NEW: Optimized Merge Logic
+# ============================================================
+def check_merges_optimized():
     healthy = node_mgr.get_healthy_active_nodes()
     if not healthy: return
 
+    # 1. 檢視當前排隊狀況
     with node_mgr.lock:
-        counts = {a: len(q) for a, q in adapter_queues.items() if len(q) > 0}
+        queues = {a: list(q) for a, q in adapter_queues.items()}
     
-    total_q = sum(counts.values())
-    
-    # ------------------------------------------------------------
-    # [Revised Logic] Merge Trigger Condition
-    # 1. Total Queue > 50% of Cluster Capacity (維持)
-    # 2. Cluster Average Utilization > 80% (放寬單點限制，改看整體)
-    # ------------------------------------------------------------
-    total_cluster_capacity = 0
-    total_running_load = 0
-    
-    with node_mgr.lock:
-        for url in healthy:
-            info = node_mgr.nodes.get(url)
-            if not info or not info.get("metrics"): continue
-            
-            m = info["metrics"]
-            cap = m["capacity"]["max_batch_size"]
-            load = m["load"]["running_batch"]
-            
-            total_cluster_capacity += cap
-            total_running_load += load
-    
-    should_merge = False
-    if total_cluster_capacity > 0:
-        avg_utilization = total_running_load / total_cluster_capacity
-        
-        # 條件：排隊數夠多，且叢集整體已經很忙 (超過 80%)
-        if (total_q > total_cluster_capacity * 0.5) and (avg_utilization > 0.8):
-            should_merge = True
-    
-    if should_merge:
-        # Hotspot Identification
-        best_adapter, max_q = None, -1
-        with node_mgr.lock:
-            for a, c in counts.items():
-                if a not in node_mgr.merged_assignment and c > max_q:
-                    best_adapter, max_q = a, c
-        
-        # 仍然保持「顯著性」檢查：該 Adapter 的 Queue 必須夠長 (大於平均負載)
-        avg_load = total_q / len(healthy)
-        
-        if best_adapter and max_q > avg_load:
-            target_node = None
-            best_score = -9999
-            with node_mgr.lock:
-                for url in healthy:
-                    info = node_mgr.nodes.get(url)
-                    if info["mode"] != "NORMAL": continue
-                    m = info["metrics"]
-                    
-                    # Score: 優先找已載入的
-                    has_it = 1 if best_adapter in m["lora_state"]["running_adapters"] else 0
-                    load = m["load"]["running_batch"]
-                    
-                    # 計算剩餘空間分數，越空分數越高
-                    # 但在 Full Load 情況下，主要看 has_it
-                    score = (has_it * 1000) - load
-                    
-                    if score > best_score:
-                        best_score = score
-                        target_node = url
-            
-            if target_node:
-                logger.info(f"🛡️  MERGE Triggered! (Cluster Util: {avg_utilization:.2f}, Q: {total_q}). Merging {best_adapter} on {target_node}")
-                node_mgr.set_mode(target_node, "PRE_MERGE", best_adapter)
+    total_reqs = sum(len(q) for q in queues.values())
+    if total_reqs == 0:
+        # 若完全無請求，檢查是否需要 Unmerge 以節省成本
+        check_unmerges_optimized()
+        return
 
-    # ------------------------------------------------------------
-    # Execute Merges (Phase 2: PRE_MERGE -> SWITCHING)
-    # ------------------------------------------------------------
+    merged_adapters = set(node_mgr.merged_assignment.keys())
+    candidate_adapter = None
+    
+    # 2. 識別熱點 (Hotspot Detection)
+    # 條件：排隊導致的預期延遲 > TTFT_THRESHOLD  OR  佔比 > DOMINANCE_THRESHOLD
+    for aid, reqs in queues.items():
+        if aid in merged_adapters: continue # 已有專車
+        
+        q_len = len(reqs)
+        dominance = q_len / total_reqs
+        
+        # 簡單估算：假設 Dynamic Mode 下單節點平均併發為 4 (Slot 限制)
+        est_wait_time = (q_len * EST_PREFILL_TIME) / 4 
+        
+        if est_wait_time > TTFT_THRESHOLD or (dominance > DOMINANCE_THRESHOLD and q_len > 10):
+            logger.info(f"🔥 Hotspot detected: {aid} (Q:{q_len}, Dom:{dominance:.2f}, EstWait:{est_wait_time:.2f}s)")
+            candidate_adapter = aid
+            break # 一次處理一個，避免震盪
+    
+    if not candidate_adapter:
+        check_unmerges_optimized()
+        return
+
+    # 3. 選擇最佳節點 (Node Selection)
+    target_node = select_node_for_merge(candidate_adapter, healthy)
+    
+    if target_node:
+        logger.info(f"🛡️ Strategy: CONVERT {target_node} to Dedicated for {candidate_adapter}")
+        node_mgr.set_mode(target_node, "PRE_MERGE", candidate_adapter)
+
+def select_node_for_merge(adapter_id, healthy_nodes):
+    best_node = None
+    max_running_count = -1
+    min_cost = float('inf')
+    
+    with node_mgr.lock:
+        for url in healthy_nodes:
+            info = node_mgr.nodes.get(url)
+            if info["mode"] != "NORMAL": continue # 只選目前是 Normal 的
+            
+            m = info.get("metrics", {})
+            running_list = [r["adapter_id"] for r in m.get("lora_state", {}).get("running_adapters_detail", [])]
+            # 若 metrics 沒 detail，退回用 simple list
+            if not running_list:
+                running_list = m.get("lora_state", {}).get("running_adapters", [])
+
+            # 統計該節點上有多少請求是目標 Adapter
+            target_count = running_list.count(adapter_id)
+            load = m.get("load", {}).get("running_batch", 0)
+            is_idle = m.get("idle", False)
+
+            # Cost Function: 
+            # 優先：正在跑該 Adapter 且量最大的 (符合 "選擇最多該 LoRA 的 node")
+            # 次之：閒置節點
+            
+            # 給予 target_count 極大權重，讓他優先被選
+            score = target_count * 100 
+            
+            if is_idle:
+                score += 50 # 閒置也不錯，可以直接用
+            else:
+                score -= load # 越忙扣分越多 (除非都在跑 target)
+            
+            # 我們要選 Score 最高的 (這裡轉換成 Cost 最小化邏輯)
+            cost = -score
+            
+            if cost < min_cost:
+                min_cost = cost
+                best_node = url
+                
+    return best_node
+
+def check_unmerges_optimized():
+    to_revert = []
+    with node_mgr.lock:
+        for adapter, url in list(node_mgr.merged_assignment.items()):
+            q_len = len(adapter_queues[adapter])
+            info = node_mgr.nodes.get(url)
+            
+            # 條件：Queue 空了 且 節點也閒置 (無 Running Request)
+            # 這樣可以盡快釋放節點回歸 Normal Pool
+            if q_len == 0 and info and info.get("metrics", {}).get("idle"):
+                # 這裡可以加一個簡單的時間防抖動 (例如持續空閒 5 秒)
+                # 為求反應速度，此處直接釋放
+                to_revert.append(url)
+
+    for url in to_revert:
+        logger.info(f"❄️ Cooldown: Reverting {url} to NORMAL")
+        asyncio.create_task(do_unmerge_node(url))
+
+async def process_transitions():
+    # 處理 PRE_MERGE -> MERGED 的轉換
+    # 必須等到節點上只剩下 Target Adapter (Drain 完成)
+    
+    tasks = []
     with node_mgr.lock:
         for url, info in list(node_mgr.nodes.items()):
             if info["mode"] == "PRE_MERGE":
-                if time.time() - info["mode_ts"] < 0.5: continue
-
                 target = info["target"]
                 m = info.get("metrics")
                 if m:
+                    # 檢查 Running Queue
+                    # running_adapters 是 adapter_id 的 list
                     running = m["lora_state"]["running_adapters"]
+                    
+                    # 檢查是否還有非 Target 的 Adapter 在跑
                     others = [x for x in running if x != target]
                     
                     if not others:
-                        logger.info(f"⚡ Executing merge {target} on {url}.")
+                        # 完美，只剩 Target 或空閒，可以 Merge 了
+                        logger.info(f"⚡ Drained! Executing merge {target} on {url}.")
                         node_mgr.set_mode(url, "SWITCHING", target) 
-                        asyncio.create_task(do_merge_node(url, target))
-
-    # ------------------------------------------------------------
-    # Revert Logic (Phase 3: MERGED -> NORMAL)
-    # ------------------------------------------------------------
-    to_revert = []
-    with node_mgr.lock:
-        for adapter, url in node_mgr.merged_assignment.items():
-            if len(adapter_queues[adapter]) == 0:
-                info = node_mgr.nodes.get(url)
-                if info and info.get("metrics"):
-                    m = info["metrics"]
-                    is_idle = m["idle"]
-                    free_slots = m["capacity"]["max_batch_size"] - m["load"]["running_batch"]
-                    others_waiting = sum(len(q) for a, q in adapter_queues.items() if a != adapter)
-                    
-                    cooldown_passed = (time.time() - info["merged_at"] > 5)
-                    
-                    if cooldown_passed:
-                        # 條件1: 完全閒置
-                        if is_idle: 
-                            to_revert.append(url)
-                        # 條件2: 資源搶佔 (我很閒，別人很忙)
-                        elif free_slots > 2 and others_waiting > 0:
-                            to_revert.append(url)
+                        tasks.append(do_merge_node(url, target))
+                    else:
+                        # 還在 Drain，等待下一輪
+                        pass
     
-    for url in to_revert:
-        asyncio.create_task(do_unmerge_node(url))
+    if tasks:
+        await asyncio.gather(*tasks)
 
 async def do_merge_node(url: str, adapter_id: str):
     try:
@@ -392,7 +418,8 @@ async def scheduler_loop():
         await asyncio.to_thread(scheduler_wakeup.wait) 
         
         auto_scaler()
-        check_merges()
+        check_merges_optimized() # 使用新的 Merge 檢查邏輯
+        await process_transitions() # 處理狀態轉換
         
         healthy_nodes = node_mgr.get_healthy_active_nodes()
         if not healthy_nodes:
@@ -402,41 +429,64 @@ async def scheduler_loop():
 
         did_work = False
         
-        with node_mgr.lock:
-            pending_adapters = [a for a, q in adapter_queues.items() if len(q) > 0]
-            merged_map = node_mgr.merged_assignment.copy()
-
-        for aid in pending_adapters:
-            target_node = merged_map.get(aid)
-            if not target_node:
-                for url in healthy_nodes:
-                    if node_mgr.can_node_accept(url, aid):
-                        target_node = url
-                        break
-            else:
-                if target_node not in healthy_nodes or not node_mgr.can_node_accept(target_node, aid):
-                    target_node = None
-
-            if target_node:
-                req = None
-                with node_mgr.lock:
-                    if adapter_queues[aid]: req = adapter_queues[aid].popleft()
+        # 1. 優先處理 Merged Assignment (專車)
+        # 這裡包含 Spillover 邏輯：如果專車滿了，允許溢出到 Normal 節點以維持 P95
+        merged_map = node_mgr.merged_assignment.copy()
+        
+        for aid, dedicated_node in merged_map.items():
+            if len(adapter_queues[aid]) > 0:
+                dispatched_to_dedicated = False
                 
-                if req:
-                    final_id = req["adapter_id"]
-                    with node_mgr.lock:
-                        info = node_mgr.nodes.get(target_node)
-                        if info:
-                            merged_id = info["metrics"]["lora_state"]["merged_adapter"]
-                            if merged_id and merged_id != final_id:
-                                substitutes = node_mgr.affinity_table.get(final_id, [])
-                                if merged_id in substitutes: 
-                                    final_id = merged_id
+                # 檢查專車容量
+                info = node_mgr.nodes.get(dedicated_node)
+                if info and info.get("metrics"):
+                    cap = info["metrics"]["capacity"]["max_batch_size"]
+                    load = info["metrics"]["load"]["running_batch"]
                     
-                    req_to_send = req.copy()
-                    req_to_send["adapter_id"] = final_id
-                    asyncio.create_task(dispatch_request(target_node, req_to_send))
-                    did_work = True
+                    if load < cap:
+                        req = adapter_queues[aid].popleft()
+                        asyncio.create_task(dispatch_request(dedicated_node, req))
+                        did_work = True
+                        dispatched_to_dedicated = True
+                
+                # 如果專車滿了，且還有其他 Normal 節點可用，執行 Spillover
+                # 這樣可以避免專車單點瓶頸導致 P95 爆炸
+                if not dispatched_to_dedicated:
+                    # 嘗試找其他 NORMAL 節點
+                    spillover_node = None
+                    for url in healthy_nodes:
+                        if url == dedicated_node: continue
+                        if node_mgr.can_node_accept(url, aid):
+                            spillover_node = url
+                            break
+                    
+                    if spillover_node:
+                        req = adapter_queues[aid].popleft()
+                        asyncio.create_task(dispatch_request(spillover_node, req))
+                        logger.info(f"🌊 Spillover {aid} to {spillover_node}")
+                        did_work = True
+
+        # 2. 處理剩餘請求 (Normal Dispatch)
+        pending_adapters = [a for a, q in adapter_queues.items() if len(q) > 0]
+        
+        for aid in pending_adapters:
+            # 如果這個 Adapter 已經有專車 (且在上面邏輯沒被處理掉，代表專車滿了且沒地方 Spillover)
+            # 就跳過，避免重複處理
+            if aid in merged_map and len(adapter_queues[aid]) == 0:
+                continue
+
+            target_node = None
+            
+            # 尋找可用節點
+            for url in healthy_nodes:
+                if node_mgr.can_node_accept(url, aid):
+                    target_node = url
+                    break
+            
+            if target_node:
+                req = adapter_queues[aid].popleft()
+                asyncio.create_task(dispatch_request(target_node, req))
+                did_work = True
 
         if not did_work:
             scheduler_wakeup.clear()
@@ -569,24 +619,8 @@ async def send_request(req: AddRequest):
         return {"request_id": rid}
 
     selected_id = final_id
+    # 這裡的邏輯移到 scheduler 處理，這裡只負責入隊
     with node_mgr.lock:
-        candidates = set([final_id] + node_mgr.affinity_table.get(final_id, []))
-        valid_candidates = list(candidates.intersection(node_mgr.allowed_adapters))
-        loaded_in_cluster = node_mgr.cluster_loaded_adapters
-        available_loaded = list(set(valid_candidates).intersection(loaded_in_cluster))
-        
-        if not available_loaded:
-            selected_id = final_id
-        else:
-            best_cand = None
-            max_q_len = -1
-            for cand in available_loaded:
-                q_len = len(adapter_queues[cand])
-                if q_len > max_q_len:
-                    max_q_len = q_len
-                    best_cand = cand
-            if best_cand: selected_id = best_cand
-
         adapter_queues[selected_id].append({
             "rid": rid, "prompt": req.prompt, "adapter_id": selected_id, "max_new_tokens": req.max_new_tokens
         })
@@ -619,7 +653,8 @@ def status():
             "node_type": "CONTROL_NODE",
             "active_nodes": len(node_mgr.active_urls),
             "queues": {k: len(v) for k, v in adapter_queues.items()},
-            "merged_map": node_mgr.merged_assignment
+            "merged_map": node_mgr.merged_assignment,
+            "nodes": node_mgr.nodes # Expose node detail for debugging
         }
 
 @app.get("/fetch_adapter/{adapter_id}")
