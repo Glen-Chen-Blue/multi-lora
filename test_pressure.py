@@ -14,7 +14,7 @@ CONTROL_URL = "http://localhost:9000"
 ADAPTERS = ["1", "2", "3", "chat", "math", "code"] 
 
 # 流量分佈模式
-TRAFFIC_PATTERN = "1"  
+TRAFFIC_PATTERN = "0"  
 TARGET_ADAPTER = "1"     
 
 TOTAL_REQUESTS = 100

@@ -6,13 +6,14 @@ import asyncio
 import httpx
 import json
 import logging
+import shutil
 from queue import Queue, Empty
 from typing import Dict, List, Deque, Optional, Any, Set, Tuple 
 from collections import deque, defaultdict
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 
 # ============================================================
@@ -29,6 +30,7 @@ logger = logging.getLogger("ControlNode")
 
 MY_NODE_URL = os.environ.get("MY_NODE_URL", "http://localhost:9000")
 EFO_URL = os.environ.get("EFO_URL", "http://localhost:9090")
+LORA_PATH = os.environ.get("LORA_PATH", "./lora_repo/control")
 ALL_CANDIDATES = [x.strip() for x in os.environ.get("COMPUTE_NODES", "http://127.0.0.1:8001").split(",")]
 
 SCALE_UP_THRESHOLD = int(os.environ.get("SCALE_UP_THRESHOLD", "4"))     
@@ -44,8 +46,6 @@ class NodeManager:
         self.lock = threading.RLock()
         self.active_urls: List[str] = []
         self.standby_urls: List[str] = []
-        # mode: "NORMAL", "PRE_MERGE", "SWITCHING", "MERGED"
-        # mode_ts: Timestamp of the last mode change (for stabilization)
         self.nodes: Dict[str, Dict[str, Any]] = {} 
         
         if ALL_CANDIDATES:
@@ -67,16 +67,14 @@ class NodeManager:
                     "target": None, 
                     "last_seen": 0, 
                     "merged_at": 0,
-                    "mode_ts": time.time() # Initialize timestamp
+                    "mode_ts": time.time()
                 }
             self.nodes[url]["metrics"] = metrics
             self.nodes[url]["last_seen"] = time.time()
 
-    # [New] Centralized mode setting with timestamp
     def set_mode(self, url: str, mode: str, target: Optional[str] = None):
         with self.lock:
             if url in self.nodes:
-                # Update only if mode changes to reset the timer
                 if self.nodes[url]["mode"] != mode:
                     self.nodes[url]["mode"] = mode
                     self.nodes[url]["target"] = target
@@ -103,15 +101,11 @@ class NodeManager:
             m = info["metrics"]
             
             if m["load"]["running_batch"] >= m["capacity"]["max_batch_size"]: return False
-            
-            # SWITCHING: Pause all dispatch to allow clean merge
             if mode == "SWITCHING": return False 
             
             merged_on_node = m["lora_state"]["merged_adapter"]
             substitutes = self.affinity_table.get(adapter_id, [])
 
-            # [Modified] PRE_MERGE Logic: Only accept Target & its Affinity
-            # This naturally drains other adapters
             if mode == "PRE_MERGE":
                 if target == adapter_id or target in substitutes: return True
                 return False
@@ -134,7 +128,11 @@ node_mgr = NodeManager()
 adapter_queues: Dict[str, Deque] = defaultdict(deque)
 stream_queues: Dict[str, Tuple[Queue, float]] = {} 
 scheduler_wakeup = threading.Event()
-client = httpx.AsyncClient(timeout=10.0)
+client = httpx.AsyncClient(timeout=60.0) 
+
+# File download lock
+download_lock = asyncio.Lock()
+active_downloads: Set[str] = set()
 
 # ============================================================
 # Background Tasks
@@ -144,16 +142,19 @@ async def sync_adapter_config(target_url: str, adapters: List[str], version_id: 
         "adapters": adapters, 
         "version_id": version_id
     }
-    for i in range(5):
+    for i in range(60):
         try:
-            resp = await client.post(f"{target_url}/sync_adapters", json=payload, timeout=5.0)
+            resp = await client.post(f"{target_url}/sync_adapters", json=payload, timeout=60.0)
             if resp.status_code == 200:
                 logger.info(f"✅ Synced adapters (v{version_id}) to {target_url}")
                 return True
-        except Exception:
+        except Exception as e:
+            if i % 10 == 0 and i > 0:
+                logger.debug(f"Waiting for {target_url}... ({i}/60) - {e}")
             pass
         await asyncio.sleep(2)
-    logger.error(f"❌ Failed to sync adapters to {target_url}")
+        
+    logger.error(f"❌ Failed to sync adapters to {target_url} after multiple attempts.")
     return False
 
 def trigger_sync_all(version_id: int):
@@ -230,9 +231,6 @@ def check_merges():
     with node_mgr.lock:
         counts = {a: len(q) for a, q in adapter_queues.items() if len(q) > 0}
     
-    # ============================================================
-    # 1. Identify Merge Candidates
-    # ============================================================
     total_q = sum(counts.values())
     if total_q >= (QMIN_MULT * len(healthy)):
         best_adapter, max_q = None, -1
@@ -257,19 +255,12 @@ def check_merges():
                         target_node = url
             
             if target_node:
-                # [Modified] Use set_mode to switch to PRE_MERGE
                 logger.info(f"🛡️  Preparing MERGE {best_adapter} on {target_node} (Mode: PRE_MERGE)")
                 node_mgr.set_mode(target_node, "PRE_MERGE", best_adapter)
 
-    # ============================================================
-    # 2. Handle PRE_MERGE -> MERGE Transition
-    # ============================================================
     with node_mgr.lock:
         for url, info in list(node_mgr.nodes.items()):
             if info["mode"] == "PRE_MERGE":
-                # [CRITICAL FIX] Stabilization Period
-                # Wait for at least 2.0 seconds after switching mode before checking metrics.
-                # This prevents Race Conditions where in-flight requests haven't appeared in metrics yet.
                 if time.time() - info["mode_ts"] < 0.5:
                     continue
 
@@ -277,30 +268,53 @@ def check_merges():
                 m = info.get("metrics")
                 if m:
                     running = m["lora_state"]["running_adapters"]
-                    # Only proceed if running adapters are empty OR only contain the target
                     others = [x for x in running if x != target]
                     
                     if not others:
-                        # [Modified] Condition Met: Safe to merge
                         logger.info(f"⚡ PRE_MERGE clear on {url} (Running: {running}). Executing merge {target}.")
-                        node_mgr.set_mode(url, "SWITCHING", target) # Lock status
+                        node_mgr.set_mode(url, "SWITCHING", target) 
                         asyncio.create_task(do_merge_node(url, target))
 
-    # ============================================================
-    # 3. Unmerge Logic
-    # ============================================================
     to_revert_merge = []
     to_revert_pre = [] 
 
     with node_mgr.lock:
-        # A. Revert PRE_MERGE if queue empty
         for url, info in node_mgr.nodes.items():
             if info["mode"] == "PRE_MERGE":
                 target = info["target"]
-                if len(adapter_queues[target]) == 0:
+                time_in_mode = time.time() - info["mode_ts"]
+                
+                # [Dual Policy Revert Logic]
+                
+                # 0. 基礎資料準備
+                local_empty = len(adapter_queues[target]) == 0
+                others_waiting_count = sum(len(q) for a, q in adapter_queues.items() if a != target)
+                
+                remote_idle = False
+                m = info.get("metrics")
+                if m and m["load"]["running_batch"] == 0 and m["load"]["waiting_queue"] == 0:
+                    remote_idle = True
+                
+                # Policy 1: 閒置緩衝 (Idle Buffer)
+                # 當完全沒有人排隊 (Target空 且 Others空) 時，保持 10秒 避免震盪
+                should_revert_idle = False
+                if local_empty and others_waiting_count == 0 and remote_idle and (time_in_mode > 10.0):
+                    should_revert_idle = True
+
+                # Policy 2: 資源搶佔 (Resource Contention)
+                # 當 Target 空了，但 Others 有人在排隊，快速撤銷 (例如 1秒)
+                # 給 1秒 是為了避免極短時間內的 Queue 抖動
+                should_revert_urgent = False
+                if local_empty and others_waiting_count > 0 and (time_in_mode > 1.0):
+                    should_revert_urgent = True
+                    
+                if should_revert_idle:
+                    logger.info(f"↩️  Reverting PRE_MERGE on {url} (Global Idle Timeout)")
+                    to_revert_pre.append(url)
+                elif should_revert_urgent:
+                    logger.info(f"⚡ Reverting PRE_MERGE on {url} (Urgent: Others Waiting: {others_waiting_count})")
                     to_revert_pre.append(url)
 
-        # B. Revert MERGED
         for adapter, url in node_mgr.merged_assignment.items():
             if len(adapter_queues[adapter]) == 0:
                 info = node_mgr.nodes.get(url)
@@ -322,7 +336,6 @@ def check_merges():
                         to_revert_merge.append(url)
     
     for url in to_revert_pre:
-        logger.info(f"↩️  Reverting PRE_MERGE on {url} (Queue empty)")
         node_mgr.set_mode(url, "NORMAL", None)
 
     for url in to_revert_merge:
@@ -331,8 +344,6 @@ def check_merges():
 
 async def do_merge_node(url: str, adapter_id: str):
     try:
-        # Use force=True. Because PRE_MERGE ensured cleaning, this is safe.
-        # merge_adapter(force=True) in system will preserve 'target' requests.
         await client.post(f"{url}/unmerge", json={"force": True})
         await client.post(f"{url}/merge", json={"adapter_id": adapter_id, "force": True})
         with node_mgr.lock:
@@ -471,10 +482,47 @@ async def reaper_task():
         await asyncio.sleep(10)
 
 # ============================================================
+# Fetch & Store Logic (New)
+# ============================================================
+async def ensure_local_adapter(adapter_id: str):
+    """
+    Checks if adapter exists in local LORA_PATH.
+    If not, downloads from EFO.
+    Uses a lock to prevent concurrent downloads of the same file.
+    """
+    target_dir = os.path.join(LORA_PATH, adapter_id)
+    target_file = os.path.join(target_dir, "adapter_model.safetensors")
+    
+    if os.path.exists(target_file):
+        return
+
+    async with download_lock:
+        if os.path.exists(target_file):
+            return
+            
+        logger.info(f"📥 ControlNode: Downloading adapter {adapter_id} from EFO...")
+        os.makedirs(target_dir, exist_ok=True)
+        
+        try:
+            async with client.stream("GET", f"{EFO_URL}/fetch_adapter/{adapter_id}") as resp:
+                if resp.status_code != 200:
+                    logger.error(f"Failed to fetch from EFO: {resp.status_code}")
+                    return
+                
+                with open(target_file, "wb") as f:
+                    async for chunk in resp.aiter_bytes():
+                        f.write(chunk)
+            logger.info(f"✅ Download complete: {adapter_id}")
+        except Exception as e:
+            logger.error(f"Download failed: {e}")
+            if os.path.exists(target_file): os.remove(target_file)
+
+# ============================================================
 # API & App
 # ============================================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    os.makedirs(LORA_PATH, exist_ok=True)
     asyncio.create_task(scheduler_loop())
     asyncio.create_task(poller_task())
     asyncio.create_task(heartbeat_task())
@@ -509,6 +557,11 @@ async def update_config(cfg: ConfigUpdate):
         node_mgr.minimal_set = cfg.minimal_set
     
     logger.info(f"📥 Config updated to v{cfg.version_id}. Allowed: {len(cfg.assigned_adapters)}")
+    
+    tasks = [ensure_local_adapter(aid) for aid in cfg.assigned_adapters]
+    if tasks:
+        asyncio.create_task(asyncio.wait(tasks))
+        
     trigger_sync_all(cfg.version_id)
     return {"status": "ok"}
 
@@ -586,6 +639,27 @@ def status():
             "nodes": node_mgr.nodes,
             "config_version": node_mgr.config_version
         }
+
+# ============================================================
+# File Serving API (For Compute Nodes)
+# ============================================================
+@app.get("/fetch_adapter/{adapter_id}")
+async def fetch_adapter_for_compute(adapter_id: str):
+    """
+    Compute Nodes call this to download the adapter model.
+    Control Node acts as a transparent cache proxy.
+    """
+    # 1. Ensure we have it locally
+    await ensure_local_adapter(adapter_id)
+    
+    target_dir = os.path.join(LORA_PATH, adapter_id)
+    target_file = os.path.join(target_dir, "adapter_model.safetensors")
+    
+    if os.path.exists(target_file):
+        logger.info(f"Serving adapter {adapter_id} to Compute Node")
+        return FileResponse(target_file, media_type="application/octet-stream", filename="adapter_model.safetensors")
+    
+    raise HTTPException(404, "Adapter could not be fetched.")
 
 if __name__ == "__main__":
     import uvicorn

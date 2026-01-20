@@ -7,7 +7,7 @@ import json
 import random
 from typing import Dict, List, Set, Optional
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
@@ -43,7 +43,9 @@ client = httpx.AsyncClient(timeout=10.0)
 # Affinity Logic
 # ============================================================
 def scan_loras():
-    if not os.path.exists(LORA_PATH): return []
+    if not os.path.exists(LORA_PATH): 
+        os.makedirs(LORA_PATH, exist_ok=True)
+        return []
     try:
         dirs = [d for d in os.listdir(LORA_PATH) if os.path.isdir(os.path.join(LORA_PATH, d))]
         return sorted([d.split("_")[-1] if "_" in d else d for d in dirs])
@@ -97,7 +99,6 @@ def update_affinity():
 # ============================================================
 async def broadcast_config():
     tasks = []
-    # [NEW] Payload includes version_id
     payload_base = {
         "affinity_table": state.affinity_table,
         "minimal_set": state.minimal_set,
@@ -117,7 +118,6 @@ def rebalance_assignments():
     nodes = list(state.registered_nodes.keys())
     if not nodes: return
 
-    # [NEW] Generate new version ID (Timestamp-based to prevent restart collisions)
     state.config_version = int(time.time() * 1000)
 
     new_node_map = {n: [] for n in nodes}
@@ -164,6 +164,7 @@ async def monitor_nodes():
 # ============================================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    os.makedirs(LORA_PATH, exist_ok=True)
     update_affinity()
     asyncio.create_task(monitor_nodes())
     yield
@@ -209,11 +210,7 @@ async def relay_request(req: RelayBody):
 
     async def proxy():
         try:
-            # [修正] 改用 client.post 取代 client.stream，因為 send_request 不是串流接口
-            # 原始錯誤的寫法: async with client.stream("POST", ... ) as r: ...
-            
             r = await client.post(f"{target_node}/send_request", json=req.dict())
-            
             if r.status_code != 200:
                 yield f"event: error\ndata: {json.dumps('Relay failed')}\n\n"
                 return
@@ -225,16 +222,41 @@ async def relay_request(req: RelayBody):
                 yield "event: error\ndata: \"No Request ID\"\n\n"
                 return
             
-            # 這裡保持用 stream，因為 /stream/{rid} 是真正的串流接口
             async with client.stream("GET", f"{target_node}/stream/{rid}") as s:
                  async for line in s.aiter_lines():
                      if line: yield f"{line}\n"
 
         except Exception as e:
-            # 這裡就是原本捕捉到 "Attempted to call a sync iterator..." 的地方
             yield f"event: error\ndata: {json.dumps(str(e))}\n\n"
 
     return StreamingResponse(proxy(), media_type="text/event-stream")
+
+# ============================================================
+# File Serving API (For Control Nodes)
+# ============================================================
+@app.get("/fetch_adapter/{adapter_id}")
+def fetch_adapter(adapter_id: str):
+    """
+    Control Nodes call this to download the adapter model.
+    """
+    # 這裡假設 adapter 是一個資料夾，裡面有 adapter_model.safetensors
+    # 為了簡化，我們直接回傳 safetensors 檔案
+    # 實際上應該要回傳整個資料夾的 zip，或是提供多個 API
+    # 這裡我們實作: 下載 safetensors
+    
+    file_path = os.path.join(LORA_PATH, adapter_id, "adapter_model.safetensors")
+    if not os.path.exists(file_path):
+        # 嘗試找沒有前綴的目錄 (因為 scan_loras 會 split('_'))
+        # 這裡做一個簡單的 fallback 搜尋
+        candidates = [d for d in os.listdir(LORA_PATH) if adapter_id in d]
+        if candidates:
+            file_path = os.path.join(LORA_PATH, candidates[0], "adapter_model.safetensors")
+    
+    if os.path.exists(file_path):
+        logger.info(f"Serving adapter {adapter_id} from {file_path}")
+        return FileResponse(file_path, media_type="application/octet-stream", filename="adapter_model.safetensors")
+    
+    raise HTTPException(404, f"Adapter {adapter_id} file not found in EFO.")
 
 @app.get("/status")
 def status():

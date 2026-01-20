@@ -5,6 +5,7 @@ import time
 import logging
 import json
 import asyncio
+import httpx
 from queue import Queue, Empty
 from contextlib import asynccontextmanager
 from typing import Dict, List, Optional
@@ -31,7 +32,8 @@ logger = logging.getLogger("ComputeNode")
 # ============================================================
 NODE_ID = os.environ.get("NODE_ID", "cn-1")
 MODEL_ID = os.environ.get("MODEL_ID", "unsloth/Meta-Llama-3.1-8B")
-LORA_PATH = os.environ.get("LORA_PATH", "./testLoRA")
+LORA_PATH = os.environ.get("LORA_PATH", "./lora_repo/compute")
+CONTROL_NODE_URL = os.environ.get("CONTROL_NODE_URL", "http://localhost:9000")
 
 # [Auto-Scale] 設定硬上限，預設 32。動態調整會在此範圍內運作。
 MAX_BATCH_SIZE_LIMIT = int(os.environ.get("MAX_BATCH_SIZE", "32"))
@@ -48,6 +50,8 @@ stream_lock = threading.Lock()
 # Config Versioning State
 last_config_version: int = -1
 config_lock = threading.Lock()
+
+client = httpx.AsyncClient(timeout=120.0) # Long timeout for download
 
 # ============================================================
 # Callbacks
@@ -100,6 +104,7 @@ def engine_loop_thread():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global engine
+    os.makedirs(LORA_PATH, exist_ok=True)
     logger.info(f"Initializing Compute Node {NODE_ID}...")
     
     engine = MultiLoRAEngine(
@@ -118,6 +123,7 @@ async def lifespan(app: FastAPI):
     shutdown_event.set()
     engine_wakeup.set()
     t.join(timeout=5)
+    await client.aclose()
 
 app = FastAPI(title=f"Compute Node {NODE_ID}", lifespan=lifespan)
 
@@ -141,13 +147,43 @@ class SyncAdaptersRequest(BaseModel):
     version_id: int 
 
 # ============================================================
+# Download Logic
+# ============================================================
+async def download_missing_adapters(adapters: List[str]):
+    """
+    Check LORA_PATH for missing adapters.
+    If missing, download from Control Node.
+    """
+    for aid in adapters:
+        target_dir = os.path.join(LORA_PATH, aid)
+        target_file = os.path.join(target_dir, "adapter_model.safetensors")
+        
+        if os.path.exists(target_file):
+            continue
+            
+        logger.info(f"📥 Missing {aid}, downloading from {CONTROL_NODE_URL}...")
+        os.makedirs(target_dir, exist_ok=True)
+        
+        try:
+            async with client.stream("GET", f"{CONTROL_NODE_URL}/fetch_adapter/{aid}") as resp:
+                if resp.status_code != 200:
+                    logger.error(f"Failed to fetch {aid} from Control Node: {resp.status_code}")
+                    continue
+                
+                with open(target_file, "wb") as f:
+                    async for chunk in resp.aiter_bytes():
+                        f.write(chunk)
+            logger.info(f"✅ Downloaded {aid} successfully.")
+        except Exception as e:
+            logger.error(f"Download error for {aid}: {e}")
+            if os.path.exists(target_file): os.remove(target_file)
+
+# ============================================================
 # Endpoints
 # ============================================================
 @app.get("/metrics")
 def metrics():
     if not engine: return {}
-    # 這裡回傳的 engine.max_batch_size 是動態調整過後的當前值
-    # Control Node 會讀到這個值，發現容量變大後，就會派送更多請求
     return {
         "node_id": NODE_ID,
         "load": {
@@ -166,7 +202,7 @@ def metrics():
     }
 
 @app.post("/sync_adapters")
-def sync_adapters(req: SyncAdaptersRequest):
+async def sync_adapters(req: SyncAdaptersRequest):
     global last_config_version
     
     with config_lock:
@@ -180,6 +216,10 @@ def sync_adapters(req: SyncAdaptersRequest):
         last_config_version = req.version_id
 
     try:
+        # [NEW] Download step
+        await download_missing_adapters(req.adapters)
+        
+        # Then load from local disk
         engine.load_adapters_to_cpu(LORA_PATH, allowed_adapters=req.adapters)
         return {
             "status": "ok", 
@@ -200,6 +240,8 @@ def add_request(req: AddRequest):
         decoding_state[rid] = 0
     
     try:
+        # Note: If adapter is not loaded, this will fail. 
+        # Ideally, Control Node ensures sync_adapters is called before dispatching.
         engine.add_request(req.prompt, req.adapter_id, rid, req.max_new_tokens)
         engine_wakeup.set()
     except KeyError as e:
