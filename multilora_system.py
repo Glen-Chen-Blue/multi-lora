@@ -144,26 +144,29 @@ def _batch_past(past_list: List[Tuple], target_len: int) -> Tuple:
     return tuple(batched)
 
 # ============================================================
-# Multi-LoRA Engine Core (With Dynamic Batch Sizing)
+# Multi-LoRA Engine Core (With Dynamic Batch Sizing & CPU LRU)
 # ============================================================
 class MultiLoRAEngine:
-    def __init__(self, model_id: str, r: int = 16, alpha: int = 64, adapter_slots: int = 2, max_batch_size: int = 4, device: Optional[str] = None, torch_dtype: torch.dtype = torch.bfloat16, enable_monitor: bool = True):
+    def __init__(self, model_id: str, r: int = 16, alpha: int = 64, adapter_slots: int = 2, max_batch_size: int = 4, max_cpu_loras: int = 10, device: Optional[str] = None, torch_dtype: torch.dtype = torch.bfloat16, enable_monitor: bool = True):
         self.device = torch.device(device) if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.dtype = torch_dtype if self.device.type == "cuda" else torch.float32
         self.enable_monitor = enable_monitor
         self.step_counter = 0
+        
         # [Auto-Scale] Configuration
-        self.limit_max_batch_size = int(max_batch_size) # 硬上限 (使用者在 Server 端設定的值)
-        # 初始 Batch Size: 設為 8 或 limit 的較小值，避免一啟動就 OOM
+        self.limit_max_batch_size = int(max_batch_size) 
         self.max_batch_size = min(32, self.limit_max_batch_size)
         self.min_batch_size = 1
+        
+        # [CPU LRU] Configuration
+        self.max_cpu_loras = int(max_cpu_loras)
         self.adapter_slots = int(adapter_slots)
         
         # [Auto-Scale] Tracking vars
         self.last_adjust_time = time.time()
-        self.adjust_interval = 1.0  # 冷卻時間：1秒
-        self.vram_high_threshold = 0.95 # >85% 視為危險，減少
-        self.vram_safe_threshold = 0.8 # <65% 視為安全，若飽和則增加
+        self.adjust_interval = 1.0  
+        self.vram_high_threshold = 0.95 
+        self.vram_safe_threshold = 0.8 
 
         print(f"⏳ [Engine] Loading base model: {model_id} on {self.device}...")
         self.tokenizer = AutoTokenizer.from_pretrained(model_id, use_fast=True)
@@ -173,7 +176,12 @@ class MultiLoRAEngine:
         self.model = AutoModelForCausalLM.from_pretrained(model_id, dtype=self.dtype, low_cpu_mem_usage=True).to(self.device).eval()
         self._replace_layers(r, alpha)
 
-        self.cpu_cache: Dict[str, Dict] = {}
+        # [LRU System]
+        # adapter_paths: aid -> safetensors path (Metadata only)
+        # cpu_cache: aid -> weights dict (OrderedDict for LRU)
+        self.adapter_paths: Dict[str, str] = {}
+        self.cpu_cache: OrderedDict[str, Dict] = OrderedDict()
+        
         self.gpu_slots: Dict[int, str] = {} 
         self.adapter_to_slot: Dict[str, int] = {} 
         self.slot_lru = OrderedDict((i, 0) for i in range(self.adapter_slots))
@@ -201,15 +209,25 @@ class MultiLoRAEngine:
                 replaced_count += 1
         print(f"🔧 [Engine] Replaced {replaced_count} layers with DynamicLoRALinear.")
 
-    def load_adapters_to_cpu(self, base_path: str = "./testLoRA", allowed_adapters: Optional[List[str]] = None):
+    def scan_adapters(self, base_path: str = "./testLoRA", allowed_adapters: Optional[List[str]] = None):
+        """
+        Scans the base_path for valid adapters and registers their paths.
+        Does NOT load weights into memory immediately.
+        """
         if not os.path.exists(base_path): return
+        
         whitelist = set(allowed_adapters) if allowed_adapters is not None else None
         
+        # Cleanup removed adapters from path registry
         if whitelist is not None:
-            current_loaded = list(self.cpu_cache.keys())
-            for aid in current_loaded:
+            current_paths = list(self.adapter_paths.keys())
+            for aid in current_paths:
                 if aid not in whitelist:
-                    del self.cpu_cache[aid]
+                    del self.adapter_paths[aid]
+                    # Also remove from cache if exists
+                    if aid in self.cpu_cache:
+                        del self.cpu_cache[aid]
+                    # Remove from GPU if exists
                     if aid in self.adapter_to_slot:
                         slot = self.adapter_to_slot.pop(aid)
                         if self.gpu_slots.get(slot) == aid: del self.gpu_slots[slot]
@@ -219,30 +237,61 @@ class MultiLoRAEngine:
             dirs = sorted([d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d))])
         except OSError: return
 
+        count = 0
         for d in dirs:
             aid = d.split("_")[-1] if "_" in d else d
             if whitelist is not None and aid not in whitelist: continue
-            if aid in self.cpu_cache: continue
-
+            
             safetensor_path = os.path.join(base_path, d, "adapter_model.safetensors")
-            if not os.path.exists(safetensor_path): continue
+            if os.path.exists(safetensor_path):
+                self.adapter_paths[aid] = safetensor_path
+                count += 1
+                
+        print(f"✅ [Engine] Scanned {count} adapters. (Lazy loaded)")
 
-            try:
-                weights = load_file(safetensor_path, device="cpu")
-                adapter_weights = {}
-                for n, m in self.model.named_modules():
-                    if isinstance(m, DynamicLoRALinear):
-                        key_A = f"base_model.model.{n}.lora_A.weight"
-                        key_B = f"base_model.model.{n}.lora_B.weight"
-                        if key_A in weights and key_B in weights:
-                            adapter_weights[n] = {
-                                "A": weights[key_A].T.contiguous().to(torch.float32).pin_memory(),
-                                "B": weights[key_B].T.contiguous().to(torch.float32).pin_memory()
-                            }
-                if adapter_weights: self.cpu_cache[aid] = adapter_weights
-            except Exception as e:
-                print(f"❌ [Engine] Failed to load {aid}: {e}")
-        print(f"✅ [Engine] Sync done. Total Resident: {len(self.cpu_cache)}")
+    def _ensure_cpu_loaded(self, adapter_id: str):
+        """
+        Ensures the adapter is loaded in CPU RAM.
+        If not, loads it from disk, potentially evicting LRU adapters.
+        """
+        # 1. Hit: Already in CPU Cache
+        if adapter_id in self.cpu_cache:
+            self.cpu_cache.move_to_end(adapter_id) # Mark as recently used
+            return
+
+        # 2. Check existence
+        if adapter_id not in self.adapter_paths:
+            raise KeyError(f"Adapter {adapter_id} path not found in registry.")
+
+        path = self.adapter_paths[adapter_id]
+        
+        # 3. Evict if full
+        while len(self.cpu_cache) >= self.max_cpu_loras:
+            evicted_aid, _ = self.cpu_cache.popitem(last=False) # FIFO (LRU)
+            # Note: We don't necessarily force eviction from GPU here, 
+            # because GPU has its own slots. But if we want to be strict, we could.
+            # Usually we keep GPU cache independent until slot contention occurs.
+            # print(f"♻️ [CPU LRU] Evicted {evicted_aid} from CPU RAM")
+
+        # 4. Load from disk
+        try:
+            # print(f"📂 [CPU LRU] Loading {adapter_id} from disk...")
+            weights = load_file(path, device="cpu")
+            adapter_weights = {}
+            for n, m in self.model.named_modules():
+                if isinstance(m, DynamicLoRALinear):
+                    key_A = f"base_model.model.{n}.lora_A.weight"
+                    key_B = f"base_model.model.{n}.lora_B.weight"
+                    if key_A in weights and key_B in weights:
+                        adapter_weights[n] = {
+                            "A": weights[key_A].T.contiguous().to(torch.float32).pin_memory(),
+                            "B": weights[key_B].T.contiguous().to(torch.float32).pin_memory()
+                        }
+            if adapter_weights:
+                self.cpu_cache[adapter_id] = adapter_weights
+        except Exception as e:
+            print(f"❌ [Engine] Failed to load {adapter_id} from disk: {e}")
+            raise e
 
     def _evict_slot(self, slot_id: int):
         if slot_id in self.gpu_slots:
@@ -253,7 +302,9 @@ class MultiLoRAEngine:
 
     @torch.no_grad()
     def _load_adapter_to_slot(self, adapter_id: str, slot_id: int):
-        if adapter_id not in self.cpu_cache: raise KeyError(f"Adapter {adapter_id} not in CPU cache.")
+        # [CPU LRU Hook] Ensure data is in CPU before copying to GPU
+        self._ensure_cpu_loaded(adapter_id)
+        
         if slot_id in self.gpu_slots and self.gpu_slots[slot_id] != adapter_id: self._evict_slot(slot_id)
 
         for n, m in self.model.named_modules():
@@ -268,7 +319,9 @@ class MultiLoRAEngine:
 
     def _ensure_adapters_resident(self, required_adapters: List[str]):
         required_set = set(required_adapters)
+        # Only consider missing if NOT in GPU slots
         missing = [aid for aid in required_adapters if aid not in self.adapter_to_slot]
+        
         if not missing:
             for aid in required_adapters: self.slot_lru.move_to_end(self.adapter_to_slot[aid], last=True)
             return
@@ -280,7 +333,9 @@ class MultiLoRAEngine:
 
     @torch.no_grad()
     def merge_adapter(self, adapter_id: str, force: bool = False):
-        if adapter_id not in self.cpu_cache: raise KeyError(f"Unknown adapter {adapter_id}")
+        # Ensure it's available (Disk -> CPU -> Merge)
+        self._ensure_cpu_loaded(adapter_id)
+        
         if not force:
             with self.lock: self.is_draining = True
             for _ in range(1000):
@@ -314,7 +369,10 @@ class MultiLoRAEngine:
                 self.current_merged_adapter = None
 
     def add_request(self, prompt: str, adapter_id: str, request_id: str, max_new_tokens: int = 128):
-        if adapter_id not in self.cpu_cache: raise KeyError(f"Adapter {adapter_id} unavailable.")
+        # [Check Metadata Only] 
+        # We only check if path exists. CPU loading is deferred to execution.
+        if adapter_id not in self.adapter_paths: raise KeyError(f"Adapter {adapter_id} unavailable (not found in paths).")
+        
         inputs = self.tokenizer(prompt, return_tensors="pt")
         with self.lock:
             self.request_queue.append({
@@ -335,13 +393,6 @@ class MultiLoRAEngine:
     # [Auto-Scale] Dynamic Batch Logic
     # ============================================================
     def _auto_tune_batch_size(self):
-        """
-        AIMD 演算法:
-        1. VRAM 過高 -> 快速乘法減少 (避免崩潰)
-        2. VRAM 安全 且 負載飽和 -> 慢速加法增加 (提升吞吐)
-           注意：因為 Control Node 會限制輸入，所以「飽和」定義為：
-           (執行中 + 等待中) >= 目前的 Max Batch Size
-        """
         if self.device.type != "cuda": return
         
         now = time.time()
@@ -351,27 +402,22 @@ class MultiLoRAEngine:
         reserved = torch.cuda.memory_reserved(self.device)
         ratio = reserved / total
         
-        # 計算當前負載 (Running + Waiting)
-        # 如果 Control Node 運作正常，Waiting 應該很小，但 Running 會頂到 Max
         current_load = len(self.running_queue) + len(self.request_queue)
         changed = False
         
-        # 1. Scale Down (Safety First)
+        # 1. Scale Down
         if ratio > self.vram_high_threshold:
             if self.max_batch_size > self.min_batch_size:
-                # 每次減少 20%
                 new_size = max(self.min_batch_size, int(self.max_batch_size * 0.8))
                 if new_size != self.max_batch_size:
                     print(f"📉 [Auto-Scale] VRAM {ratio:.1%} > {self.vram_high_threshold:.1%}. Batch {self.max_batch_size}->{new_size}")
                     self.max_batch_size = new_size
-                    torch.cuda.empty_cache() # 既然太高，主動清快取
+                    torch.cuda.empty_cache() 
                     changed = True
 
-        # 2. Scale Up (Capacity Signal)
-        # 條件：VRAM 低於安全水位 且 系統已經吃滿目前的額度 (代表外面可能還有單)
+        # 2. Scale Up
         elif ratio < self.vram_safe_threshold and current_load >= self.max_batch_size:
             if self.max_batch_size < self.limit_max_batch_size:
-                # 線性增加
                 new_size = self.max_batch_size + 8
                 print(f"📈 [Auto-Scale] Saturation detected ({current_load}/{self.max_batch_size}). VRAM {ratio:.1%} OK. Batch -> {new_size}")
                 self.max_batch_size = new_size
@@ -383,17 +429,17 @@ class MultiLoRAEngine:
     @torch.no_grad()
     def step(self) -> bool:
         with self.lock:
-            # [Auto-Scale] 1. 每次 step 前調整 Batch Size
+            # 1. 每次 step 前調整 Batch Size
             self.step_counter += 1
             if self.step_counter % 5 == 0:
                 self._auto_tune_batch_size()
             
             self.running_queue = [r for r in self.running_queue if not r["done"]]
 
-            # 2. 調度邏輯：依照新的 self.max_batch_size 放入請求
+            # 2. 調度邏輯
             if not self.is_draining:
                 if self.current_merged_adapter:
-                    # Merged Mode: 只收同一種 Adapter
+                    # Merged Mode
                     while len(self.running_queue) < self.max_batch_size and self.request_queue:
                         cand_idx = -1
                         for i, req in enumerate(self.request_queue):
@@ -403,11 +449,10 @@ class MultiLoRAEngine:
                         if cand_idx != -1: self.running_queue.append(self.request_queue.pop(cand_idx))
                         else: break
                 else:
-                    # Mixed Mode: 依照 Slot 限制放入
+                    # Mixed Mode
                     while len(self.running_queue) < self.max_batch_size and self.request_queue:
                         req = self.request_queue[0]
                         current_aids = {r["adapter_id"] for r in self.running_queue}
-                        # 若該請求的 Adapter 還沒載入，且 Slot 已滿，就不能進
                         if req["adapter_id"] not in current_aids and len(current_aids) >= self.adapter_slots:
                             break 
                         self.running_queue.append(self.request_queue.pop(0))
@@ -419,16 +464,16 @@ class MultiLoRAEngine:
                 LoRAContext.set_mapping(None)
             else:
                 required = sorted(list({r["adapter_id"] for r in self.running_queue}))
+                # [CPU LRU Logic happens inside here]
                 self._ensure_adapters_resident(required)
 
-            # 4. 執行模型與 OOM 防護
+            # 4. 執行模型
             try:
-                # 優先處理 Prefill
+                # Prefill Phase
                 prefill_reqs = [r for r in self.running_queue if r["past_key_values"] is None]
                 decode_reqs = [r for r in self.running_queue if r["past_key_values"] is not None]
 
                 if prefill_reqs:
-                    # --- Prefill Phase ---
                     target_group = prefill_reqs
                     
                     if not self.current_merged_adapter:
@@ -448,7 +493,6 @@ class MultiLoRAEngine:
                     out = self.model(input_ids=padded_input, attention_mask=attention_mask, use_cache=True)
 
                 elif decode_reqs:
-                    # --- Decode Phase ---
                     target_group = decode_reqs
                     
                     if not self.current_merged_adapter:
@@ -467,38 +511,27 @@ class MultiLoRAEngine:
                 else:
                     return False
                 
-                # 處理輸出
                 self._process_outputs(out, target_group)
                 LoRAContext.set_mapping(None)
                 return True
 
             except RuntimeError as e:
-                # [Auto-Scale] 嚴重錯誤處理：OOM Rescue
+                # [Auto-Scale] OOM Rescue
                 if "out of memory" in str(e).lower():
                     print(f"🚨 [OOM RESCUE] Out of memory! Reducing batch size and retrying.")
-                    
-                    # 1. 強制砍半 Batch Size
                     self.max_batch_size = max(1, self.max_batch_size // 2)
                     
-                    # 2. 將超量的請求踢回 Request Queue (優先處理)
                     cutoff = self.max_batch_size
                     if len(self.running_queue) > cutoff:
                         excess_reqs = self.running_queue[cutoff:]
                         self.running_queue = self.running_queue[:cutoff]
-                        
-                        # 逆序放回最前面
                         for r in reversed(excess_reqs):
                             self.request_queue.insert(0, r)
-                        print(f"   -> Evicted {len(excess_reqs)} requests back to queue.")
 
-                    # 3. 清理快取
                     LoRAContext.set_mapping(None)
                     torch.cuda.empty_cache()
-                    
-                    # 4. 回傳 False，讓下一次 Loop 用新的狀態重試
                     return False
                 else:
-                    # 其他錯誤照常拋出
                     raise e
 
     def _process_outputs(self, model_out, reqs):
@@ -515,7 +548,6 @@ class MultiLoRAEngine:
             current_len = req["seq_len"] + len(req["tokens_gen"])
             req["past_key_values"] = _slice_past_for_sample(new_past_legacy, i, current_len)
             
-            # if token_id == self.tokenizer.eos_token_id or len(req["tokens_gen"]) >= req["max_new_tokens"]:
             if len(req["tokens_gen"]) >= req["max_new_tokens"]:
                 req["done"] = True
                 if self.on_finish: self.on_finish(req["request_id"], "finished")

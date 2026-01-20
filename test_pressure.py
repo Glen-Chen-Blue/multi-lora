@@ -19,7 +19,6 @@ TARGET_ADAPTER = "1"
 
 TOTAL_REQUESTS = 100
 AVG_RPS = 15.0 
-MAX_NEW_TOKENS = 128
 
 PROMPTS = ["test"]
 
@@ -33,7 +32,7 @@ GREY = "\033[90m"
 stats = {"sent": 0, "finished": 0, "errors": 0}
 ttft_records = [] 
 
-# [新增] 資源監控統計
+# 資源監控統計
 resource_stats = {
     "node_seconds": 0.0,      # 累積的 (節點 * 秒數)
     "max_nodes": 0,           # 曾達到的最大節點數
@@ -49,7 +48,7 @@ def format_alpaca_prompt(user_prompt):
 
 async def monitor_cluster_usage(client: httpx.AsyncClient):
     """
-    [新增] 背景任務：每秒查詢一次 Control Node，計算資源消耗積分
+    背景任務：每秒查詢一次 Control Node，計算資源消耗積分
     """
     print(f"{YELLOW}[Monitor] Started tracking cluster resource usage...{RESET}")
     while is_test_running:
@@ -61,7 +60,6 @@ async def monitor_cluster_usage(client: httpx.AsyncClient):
                 active_nodes = data.get("active_nodes", 0)
                 
                 # 積分計算：假設這 1 秒內節點數維持不變 (Riemann Sum)
-                # 這裡簡單使用採樣間隔作為權重
                 resource_stats["node_seconds"] += active_nodes * 1.0 
                 
                 # 更新最大值
@@ -92,10 +90,13 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
     raw_prompt = random.choice(PROMPTS)
     formatted_prompt = format_alpaca_prompt(raw_prompt)
     
+    # 隨機產生 Token 數量 (64 ~ 128)
+    current_max_tokens = random.randint(64, 128)
+    
     payload = {
         "prompt": formatted_prompt, 
         "adapter_id": adapter,
-        "max_new_tokens": MAX_NEW_TOKENS
+        "max_new_tokens": current_max_tokens
     }
     
     start_ts = time.time()
@@ -110,7 +111,8 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
         
         stats["sent"] += 1
         short_prompt = (raw_prompt[:30] + '..') if len(raw_prompt) > 30 else raw_prompt
-        print(f"{CYAN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq}/{TOTAL_REQUESTS} SENT -> {adapter} (ID: {request_id[:8]}...) Q: {short_prompt}{RESET}")
+        # 印出 Log 時也可以加上 Token 數量資訊
+        print(f"{CYAN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq}/{TOTAL_REQUESTS} SENT -> {adapter} (T:{current_max_tokens}) (ID: {request_id[:8]}...) Q: {short_prompt}{RESET}")
 
         async with client.stream("GET", f"{CONTROL_URL}/stream/{request_id}", timeout=120.0) as response:
             async for line in response.aiter_lines():
@@ -140,9 +142,12 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
         ttft_records.append(final_ttft)
 
         answer = "".join(full_response_text).strip()
-        print(f"{GREEN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq} DONE <- {adapter} (Time: {elapsed:.2f}s, TTFT: {final_ttft:.2f}s){RESET}")
-        clean_answer = answer.replace("\n", " ")
-        # print(f"{GREY}{clean_answer}{RESET}")
+        # [Modified] 計算接收到的 token 數量 (chunks)
+        token_count = len(full_response_text)
+        
+        # [Modified] 在輸出中加入 Tokens: {token_count}
+        print(f"{GREEN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq} DONE <- {adapter} (Time: {elapsed:.2f}s, TTFT: {final_ttft:.2f}s, Tokens: {token_count}){RESET}")
+        
         if answer == "responseRequest aborted by system merge.":
             sys.exit(1)
 
@@ -167,7 +172,7 @@ async def main():
             print(f"{RED}Cannot connect to Control Node: {e}{RESET}")
             return
 
-        # [新增] 啟動資源監控
+        # 啟動資源監控
         monitor_task = asyncio.create_task(monitor_cluster_usage(client))
 
         try:
@@ -191,7 +196,7 @@ async def main():
             print("\nStopping...")
             for t in background_tasks: t.cancel()
         finally:
-            # [新增] 停止資源監控
+            # 停止資源監控
             is_test_running = False
             await monitor_task
             total_duration = time.time() - start_time
@@ -210,7 +215,7 @@ async def main():
         print(f"Average TTFT : {avg_ttft:.4f} s")
         print(f"P95 TTFT     : {p95_ttft:.4f} s")
         
-        # [新增] 資源消耗報告
+        # 資源消耗報告
         node_seconds = resource_stats['node_seconds']
         avg_nodes = node_seconds / total_duration if total_duration > 0 else 0
         

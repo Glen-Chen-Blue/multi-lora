@@ -35,8 +35,10 @@ MODEL_ID = os.environ.get("MODEL_ID", "unsloth/Meta-Llama-3.1-8B")
 LORA_PATH = os.environ.get("LORA_PATH", "./lora_repo/compute")
 CONTROL_NODE_URL = os.environ.get("CONTROL_NODE_URL", "http://localhost:9000")
 
-# [Auto-Scale] 設定硬上限，預設 32。動態調整會在此範圍內運作。
+# [Auto-Scale] 設定硬上限
 MAX_BATCH_SIZE_LIMIT = int(os.environ.get("MAX_BATCH_SIZE", "32"))
+# [CPU Cache] 設定 CPU LoRA 上限
+MAX_CPU_LORAS = int(os.environ.get("MAX_CPU_LORAS", "10"))
 
 engine: Optional[MultiLoRAEngine] = None
 engine_wakeup = threading.Event()
@@ -51,7 +53,7 @@ stream_lock = threading.Lock()
 last_config_version: int = -1
 config_lock = threading.Lock()
 
-client = httpx.AsyncClient(timeout=120.0) # Long timeout for download
+client = httpx.AsyncClient(timeout=120.0)
 
 # ============================================================
 # Callbacks
@@ -105,16 +107,20 @@ def engine_loop_thread():
 async def lifespan(app: FastAPI):
     global engine
     os.makedirs(LORA_PATH, exist_ok=True)
-    logger.info(f"Initializing Compute Node {NODE_ID}...")
+    logger.info(f"Initializing Compute Node {NODE_ID} (Max CPU LoRAs: {MAX_CPU_LORAS})...")
     
     engine = MultiLoRAEngine(
         model_id=MODEL_ID,
         adapter_slots=8,
-        max_batch_size=MAX_BATCH_SIZE_LIMIT, # 傳入硬上限
+        max_batch_size=MAX_BATCH_SIZE_LIMIT,
+        max_cpu_loras=MAX_CPU_LORAS, # 傳入 CPU 上限
         enable_monitor=True
     )
     engine.on_token = on_token
     engine.on_finish = on_finish
+    
+    # 這裡我們只掃描路徑，不載入權重 (Lazy Loading)
+    engine.scan_adapters(LORA_PATH)
     
     t = threading.Thread(target=engine_loop_thread, daemon=True)
     t.start()
@@ -150,10 +156,6 @@ class SyncAdaptersRequest(BaseModel):
 # Download Logic
 # ============================================================
 async def download_missing_adapters(adapters: List[str]):
-    """
-    Check LORA_PATH for missing adapters.
-    If missing, download from Control Node.
-    """
     for aid in adapters:
         target_dir = os.path.join(LORA_PATH, aid)
         target_file = os.path.join(target_dir, "adapter_model.safetensors")
@@ -193,9 +195,12 @@ def metrics():
         "lora_state": {
             "merged_adapter": engine.current_merged_adapter,
             "running_adapters": list({str(r["adapter_id"]) for r in engine.running_queue}),
-            "loaded_adapters": list(engine.cpu_cache.keys())
+            "loaded_adapters": list(engine.cpu_cache.keys()) # 現在只會顯示在 CPU Cache 中的
         },
-        "capacity": {"max_batch_size": engine.max_batch_size},
+        "capacity": {
+            "max_batch_size": engine.max_batch_size,
+            "max_cpu_loras": engine.max_cpu_loras
+        },
         "idle": engine.is_idle(),
         "draining": engine.is_draining,
         "config_version": last_config_version
@@ -216,11 +221,12 @@ async def sync_adapters(req: SyncAdaptersRequest):
         last_config_version = req.version_id
 
     try:
-        # [NEW] Download step
+        # Download missing files
         await download_missing_adapters(req.adapters)
         
-        # Then load from local disk
-        engine.load_adapters_to_cpu(LORA_PATH, allowed_adapters=req.adapters)
+        # Rescan local paths to acknowledge new files
+        engine.scan_adapters(LORA_PATH, allowed_adapters=req.adapters)
+        
         return {
             "status": "ok", 
             "version_applied": req.version_id,
@@ -240,15 +246,15 @@ def add_request(req: AddRequest):
         decoding_state[rid] = 0
     
     try:
-        # Note: If adapter is not loaded, this will fail. 
-        # Ideally, Control Node ensures sync_adapters is called before dispatching.
+        # 這裡會檢查 adapter 是否在掃描到的路徑清單中，若不在會噴錯
+        # 實際載入權重會延遲到 step() 執行時
         engine.add_request(req.prompt, req.adapter_id, rid, req.max_new_tokens)
         engine_wakeup.set()
     except KeyError as e:
         with stream_lock:
             stream_queues.pop(rid, None)
             decoding_state.pop(rid, None)
-        raise HTTPException(400, f"Adapter {req.adapter_id} not available: {e}")
+        raise HTTPException(400, f"Adapter {req.adapter_id} unavailable (not found in paths): {e}")
 
     def event_generator():
         try:
