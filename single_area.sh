@@ -5,10 +5,14 @@ set -e
 PIDS=()
 
 start() {
-  echo "=== Mode 1: 1 EFO -> 1 Control -> 2 Compute (Distributed LoRA Storage, CPU LRU) ==="
+  echo "=== Mode 1: 1 EFO -> 1 Control -> 2 Compute (Virtual Mapping Enabled) ==="
 
-  # 0. 準備模擬的分散式儲存環境
+  # 0. 準備模擬的分散式儲存環境 & 生成 Mapping
   echo "📂 Checking storage directories..."
+  
+  # 生成 Mapping 檔案
+  echo "🔮 Generating lora_mapping.json..."
+  python gen_lora_map.py
   
   # 建立主目錄
   mkdir -p lora_repo
@@ -39,13 +43,13 @@ start() {
 
   # 1. 啟動 EFO Server (Port 9080)
   echo "Starting EFO Server..."
+  # EFO 負責讀取當前目錄下的 lora_mapping.json
   LORA_PATH="./lora_repo/efo" \
   uvicorn EFO_server:app --host 0.0.0.0 --port 9080 &
   PIDS+=($!)
   sleep 2
 
   # 2. 啟動 Compute Node 1 (Port 8001)
-  # [Modified] 加入 MAX_CPU_LORAS 限制
   echo "Starting Compute Node 1..."
   CUDA_VISIBLE_DEVICES=0 \
   NODE_ID=cn-1 \
@@ -57,7 +61,6 @@ start() {
   PIDS+=($!)
 
   # 3. 啟動 Compute Node 2 (Port 8002)
-  # [Modified] 加入 MAX_CPU_LORAS 限制
   echo "Starting Compute Node 2..."
   CUDA_VISIBLE_DEVICES=1 \
   NODE_ID=cn-2 \

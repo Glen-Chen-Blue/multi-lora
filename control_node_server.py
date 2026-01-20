@@ -35,7 +35,6 @@ ALL_CANDIDATES = [x.strip() for x in os.environ.get("COMPUTE_NODES", "http://127
 
 SCALE_UP_THRESHOLD = int(os.environ.get("SCALE_UP_THRESHOLD", "4"))     
 SCALE_COOLDOWN_SEC = float(os.environ.get("SCALE_COOLDOWN_SEC", "5.0"))
-QMIN_MULT = int(os.environ.get("QMIN_MULT", "4"))
 MIN_NODES = 1
 
 # ============================================================
@@ -58,6 +57,7 @@ class NodeManager:
         self.merged_assignment: Dict[str, str] = {} 
         
         self.config_version: int = 0
+        self.cluster_loaded_adapters: Set[str] = set()
 
     def update_metrics(self, url: str, metrics: Dict):
         with self.lock:
@@ -71,6 +71,16 @@ class NodeManager:
                 }
             self.nodes[url]["metrics"] = metrics
             self.nodes[url]["last_seen"] = time.time()
+            self._rebuild_cluster_cache()
+
+    def _rebuild_cluster_cache(self):
+        new_set = set()
+        for url in self.active_urls:
+            info = self.nodes.get(url)
+            if info and "metrics" in info:
+                loaded = info["metrics"].get("lora_state", {}).get("loaded_adapters", [])
+                new_set.update(loaded)
+        self.cluster_loaded_adapters = new_set
 
     def set_mode(self, url: str, mode: str, target: Optional[str] = None):
         with self.lock:
@@ -87,7 +97,7 @@ class NodeManager:
         with self.lock:
             for url in self.active_urls:
                 info = self.nodes.get(url)
-                if info and info.get("metrics") and (now - info["last_seen"] < 2.0):
+                if info and info.get("metrics") and (now - info["last_seen"] < 5.0):
                     res.append(url)
         return res
 
@@ -129,32 +139,21 @@ adapter_queues: Dict[str, Deque] = defaultdict(deque)
 stream_queues: Dict[str, Tuple[Queue, float]] = {} 
 scheduler_wakeup = threading.Event()
 client = httpx.AsyncClient(timeout=60.0) 
-
-# File download lock
 download_lock = asyncio.Lock()
-active_downloads: Set[str] = set()
 
 # ============================================================
 # Background Tasks
 # ============================================================
 async def sync_adapter_config(target_url: str, adapters: List[str], version_id: int) -> bool:
-    payload = {
-        "adapters": adapters, 
-        "version_id": version_id
-    }
-    for i in range(60):
+    payload = {"adapters": adapters, "version_id": version_id}
+    for i in range(10):
         try:
-            resp = await client.post(f"{target_url}/sync_adapters", json=payload, timeout=60.0)
+            resp = await client.post(f"{target_url}/sync_adapters", json=payload, timeout=30.0)
             if resp.status_code == 200:
                 logger.info(f"✅ Synced adapters (v{version_id}) to {target_url}")
                 return True
-        except Exception as e:
-            if i % 10 == 0 and i > 0:
-                logger.debug(f"Waiting for {target_url}... ({i}/60) - {e}")
-            pass
+        except Exception: pass
         await asyncio.sleep(2)
-        
-    logger.error(f"❌ Failed to sync adapters to {target_url} after multiple attempts.")
     return False
 
 def trigger_sync_all(version_id: int):
@@ -166,15 +165,11 @@ def trigger_sync_all(version_id: int):
 
 async def activate_node_task(node_url: str, adapters: List[str], version_id: int):
     logger.info(f"⏳ Provisioning {node_url} (Syncing config v{version_id})...")
-    success = await sync_adapter_config(node_url, adapters, version_id)
-    if success:
-        with node_mgr.lock:
-            node_mgr.active_urls.append(node_url)
-        logger.info(f"🚀 Node {node_url} is now ACTIVE and ready to serve.")
+    if await sync_adapter_config(node_url, adapters, version_id):
+        with node_mgr.lock: node_mgr.active_urls.append(node_url)
+        logger.info(f"🚀 Node {node_url} is now ACTIVE.")
     else:
-        logger.warning(f"⚠️ Provisioning failed for {node_url}. Returning to Standby.")
-        with node_mgr.lock:
-            node_mgr.standby_urls.append(node_url)
+        with node_mgr.lock: node_mgr.standby_urls.append(node_url)
 
 # ============================================================
 # Scaling & Scheduler Logic
@@ -188,8 +183,8 @@ def auto_scaler():
 
     with node_mgr.lock:
         q_total = sum(len(q) for q in adapter_queues.values())
-        n_active = len(node_mgr.active_urls)
         n_standby = len(node_mgr.standby_urls)
+        n_active = len(node_mgr.active_urls)
         
         total_capacity = 0
         for url in node_mgr.active_urls:
@@ -202,12 +197,8 @@ def auto_scaler():
         if n_standby > 0 and q_total > threshold:
             new_node = node_mgr.standby_urls.pop(0)
             last_scale_ts = now
-            logger.info(f"🚀 Scale UP initiated (Q: {q_total} > 50% of Cap {total_capacity}): {new_node}")
-            asyncio.create_task(activate_node_task(
-                new_node, 
-                list(node_mgr.allowed_adapters), 
-                node_mgr.config_version
-            ))
+            logger.info(f"🚀 Scale UP: {new_node} (Q:{q_total} > {threshold})")
+            asyncio.create_task(activate_node_task(new_node, list(node_mgr.allowed_adapters), node_mgr.config_version))
             return
 
         if n_active > MIN_NODES and q_total == 0:
@@ -232,14 +223,47 @@ def check_merges():
         counts = {a: len(q) for a, q in adapter_queues.items() if len(q) > 0}
     
     total_q = sum(counts.values())
-    if total_q >= (QMIN_MULT * len(healthy)):
+    
+    # ------------------------------------------------------------
+    # [Revised Logic] Merge Trigger Condition
+    # 1. Total Queue > 50% of Cluster Capacity (維持)
+    # 2. Cluster Average Utilization > 80% (放寬單點限制，改看整體)
+    # ------------------------------------------------------------
+    total_cluster_capacity = 0
+    total_running_load = 0
+    
+    with node_mgr.lock:
+        for url in healthy:
+            info = node_mgr.nodes.get(url)
+            if not info or not info.get("metrics"): continue
+            
+            m = info["metrics"]
+            cap = m["capacity"]["max_batch_size"]
+            load = m["load"]["running_batch"]
+            
+            total_cluster_capacity += cap
+            total_running_load += load
+    
+    should_merge = False
+    if total_cluster_capacity > 0:
+        avg_utilization = total_running_load / total_cluster_capacity
+        
+        # 條件：排隊數夠多，且叢集整體已經很忙 (超過 80%)
+        if (total_q > total_cluster_capacity * 0.5) and (avg_utilization > 0.8):
+            should_merge = True
+    
+    if should_merge:
+        # Hotspot Identification
         best_adapter, max_q = None, -1
         with node_mgr.lock:
             for a, c in counts.items():
                 if a not in node_mgr.merged_assignment and c > max_q:
                     best_adapter, max_q = a, c
         
-        if best_adapter and max_q > (total_q / len(healthy)):
+        # 仍然保持「顯著性」檢查：該 Adapter 的 Queue 必須夠長 (大於平均負載)
+        avg_load = total_q / len(healthy)
+        
+        if best_adapter and max_q > avg_load:
             target_node = None
             best_score = -9999
             with node_mgr.lock:
@@ -247,22 +271,30 @@ def check_merges():
                     info = node_mgr.nodes.get(url)
                     if info["mode"] != "NORMAL": continue
                     m = info["metrics"]
+                    
+                    # Score: 優先找已載入的
                     has_it = 1 if best_adapter in m["lora_state"]["running_adapters"] else 0
                     load = m["load"]["running_batch"]
-                    score = (has_it * 100) - load
+                    
+                    # 計算剩餘空間分數，越空分數越高
+                    # 但在 Full Load 情況下，主要看 has_it
+                    score = (has_it * 1000) - load
+                    
                     if score > best_score:
                         best_score = score
                         target_node = url
             
             if target_node:
-                logger.info(f"🛡️  Preparing MERGE {best_adapter} on {target_node} (Mode: PRE_MERGE)")
+                logger.info(f"🛡️  MERGE Triggered! (Cluster Util: {avg_utilization:.2f}, Q: {total_q}). Merging {best_adapter} on {target_node}")
                 node_mgr.set_mode(target_node, "PRE_MERGE", best_adapter)
 
+    # ------------------------------------------------------------
+    # Execute Merges (Phase 2: PRE_MERGE -> SWITCHING)
+    # ------------------------------------------------------------
     with node_mgr.lock:
         for url, info in list(node_mgr.nodes.items()):
             if info["mode"] == "PRE_MERGE":
-                if time.time() - info["mode_ts"] < 0.5:
-                    continue
+                if time.time() - info["mode_ts"] < 0.5: continue
 
                 target = info["target"]
                 m = info.get("metrics")
@@ -271,75 +303,35 @@ def check_merges():
                     others = [x for x in running if x != target]
                     
                     if not others:
-                        logger.info(f"⚡ PRE_MERGE clear on {url} (Running: {running}). Executing merge {target}.")
+                        logger.info(f"⚡ Executing merge {target} on {url}.")
                         node_mgr.set_mode(url, "SWITCHING", target) 
                         asyncio.create_task(do_merge_node(url, target))
 
-    to_revert_merge = []
-    to_revert_pre = [] 
-
+    # ------------------------------------------------------------
+    # Revert Logic (Phase 3: MERGED -> NORMAL)
+    # ------------------------------------------------------------
+    to_revert = []
     with node_mgr.lock:
-        for url, info in node_mgr.nodes.items():
-            if info["mode"] == "PRE_MERGE":
-                target = info["target"]
-                time_in_mode = time.time() - info["mode_ts"]
-                
-                # [Dual Policy Revert Logic]
-                
-                # 0. 基礎資料準備
-                local_empty = len(adapter_queues[target]) == 0
-                others_waiting_count = sum(len(q) for a, q in adapter_queues.items() if a != target)
-                
-                remote_idle = False
-                m = info.get("metrics")
-                if m and m["load"]["running_batch"] == 0 and m["load"]["waiting_queue"] == 0:
-                    remote_idle = True
-                
-                # Policy 1: 閒置緩衝 (Idle Buffer)
-                # 當完全沒有人排隊 (Target空 且 Others空) 時，保持 10秒 避免震盪
-                should_revert_idle = False
-                if local_empty and others_waiting_count == 0 and remote_idle and (time_in_mode > 10.0):
-                    should_revert_idle = True
-
-                # Policy 2: 資源搶佔 (Resource Contention)
-                # 當 Target 空了，但 Others 有人在排隊，快速撤銷 (例如 1秒)
-                # 給 1秒 是為了避免極短時間內的 Queue 抖動
-                should_revert_urgent = False
-                if local_empty and others_waiting_count > 0 and (time_in_mode > 1.0):
-                    should_revert_urgent = True
-                    
-                if should_revert_idle:
-                    logger.info(f"↩️  Reverting PRE_MERGE on {url} (Global Idle Timeout)")
-                    to_revert_pre.append(url)
-                elif should_revert_urgent:
-                    logger.info(f"⚡ Reverting PRE_MERGE on {url} (Urgent: Others Waiting: {others_waiting_count})")
-                    to_revert_pre.append(url)
-
         for adapter, url in node_mgr.merged_assignment.items():
             if len(adapter_queues[adapter]) == 0:
                 info = node_mgr.nodes.get(url)
                 if info and info.get("metrics"):
                     m = info["metrics"]
-                    running = m["load"]["running_batch"]
-                    limit = m["capacity"]["max_batch_size"]
-                    free_slots = limit - running
+                    is_idle = m["idle"]
+                    free_slots = m["capacity"]["max_batch_size"] - m["load"]["running_batch"]
                     others_waiting = sum(len(q) for a, q in adapter_queues.items() if a != adapter)
-
+                    
                     cooldown_passed = (time.time() - info["merged_at"] > 5)
-                    should_revert = False
                     
                     if cooldown_passed:
-                        if m["idle"]: should_revert = True
-                        elif free_slots > 2 and others_waiting > 0: should_revert = True
-                            
-                    if should_revert:
-                        to_revert_merge.append(url)
+                        # 條件1: 完全閒置
+                        if is_idle: 
+                            to_revert.append(url)
+                        # 條件2: 資源搶佔 (我很閒，別人很忙)
+                        elif free_slots > 2 and others_waiting > 0:
+                            to_revert.append(url)
     
-    for url in to_revert_pre:
-        node_mgr.set_mode(url, "NORMAL", None)
-
-    for url in to_revert_merge:
-        logger.info(f"🔓 Reverting MERGE on {url}")
+    for url in to_revert:
         asyncio.create_task(do_unmerge_node(url))
 
 async def do_merge_node(url: str, adapter_id: str):
@@ -351,8 +343,7 @@ async def do_merge_node(url: str, adapter_id: str):
                 node_mgr.set_mode(url, "MERGED", adapter_id)
                 node_mgr.nodes[url]["merged_at"] = time.time()
                 node_mgr.merged_assignment[adapter_id] = url
-    except Exception as e:
-        logger.error(f"Merge failed on {url}: {e}")
+    except Exception:
         node_mgr.set_mode(url, "NORMAL", None)
 
 async def do_unmerge_node(url: str):
@@ -363,8 +354,7 @@ async def do_unmerge_node(url: str):
                 node_mgr.set_mode(url, "NORMAL", None)
                 for k, v in list(node_mgr.merged_assignment.items()):
                     if v == url: del node_mgr.merged_assignment[k]
-    except Exception:
-        pass
+    except Exception: pass
 
 async def dispatch_request(url: str, req: Dict):
     try:
@@ -374,7 +364,7 @@ async def dispatch_request(url: str, req: Dict):
             "max_new_tokens": req["max_new_tokens"]
         }, timeout=None) as r:
             if r.status_code != 200:
-                _push_stream(req["rid"], json.dumps({"type": "error", "message": f"Compute Node Error: {r.status_code}"}))
+                _push_stream(req["rid"], json.dumps({"type": "error", "message": f"Node Error: {r.status_code}"}))
                 return
 
             async for line in r.aiter_lines():
@@ -383,7 +373,7 @@ async def dispatch_request(url: str, req: Dict):
                     if content and content != "[DONE]":
                         _push_stream(req["rid"], content)
     except Exception as e:
-        logger.error(f"Dispatch to {url} failed: {e}")
+        logger.error(f"Dispatch error: {e}")
         _push_stream(req["rid"], json.dumps({"type": "error", "message": str(e)}))
     finally:
         _finish_stream(req["rid"])
@@ -411,6 +401,7 @@ async def scheduler_loop():
             continue
 
         did_work = False
+        
         with node_mgr.lock:
             pending_adapters = [a for a, q in adapter_queues.items() if len(q) > 0]
             merged_map = node_mgr.merged_assignment.copy()
@@ -439,7 +430,8 @@ async def scheduler_loop():
                             merged_id = info["metrics"]["lora_state"]["merged_adapter"]
                             if merged_id and merged_id != final_id:
                                 substitutes = node_mgr.affinity_table.get(final_id, [])
-                                if merged_id in substitutes: final_id = merged_id
+                                if merged_id in substitutes: 
+                                    final_id = merged_id
                     
                     req_to_send = req.copy()
                     req_to_send["adapter_id"] = final_id
@@ -481,44 +473,23 @@ async def reaper_task():
         for rid in to_del: del stream_queues[rid]
         await asyncio.sleep(10)
 
-# ============================================================
-# Fetch & Store Logic (New)
-# ============================================================
 async def ensure_local_adapter(adapter_id: str):
-    """
-    Checks if adapter exists in local LORA_PATH.
-    If not, downloads from EFO.
-    Uses a lock to prevent concurrent downloads of the same file.
-    """
     target_dir = os.path.join(LORA_PATH, adapter_id)
     target_file = os.path.join(target_dir, "adapter_model.safetensors")
-    
-    if os.path.exists(target_file):
-        return
-
+    if os.path.exists(target_file): return
     async with download_lock:
-        if os.path.exists(target_file):
-            return
-            
-        logger.info(f"📥 ControlNode: Downloading adapter {adapter_id} from EFO...")
+        if os.path.exists(target_file): return
         os.makedirs(target_dir, exist_ok=True)
-        
         try:
             async with client.stream("GET", f"{EFO_URL}/fetch_adapter/{adapter_id}") as resp:
-                if resp.status_code != 200:
-                    logger.error(f"Failed to fetch from EFO: {resp.status_code}")
-                    return
-                
-                with open(target_file, "wb") as f:
-                    async for chunk in resp.aiter_bytes():
-                        f.write(chunk)
-            logger.info(f"✅ Download complete: {adapter_id}")
-        except Exception as e:
-            logger.error(f"Download failed: {e}")
+                if resp.status_code == 200:
+                    with open(target_file, "wb") as f:
+                        async for chunk in resp.aiter_bytes(): f.write(chunk)
+        except Exception: 
             if os.path.exists(target_file): os.remove(target_file)
 
 # ============================================================
-# API & App
+# API
 # ============================================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -547,68 +518,81 @@ class ConfigUpdate(BaseModel):
 @app.post("/update_config")
 async def update_config(cfg: ConfigUpdate):
     with node_mgr.lock:
-        if cfg.version_id < node_mgr.config_version:
-            logger.warning(f"⚠️ Ignoring obsolete config v{cfg.version_id} (Current: v{node_mgr.config_version})")
-            return {"status": "ignored", "reason": "obsolete_version"}
-        
+        if cfg.version_id < node_mgr.config_version: return {"status": "ignored"}
         node_mgr.config_version = cfg.version_id
         node_mgr.allowed_adapters = cfg.assigned_adapters
         node_mgr.affinity_table = cfg.affinity_table
         node_mgr.minimal_set = cfg.minimal_set
     
-    logger.info(f"📥 Config updated to v{cfg.version_id}. Allowed: {len(cfg.assigned_adapters)}")
-    
     tasks = [ensure_local_adapter(aid) for aid in cfg.assigned_adapters]
-    if tasks:
-        asyncio.create_task(asyncio.wait(tasks))
-        
+    if tasks: asyncio.create_task(asyncio.wait(tasks))
     trigger_sync_all(cfg.version_id)
     return {"status": "ok"}
+
+async def _proxy_efo(rid, req: AddRequest):
+    try:
+        logger.info(f"🛰️ Offloading Request {rid} (Adapter {req.adapter_id}) to EFO")
+        async with client.stream("POST", f"{EFO_URL}/relay_request", json=req.dict()) as r:
+            if r.status_code != 200:
+                _push_stream(rid, json.dumps({"type": "error", "message": f"EFO Error: {r.status_code}"}))
+                return
+            async for line in r.aiter_lines():
+                if line.startswith("data:"):
+                    content = line[len("data:"):].rstrip("\n")
+                    if content: _push_stream(rid, content)
+    except Exception as e:
+        _push_stream(rid, json.dumps({"type": "error", "message": f"Offload failed: {e}"}))
+    finally:
+        _finish_stream(rid)
 
 @app.post("/send_request")
 async def send_request(req: AddRequest):
     rid = str(uuid.uuid4())
     stream_queues[rid] = (Queue(), time.time())
     
-    is_local = False
     final_id = req.adapter_id
+    is_allowed = False
     
     with node_mgr.lock:
-        if not node_mgr.allowed_adapters or req.adapter_id in node_mgr.allowed_adapters: is_local = True
-        if not is_local:
-            subs = node_mgr.affinity_table.get(req.adapter_id, [])
-            for s in subs:
-                if s in node_mgr.allowed_adapters:
-                    is_local = True; final_id = s; break
-            if not is_local:
-                for url in node_mgr.active_urls:
-                    info = node_mgr.nodes.get(url)
-                    if info and info.get("metrics"):
-                        m = info["metrics"]["lora_state"]["merged_adapter"]
-                        if m and m in subs: is_local = True; break
+        if req.adapter_id in node_mgr.allowed_adapters:
+            is_allowed = True
+            final_id = req.adapter_id
+        else:
+            substitutes = node_mgr.affinity_table.get(req.adapter_id, [])
+            valid_subs = [s for s in substitutes if s in node_mgr.allowed_adapters]
+            if valid_subs:
+                is_allowed = True
+                final_id = valid_subs[0]
     
-    if is_local:
-        with node_mgr.lock:
-            adapter_queues[final_id].append({
-                "rid": rid, "prompt": req.prompt, "adapter_id": final_id, "max_new_tokens": req.max_new_tokens
-            })
-        scheduler_wakeup.set()
-    else:
+    if not is_allowed:
         asyncio.create_task(_proxy_efo(rid, req))
+        return {"request_id": rid}
 
+    selected_id = final_id
+    with node_mgr.lock:
+        candidates = set([final_id] + node_mgr.affinity_table.get(final_id, []))
+        valid_candidates = list(candidates.intersection(node_mgr.allowed_adapters))
+        loaded_in_cluster = node_mgr.cluster_loaded_adapters
+        available_loaded = list(set(valid_candidates).intersection(loaded_in_cluster))
+        
+        if not available_loaded:
+            selected_id = final_id
+        else:
+            best_cand = None
+            max_q_len = -1
+            for cand in available_loaded:
+                q_len = len(adapter_queues[cand])
+                if q_len > max_q_len:
+                    max_q_len = q_len
+                    best_cand = cand
+            if best_cand: selected_id = best_cand
+
+        adapter_queues[selected_id].append({
+            "rid": rid, "prompt": req.prompt, "adapter_id": selected_id, "max_new_tokens": req.max_new_tokens
+        })
+        
+    scheduler_wakeup.set()
     return {"request_id": rid}
-
-async def _proxy_efo(rid, req):
-    try:
-        async with client.stream("POST", f"{EFO_URL}/relay_request", json=req.dict()) as r:
-            async for line in r.aiter_lines():
-                if line.startswith("data:"):
-                    content = line[len("data:"):].rstrip("\n")
-                    if content: _push_stream(rid, content)
-    except Exception as e:
-        _push_stream(rid, json.dumps({"type": "error", "message": str(e)}))
-    finally:
-        _finish_stream(rid)
 
 @app.get("/stream/{request_id}")
 async def stream(request_id: str, request: Request):
@@ -635,30 +619,15 @@ def status():
             "node_type": "CONTROL_NODE",
             "active_nodes": len(node_mgr.active_urls),
             "queues": {k: len(v) for k, v in adapter_queues.items()},
-            "merged_map": node_mgr.merged_assignment,
-            "nodes": node_mgr.nodes,
-            "config_version": node_mgr.config_version
+            "merged_map": node_mgr.merged_assignment
         }
 
-# ============================================================
-# File Serving API (For Compute Nodes)
-# ============================================================
 @app.get("/fetch_adapter/{adapter_id}")
 async def fetch_adapter_for_compute(adapter_id: str):
-    """
-    Compute Nodes call this to download the adapter model.
-    Control Node acts as a transparent cache proxy.
-    """
-    # 1. Ensure we have it locally
     await ensure_local_adapter(adapter_id)
-    
-    target_dir = os.path.join(LORA_PATH, adapter_id)
-    target_file = os.path.join(target_dir, "adapter_model.safetensors")
-    
+    target_file = os.path.join(LORA_PATH, adapter_id, "adapter_model.safetensors")
     if os.path.exists(target_file):
-        logger.info(f"Serving adapter {adapter_id} to Compute Node")
         return FileResponse(target_file, media_type="application/octet-stream", filename="adapter_model.safetensors")
-    
     raise HTTPException(404, "Adapter could not be fetched.")
 
 if __name__ == "__main__":

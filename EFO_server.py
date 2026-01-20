@@ -19,6 +19,7 @@ logger = logging.getLogger("EFO")
 
 LORA_PATH = os.environ.get("LORA_PATH", "./testLoRA")
 AFFINITY_FILE = "lora_affinity.json"
+MAPPING_FILE = "lora_mapping.json"
 
 # ============================================================
 # Global State
@@ -28,71 +29,91 @@ class GlobalState:
         self.all_loras: List[str] = []
         self.affinity_table: Dict[str, List[str]] = {}
         self.minimal_set: List[str] = []
+        self.lora_map_data: Dict[str, Dict] = {} 
         
-        self.registered_nodes: Dict[str, float] = {} # url -> last_heartbeat
-        self.node_assignments: Dict[str, List[str]] = {} # node -> allowed_adapters
-        self.lora_routing: Dict[str, str] = {} # adapter -> target_node
+        self.registered_nodes: Dict[str, float] = {} 
+        self.node_assignments: Dict[str, List[str]] = {} 
+        self.lora_routing: Dict[str, str] = {} 
         
-        # [NEW] Config Versioning
         self.config_version: int = 0
 
 state = GlobalState()
 client = httpx.AsyncClient(timeout=10.0)
 
 # ============================================================
-# Affinity Logic
+# Affinity & Mapping Logic
 # ============================================================
-def scan_loras():
+def load_mapping_and_affinity():
+    if os.path.exists(MAPPING_FILE):
+        try:
+            with open(MAPPING_FILE, "r") as f:
+                data = json.load(f)
+                state.lora_map_data = data.get("lora_map", {})
+            
+            state.all_loras = sorted(list(state.lora_map_data.keys()), key=lambda x: int(x) if x.isdigit() else x)
+            
+            table = {}
+            for aid, info in state.lora_map_data.items():
+                subs = info.get("substitutes", [])
+                valid_subs = [s for s in subs if s in state.lora_map_data]
+                table[aid] = list(set([aid] + valid_subs))
+            
+            state.affinity_table = table
+            calculate_minimal_set(state.all_loras, state.affinity_table)
+            logger.info(f"✅ Loaded Mapping. Virtual Adapters: {len(state.all_loras)}")
+            return
+        except Exception as e:
+            logger.error(f"❌ Failed to load {MAPPING_FILE}: {e}")
+
+    logger.warning("⚠️ No mapping file found. Falling back to physical directory scan.")
+    scan_physical_loras()
+
+def scan_physical_loras():
     if not os.path.exists(LORA_PATH): 
         os.makedirs(LORA_PATH, exist_ok=True)
-        return []
+        return
+
     try:
         dirs = [d for d in os.listdir(LORA_PATH) if os.path.isdir(os.path.join(LORA_PATH, d))]
-        return sorted([d.split("_")[-1] if "_" in d else d for d in dirs])
-    except Exception:
-        return []
-
-def update_affinity():
-    loras = scan_loras()
-    if not loras: return
-    
-    state.all_loras = loras
-    
-    # 模擬生成 Affinity Table
-    table = {}
-    for aid in loras:
-        subs = [aid]
-        others = [x for x in loras if x != aid]
-        if others and random.random() > 0.7:
-            subs.append(random.choice(others))
-        table[aid] = list(set(subs))
-    
-    state.affinity_table = table
-    with open(AFFINITY_FILE, "w") as f:
-        json.dump(table, f, indent=4)
+        loras = sorted([d.split("_")[-1] if "_" in d else d for d in dirs])
+        state.all_loras = loras
         
-    # 計算最小覆蓋集
-    universe = set(loras)
+        table = {}
+        for aid in loras:
+            table[aid] = [aid]
+        
+        state.affinity_table = table
+        calculate_minimal_set(loras, table)
+    except Exception as e:
+        logger.error(f"Scan failed: {e}")
+
+def calculate_minimal_set(universe_list, table):
+    universe = set(universe_list)
     covered = set()
     selected = []
     
     while covered != universe:
         best_cand = None
         best_cover_diff = set()
+        candidates = universe_list
         
-        for cand in loras:
-            can_cover = {target for target, subs in table.items() if cand in subs}
-            diff = can_cover - covered
+        for cand in candidates:
+            can_serve = {target for target, subs in table.items() if cand in subs}
+            diff = can_serve - covered
             if len(diff) > len(best_cover_diff):
                 best_cand = cand
                 best_cover_diff = diff
         
-        if not best_cand: break
+        if not best_cand: 
+            remaining = universe - covered
+            selected.extend(list(remaining))
+            break
+            
         selected.append(best_cand)
         covered.update(best_cover_diff)
             
     state.minimal_set = selected
-    logger.info(f"Updated logic. Adapters: {len(loras)}, Minimal Set: {selected}")
+    logger.info(f"Updated Minimal Set: {len(selected)} items")
 
 # ============================================================
 # Rebalance & Broadcast
@@ -108,7 +129,6 @@ async def broadcast_config():
     for node, allowed in state.node_assignments.items():
         payload = payload_base.copy()
         payload["assigned_adapters"] = allowed
-        logger.info(f"Pushing config v{state.config_version} to {node} (Adapters: {len(allowed)})")
         tasks.append(client.post(f"{node}/update_config", json=payload))
     
     if tasks:
@@ -119,7 +139,6 @@ def rebalance_assignments():
     if not nodes: return
 
     state.config_version = int(time.time() * 1000)
-
     new_node_map = {n: [] for n in nodes}
     new_routing = {}
     
@@ -133,10 +152,11 @@ def rebalance_assignments():
                 if aid not in new_routing:
                     new_routing[aid] = target
     
-    # 2. Fallback
+    # 2. Assign others (ensure everything is routed)
     for aid in state.all_loras:
         if aid not in new_routing:
-            new_routing[aid] = nodes[0]
+            target = nodes[0]
+            new_routing[aid] = target
             
     state.node_assignments = new_node_map
     state.lora_routing = new_routing
@@ -151,9 +171,7 @@ async def monitor_nodes():
         await asyncio.sleep(10)
         now = time.time()
         dead = [url for url, ts in state.registered_nodes.items() if now - ts > 30]
-        
         if dead:
-            logger.warning(f"Removing dead nodes: {dead}")
             for d in dead:
                 del state.registered_nodes[d]
                 state.node_assignments.pop(d, None)
@@ -165,7 +183,7 @@ async def monitor_nodes():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     os.makedirs(LORA_PATH, exist_ok=True)
-    update_affinity()
+    load_mapping_and_affinity()
     asyncio.create_task(monitor_nodes())
     yield
     await client.aclose()
@@ -185,11 +203,9 @@ async def register(body: RegisterBody):
     url = body.control_node_url
     is_new = url not in state.registered_nodes
     state.registered_nodes[url] = time.time()
-    
     if is_new:
         logger.info(f"New node registered: {url}")
         rebalance_assignments()
-    
     return {"status": "registered"}
 
 @app.post("/heartbeat")
@@ -200,61 +216,48 @@ async def heartbeat(body: RegisterBody):
 
 @app.post("/relay_request")
 async def relay_request(req: RelayBody):
-    target_node = state.lora_routing.get(req.adapter_id)
+    """
+    接收 Control Node 無法處理的請求並進行轉發 (模擬 Offloading/Cloud Execution)。
+    """
+    logger.info(f"☁️ Received OFFLOAD Request for {req.adapter_id}")
     
+    target_node = state.lora_routing.get(req.adapter_id)
     if not target_node and state.registered_nodes:
         target_node = list(state.registered_nodes.keys())[0]
-        
+
     if not target_node:
-        raise HTTPException(503, "No available Control Nodes")
+        raise HTTPException(503, "No nodes available for relay")
 
     async def proxy():
         try:
-            r = await client.post(f"{target_node}/send_request", json=req.dict())
-            if r.status_code != 200:
-                yield f"event: error\ndata: {json.dumps('Relay failed')}\n\n"
-                return
-            
-            resp_json = r.json()
-            rid = resp_json.get("request_id")
-            
-            if not rid:
-                yield "event: error\ndata: \"No Request ID\"\n\n"
-                return
-            
-            async with client.stream("GET", f"{target_node}/stream/{rid}") as s:
-                 async for line in s.aiter_lines():
-                     if line: yield f"{line}\n"
-
+            # 這裡模擬 EFO/Cloud 處理請求
+            # 實務上可能會在此調用更強大的 Inference Service
+            yield f"event: open\ndata: ok\n\n"
+            yield f"data: {json.dumps({'type': 'info', 'message': 'Executed by EFO/Cloud'})}\n\n"
+            # 簡單回傳模擬數據，證明 Offloading 發生
+            yield f"data: {json.dumps(' [EFO_Cloud_Response] ')}\n\n"
+            yield f"event: end\ndata: [DONE]\n\n"
         except Exception as e:
             yield f"event: error\ndata: {json.dumps(str(e))}\n\n"
 
     return StreamingResponse(proxy(), media_type="text/event-stream")
 
-# ============================================================
-# File Serving API (For Control Nodes)
-# ============================================================
 @app.get("/fetch_adapter/{adapter_id}")
 def fetch_adapter(adapter_id: str):
-    """
-    Control Nodes call this to download the adapter model.
-    """
-    # 這裡假設 adapter 是一個資料夾，裡面有 adapter_model.safetensors
-    # 為了簡化，我們直接回傳 safetensors 檔案
-    # 實際上應該要回傳整個資料夾的 zip，或是提供多個 API
-    # 這裡我們實作: 下載 safetensors
+    target_path = None
+    if adapter_id in state.lora_map_data:
+        info = state.lora_map_data[adapter_id]
+        source_path = info.get("source_path", "")
+        folder_name = os.path.basename(source_path)
+        target_path = os.path.join(LORA_PATH, folder_name, "adapter_model.safetensors")
+        logger.info(f"🔍 Mapping fetch: {adapter_id} -> {folder_name}")
     
-    file_path = os.path.join(LORA_PATH, adapter_id, "adapter_model.safetensors")
-    if not os.path.exists(file_path):
-        # 嘗試找沒有前綴的目錄 (因為 scan_loras 會 split('_'))
-        # 這裡做一個簡單的 fallback 搜尋
-        candidates = [d for d in os.listdir(LORA_PATH) if adapter_id in d]
-        if candidates:
-            file_path = os.path.join(LORA_PATH, candidates[0], "adapter_model.safetensors")
-    
-    if os.path.exists(file_path):
-        logger.info(f"Serving adapter {adapter_id} from {file_path}")
-        return FileResponse(file_path, media_type="application/octet-stream", filename="adapter_model.safetensors")
+    if not target_path or not os.path.exists(target_path):
+        fallback_path = os.path.join(LORA_PATH, adapter_id, "adapter_model.safetensors")
+        if os.path.exists(fallback_path): target_path = fallback_path
+
+    if target_path and os.path.exists(target_path):
+        return FileResponse(target_path, media_type="application/octet-stream", filename="adapter_model.safetensors")
     
     raise HTTPException(404, f"Adapter {adapter_id} file not found in EFO.")
 
@@ -262,9 +265,8 @@ def fetch_adapter(adapter_id: str):
 def status():
     return {
         "nodes": list(state.registered_nodes.keys()),
-        "loras": state.all_loras,
+        "loras_count": len(state.all_loras),
         "assignments": state.node_assignments,
-        "routing": state.lora_routing,
         "version": state.config_version
     }
 

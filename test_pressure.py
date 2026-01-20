@@ -11,14 +11,15 @@ from datetime import datetime
 # ==========================================
 CONTROL_URL = "http://localhost:9000"
 
-ADAPTERS = ["1", "2", "3", "chat", "math", "code"] 
+# [Modified] Use virtual IDs 1-100
+ADAPTERS = [str(i) for i in range(1, 101)]
 
 # 流量分佈模式
-TRAFFIC_PATTERN = "0"  
+TRAFFIC_PATTERN = "1"  
 TARGET_ADAPTER = "1"     
 
-TOTAL_REQUESTS = 100
-AVG_RPS = 15.0 
+TOTAL_REQUESTS = 500
+AVG_RPS = 100.0 
 
 PROMPTS = ["test"]
 
@@ -32,13 +33,12 @@ GREY = "\033[90m"
 stats = {"sent": 0, "finished": 0, "errors": 0}
 ttft_records = [] 
 
-# 資源監控統計
 resource_stats = {
-    "node_seconds": 0.0,      # 累積的 (節點 * 秒數)
-    "max_nodes": 0,           # 曾達到的最大節點數
-    "samples": 0              # 取樣次數
+    "node_seconds": 0.0,
+    "max_nodes": 0,
+    "samples": 0
 }
-is_test_running = True        # 控制監控迴圈的旗標
+is_test_running = True
 
 def format_alpaca_prompt(user_prompt):
     return (
@@ -47,9 +47,6 @@ def format_alpaca_prompt(user_prompt):
     )
 
 async def monitor_cluster_usage(client: httpx.AsyncClient):
-    """
-    背景任務：每秒查詢一次 Control Node，計算資源消耗積分
-    """
     print(f"{YELLOW}[Monitor] Started tracking cluster resource usage...{RESET}")
     while is_test_running:
         try:
@@ -58,39 +55,31 @@ async def monitor_cluster_usage(client: httpx.AsyncClient):
             if resp.status_code == 200:
                 data = resp.json()
                 active_nodes = data.get("active_nodes", 0)
-                
-                # 積分計算：假設這 1 秒內節點數維持不變 (Riemann Sum)
                 resource_stats["node_seconds"] += active_nodes * 1.0 
-                
-                # 更新最大值
                 if active_nodes > resource_stats["max_nodes"]:
                     resource_stats["max_nodes"] = active_nodes
-                
                 resource_stats["samples"] += 1
             
-            # 補償延遲，盡量維持 1.0 秒的採樣頻率
             elapsed = time.time() - start_check
             sleep_time = max(0.0, 1.0 - elapsed)
             await asyncio.sleep(sleep_time)
             
         except Exception:
-            # 忽略監控錯誤，不影響主測試
             await asyncio.sleep(1)
 
 async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
+    # Traffic Pattern: 80% to TARGET, 20% Uniform to others
     if TRAFFIC_PATTERN == "1":
         if random.random() < 0.8:
             adapter = TARGET_ADAPTER
         else:
             others = [a for a in ADAPTERS if a != TARGET_ADAPTER]
-            adapter = TARGET_ADAPTER if not others else random.choice(others)
+            adapter = random.choice(others) if others else TARGET_ADAPTER
     else:
         adapter = random.choice(ADAPTERS)
 
     raw_prompt = random.choice(PROMPTS)
     formatted_prompt = format_alpaca_prompt(raw_prompt)
-    
-    # 隨機產生 Token 數量 (64 ~ 128)
     current_max_tokens = random.randint(64, 128)
     
     payload = {
@@ -111,8 +100,7 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
         
         stats["sent"] += 1
         short_prompt = (raw_prompt[:30] + '..') if len(raw_prompt) > 30 else raw_prompt
-        # 印出 Log 時也可以加上 Token 數量資訊
-        print(f"{CYAN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq}/{TOTAL_REQUESTS} SENT -> {adapter} (T:{current_max_tokens}) (ID: {request_id[:8]}...) Q: {short_prompt}{RESET}")
+        print(f"{CYAN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq}/{TOTAL_REQUESTS} SENT -> {adapter} (T:{current_max_tokens}) (ID: {request_id[:8]}...){RESET}")
 
         async with client.stream("GET", f"{CONTROL_URL}/stream/{request_id}", timeout=120.0) as response:
             async for line in response.aiter_lines():
@@ -141,26 +129,17 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
         final_ttft = ttft if ttft > 0 else elapsed
         ttft_records.append(final_ttft)
 
-        answer = "".join(full_response_text).strip()
-        # [Modified] 計算接收到的 token 數量 (chunks)
         token_count = len(full_response_text)
-        
-        # [Modified] 在輸出中加入 Tokens: {token_count}
         print(f"{GREEN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq} DONE <- {adapter} (Time: {elapsed:.2f}s, TTFT: {final_ttft:.2f}s, Tokens: {token_count}){RESET}")
         
-        if answer == "responseRequest aborted by system merge.":
-            sys.exit(1)
-
     except Exception as e:
         stats["errors"] += 1
         print(f"{RED}[ERROR] #{req_id_seq} Failed: {repr(e)}{RESET}")
 
 async def main():
     global is_test_running
-    print(f"=== Traffic Simulator ===")
+    print(f"=== Traffic Simulator (1-100 Virtual IDs) ===")
     print(f"Mode: {TRAFFIC_PATTERN.upper()}")
-    if TRAFFIC_PATTERN == "1":
-        print(f"Target: {TARGET_ADAPTER} (80%)")
     
     background_tasks = set()
     limits = httpx.Limits(max_keepalive_connections=200, max_connections=200)
@@ -172,13 +151,10 @@ async def main():
             print(f"{RED}Cannot connect to Control Node: {e}{RESET}")
             return
 
-        # 啟動資源監控
         monitor_task = asyncio.create_task(monitor_cluster_usage(client))
 
         try:
             start_time = time.time()
-            
-            # 發送請求迴圈
             for i in range(1, TOTAL_REQUESTS + 1):
                 task = asyncio.create_task(simulate_user(client, i))
                 background_tasks.add(task)
@@ -196,7 +172,6 @@ async def main():
             print("\nStopping...")
             for t in background_tasks: t.cancel()
         finally:
-            # 停止資源監控
             is_test_running = False
             await monitor_task
             total_duration = time.time() - start_time
@@ -215,7 +190,6 @@ async def main():
         print(f"Average TTFT : {avg_ttft:.4f} s")
         print(f"P95 TTFT     : {p95_ttft:.4f} s")
         
-        # 資源消耗報告
         node_seconds = resource_stats['node_seconds']
         avg_nodes = node_seconds / total_duration if total_duration > 0 else 0
         
@@ -223,11 +197,6 @@ async def main():
         print(f"Test Duration        : {total_duration:.2f} s")
         print(f"Total Resource Usage : {node_seconds:.2f} Node-Seconds")
         print(f"Average Active Nodes : {avg_nodes:.2f}")
-        print(f"Peak Active Nodes    : {resource_stats['max_nodes']}")
-        print(f"Cost Estimate        : {node_seconds / 3600:.4f} Node-Hours")
-
-    else:
-        print(f"{RED}No successful requests to calculate stats.{RESET}")
 
 if __name__ == "__main__":
     asyncio.run(main())

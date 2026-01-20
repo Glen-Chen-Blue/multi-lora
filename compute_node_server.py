@@ -113,13 +113,12 @@ async def lifespan(app: FastAPI):
         model_id=MODEL_ID,
         adapter_slots=8,
         max_batch_size=MAX_BATCH_SIZE_LIMIT,
-        max_cpu_loras=MAX_CPU_LORAS, # 傳入 CPU 上限
+        max_cpu_loras=MAX_CPU_LORAS,
         enable_monitor=True
     )
     engine.on_token = on_token
     engine.on_finish = on_finish
     
-    # 這裡我們只掃描路徑，不載入權重 (Lazy Loading)
     engine.scan_adapters(LORA_PATH)
     
     t = threading.Thread(target=engine_loop_thread, daemon=True)
@@ -195,7 +194,7 @@ def metrics():
         "lora_state": {
             "merged_adapter": engine.current_merged_adapter,
             "running_adapters": list({str(r["adapter_id"]) for r in engine.running_queue}),
-            "loaded_adapters": list(engine.cpu_cache.keys()) # 現在只會顯示在 CPU Cache 中的
+            "loaded_adapters": list(engine.cpu_cache.keys()) 
         },
         "capacity": {
             "max_batch_size": engine.max_batch_size,
@@ -212,19 +211,11 @@ async def sync_adapters(req: SyncAdaptersRequest):
     
     with config_lock:
         if req.version_id <= last_config_version:
-            logger.warning(f"⚠️ Ignoring stale config v{req.version_id} (Current: v{last_config_version})")
-            return {
-                "status": "ignored", 
-                "reason": "stale_version",
-                "loaded": list(engine.cpu_cache.keys())
-            }
+            return {"status": "ignored"}
         last_config_version = req.version_id
 
     try:
-        # Download missing files
         await download_missing_adapters(req.adapters)
-        
-        # Rescan local paths to acknowledge new files
         engine.scan_adapters(LORA_PATH, allowed_adapters=req.adapters)
         
         return {
@@ -246,8 +237,6 @@ def add_request(req: AddRequest):
         decoding_state[rid] = 0
     
     try:
-        # 這裡會檢查 adapter 是否在掃描到的路徑清單中，若不在會噴錯
-        # 實際載入權重會延遲到 step() 執行時
         engine.add_request(req.prompt, req.adapter_id, rid, req.max_new_tokens)
         engine_wakeup.set()
     except KeyError as e:
