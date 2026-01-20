@@ -44,6 +44,8 @@ class NodeManager:
         self.lock = threading.RLock()
         self.active_urls: List[str] = []
         self.standby_urls: List[str] = []
+        # mode: "NORMAL", "PRE_MERGE", "SWITCHING", "MERGED"
+        # mode_ts: Timestamp of the last mode change (for stabilization)
         self.nodes: Dict[str, Dict[str, Any]] = {} 
         
         if ALL_CANDIDATES:
@@ -55,15 +57,31 @@ class NodeManager:
         self.minimal_set: List[str] = []
         self.merged_assignment: Dict[str, str] = {} 
         
-        # [NEW] Config Version
         self.config_version: int = 0
 
     def update_metrics(self, url: str, metrics: Dict):
         with self.lock:
             if url not in self.nodes:
-                self.nodes[url] = {"mode": "NORMAL", "target": None, "last_seen": 0, "merged_at": 0}
+                self.nodes[url] = {
+                    "mode": "NORMAL", 
+                    "target": None, 
+                    "last_seen": 0, 
+                    "merged_at": 0,
+                    "mode_ts": time.time() # Initialize timestamp
+                }
             self.nodes[url]["metrics"] = metrics
             self.nodes[url]["last_seen"] = time.time()
+
+    # [New] Centralized mode setting with timestamp
+    def set_mode(self, url: str, mode: str, target: Optional[str] = None):
+        with self.lock:
+            if url in self.nodes:
+                # Update only if mode changes to reset the timer
+                if self.nodes[url]["mode"] != mode:
+                    self.nodes[url]["mode"] = mode
+                    self.nodes[url]["target"] = target
+                    self.nodes[url]["mode_ts"] = time.time()
+                    logger.info(f"🔄 Node {url} state -> {mode} (Target: {target})")
 
     def get_healthy_active_nodes(self) -> List[str]:
         now = time.time()
@@ -85,10 +103,18 @@ class NodeManager:
             m = info["metrics"]
             
             if m["load"]["running_batch"] >= m["capacity"]["max_batch_size"]: return False
-            if mode == "DRAINING": return False
-
+            
+            # SWITCHING: Pause all dispatch to allow clean merge
+            if mode == "SWITCHING": return False 
+            
             merged_on_node = m["lora_state"]["merged_adapter"]
             substitutes = self.affinity_table.get(adapter_id, [])
+
+            # [Modified] PRE_MERGE Logic: Only accept Target & its Affinity
+            # This naturally drains other adapters
+            if mode == "PRE_MERGE":
+                if target == adapter_id or target in substitutes: return True
+                return False
 
             if mode == "MERGED":
                 if target == adapter_id or target in substitutes: return True
@@ -114,7 +140,6 @@ client = httpx.AsyncClient(timeout=10.0)
 # Background Tasks
 # ============================================================
 async def sync_adapter_config(target_url: str, adapters: List[str], version_id: int) -> bool:
-    """背景推送 Adapter 設定，附帶版本號。回傳 True 表示成功。"""
     payload = {
         "adapters": adapters, 
         "version_id": version_id
@@ -139,24 +164,13 @@ def trigger_sync_all(version_id: int):
         asyncio.create_task(sync_adapter_config(url, adapters, version_id))
 
 async def activate_node_task(node_url: str, adapters: List[str], version_id: int):
-    """
-    [NEW] Provisioning Task:
-    1. Sync adapters first.
-    2. Only add to active_urls if sync succeeds.
-    This prevents the scheduler from assigning tasks to a node that hasn't loaded adapters yet.
-    """
     logger.info(f"⏳ Provisioning {node_url} (Syncing config v{version_id})...")
-    
-    # 1. 等待同步完成
     success = await sync_adapter_config(node_url, adapters, version_id)
-    
     if success:
-        # 2. 只有成功後，才將節點加入 active_urls
         with node_mgr.lock:
             node_mgr.active_urls.append(node_url)
         logger.info(f"🚀 Node {node_url} is now ACTIVE and ready to serve.")
     else:
-        # 3. 失敗則退回 standby
         logger.warning(f"⚠️ Provisioning failed for {node_url}. Returning to Standby.")
         with node_mgr.lock:
             node_mgr.standby_urls.append(node_url)
@@ -186,11 +200,8 @@ def auto_scaler():
         
         if n_standby > 0 and q_total > threshold:
             new_node = node_mgr.standby_urls.pop(0)
-            
             last_scale_ts = now
             logger.info(f"🚀 Scale UP initiated (Q: {q_total} > 50% of Cap {total_capacity}): {new_node}")
-            
-            # Start provisioning in background
             asyncio.create_task(activate_node_task(
                 new_node, 
                 list(node_mgr.allowed_adapters), 
@@ -198,7 +209,6 @@ def auto_scaler():
             ))
             return
 
-        # Scale DOWN Logic
         if n_active > MIN_NODES and q_total == 0:
             candidate = None
             for i in range(len(node_mgr.active_urls) - 1, MIN_NODES - 1, -1):
@@ -220,6 +230,9 @@ def check_merges():
     with node_mgr.lock:
         counts = {a: len(q) for a, q in adapter_queues.items() if len(q) > 0}
     
+    # ============================================================
+    # 1. Identify Merge Candidates
+    # ============================================================
     total_q = sum(counts.values())
     if total_q >= (QMIN_MULT * len(healthy)):
         best_adapter, max_q = None, -1
@@ -244,87 +257,99 @@ def check_merges():
                         target_node = url
             
             if target_node:
-                logger.info(f"🔒 Locking {target_node} to MERGE {best_adapter}")
-                with node_mgr.lock:
-                    node_mgr.nodes[target_node]["mode"] = "DRAINING"
-                    node_mgr.nodes[target_node]["target"] = best_adapter
+                # [Modified] Use set_mode to switch to PRE_MERGE
+                logger.info(f"🛡️  Preparing MERGE {best_adapter} on {target_node} (Mode: PRE_MERGE)")
+                node_mgr.set_mode(target_node, "PRE_MERGE", best_adapter)
+
+    # ============================================================
+    # 2. Handle PRE_MERGE -> MERGE Transition
+    # ============================================================
+    with node_mgr.lock:
+        for url, info in list(node_mgr.nodes.items()):
+            if info["mode"] == "PRE_MERGE":
+                # [CRITICAL FIX] Stabilization Period
+                # Wait for at least 2.0 seconds after switching mode before checking metrics.
+                # This prevents Race Conditions where in-flight requests haven't appeared in metrics yet.
+                if time.time() - info["mode_ts"] < 0.5:
+                    continue
+
+                target = info["target"]
+                m = info.get("metrics")
+                if m:
+                    running = m["lora_state"]["running_adapters"]
+                    # Only proceed if running adapters are empty OR only contain the target
+                    others = [x for x in running if x != target]
+                    
+                    if not others:
+                        # [Modified] Condition Met: Safe to merge
+                        logger.info(f"⚡ PRE_MERGE clear on {url} (Running: {running}). Executing merge {target}.")
+                        node_mgr.set_mode(url, "SWITCHING", target) # Lock status
+                        asyncio.create_task(do_merge_node(url, target))
+
+    # ============================================================
+    # 3. Unmerge Logic
+    # ============================================================
+    to_revert_merge = []
+    to_revert_pre = [] 
 
     with node_mgr.lock:
+        # A. Revert PRE_MERGE if queue empty
         for url, info in node_mgr.nodes.items():
-            if info["mode"] == "DRAINING" and info["metrics"]["idle"]:
+            if info["mode"] == "PRE_MERGE":
                 target = info["target"]
-                logger.info(f"🔗 Executing MERGE {target} on {url}")
-                asyncio.create_task(do_merge_node(url, target))
-                
-        # ============================================================
-        # [MODIFIED] Unmerge Logic (Optimized for Hot Swap)
-        # ============================================================
-        to_revert = []
+                if len(adapter_queues[target]) == 0:
+                    to_revert_pre.append(url)
+
+        # B. Revert MERGED
         for adapter, url in node_mgr.merged_assignment.items():
-            # 條件 1: 該 Merged Adapter 已經沒有待處理請求了
             if len(adapter_queues[adapter]) == 0:
                 info = node_mgr.nodes.get(url)
                 if info and info.get("metrics"):
                     m = info["metrics"]
-                    
-                    # 取得當前負載與容量
                     running = m["load"]["running_batch"]
                     limit = m["capacity"]["max_batch_size"]
                     free_slots = limit - running
-                    
-                    # 計算「其他」Adapter 的排隊總數
                     others_waiting = sum(len(q) for a, q in adapter_queues.items() if a != adapter)
 
-                    # 條件檢查：
-                    # A. 冷卻時間 > 5秒 (基本穩定性)
                     cooldown_passed = (time.time() - info["merged_at"] > 5)
-                    
-                    # B. 觸發 Unmerge 的時機
-                    #    - 節點完全閒置 (m["idle"])
-                    #    - 或者：有 >2 個空位 且 有其他人在等 (free_slots > 2 and others_waiting > 0)
                     should_revert = False
                     
                     if cooldown_passed:
-                        if m["idle"]:
-                            should_revert = True
-                        elif free_slots > 2 and others_waiting > 0:
-                            should_revert = True
+                        if m["idle"]: should_revert = True
+                        elif free_slots > 2 and others_waiting > 0: should_revert = True
                             
                     if should_revert:
-                        to_revert.append(url)
-        
-        for url in to_revert:
-            free_info = ""
-            try:
-                limit = node_mgr.nodes[url]['metrics']['capacity']['max_batch_size']
-                curr = node_mgr.nodes[url]['metrics']['load']['running_batch']
-                free_info = f"{limit - curr}"
-            except:
-                free_info = "?"
-                
-            logger.info(f"🔓 Reverting MERGE on {url} (Free slots: {free_info}, Others waiting)")
-            asyncio.create_task(do_unmerge_node(url))
+                        to_revert_merge.append(url)
+    
+    for url in to_revert_pre:
+        logger.info(f"↩️  Reverting PRE_MERGE on {url} (Queue empty)")
+        node_mgr.set_mode(url, "NORMAL", None)
+
+    for url in to_revert_merge:
+        logger.info(f"🔓 Reverting MERGE on {url}")
+        asyncio.create_task(do_unmerge_node(url))
 
 async def do_merge_node(url: str, adapter_id: str):
     try:
+        # Use force=True. Because PRE_MERGE ensured cleaning, this is safe.
+        # merge_adapter(force=True) in system will preserve 'target' requests.
         await client.post(f"{url}/unmerge", json={"force": True})
         await client.post(f"{url}/merge", json={"adapter_id": adapter_id, "force": True})
         with node_mgr.lock:
             if url in node_mgr.nodes:
-                node_mgr.nodes[url]["mode"] = "MERGED"
+                node_mgr.set_mode(url, "MERGED", adapter_id)
                 node_mgr.nodes[url]["merged_at"] = time.time()
                 node_mgr.merged_assignment[adapter_id] = url
     except Exception as e:
         logger.error(f"Merge failed on {url}: {e}")
+        node_mgr.set_mode(url, "NORMAL", None)
 
 async def do_unmerge_node(url: str):
     try:
-        # [MODIFIED] 使用 force=True 來允許在非 idle 狀態下解除合併
         await client.post(f"{url}/unmerge", json={"force": True})
         with node_mgr.lock:
             if url in node_mgr.nodes:
-                node_mgr.nodes[url]["mode"] = "NORMAL"
-                node_mgr.nodes[url]["target"] = None
+                node_mgr.set_mode(url, "NORMAL", None)
                 for k, v in list(node_mgr.merged_assignment.items()):
                     if v == url: del node_mgr.merged_assignment[k]
     except Exception:
@@ -429,7 +454,7 @@ async def poller_task():
                 node_mgr.update_metrics(url, r.json())
             except Exception: pass
         scheduler_wakeup.set()
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.1)
 
 async def heartbeat_task():
     while True:
@@ -469,12 +494,11 @@ class ConfigUpdate(BaseModel):
     assigned_adapters: List[str]
     affinity_table: Dict[str, List[str]]
     minimal_set: List[str]
-    version_id: int # [NEW]
+    version_id: int 
 
 @app.post("/update_config")
 async def update_config(cfg: ConfigUpdate):
     with node_mgr.lock:
-        # [NEW] Version Check
         if cfg.version_id < node_mgr.config_version:
             logger.warning(f"⚠️ Ignoring obsolete config v{cfg.version_id} (Current: v{node_mgr.config_version})")
             return {"status": "ignored", "reason": "obsolete_version"}
@@ -485,8 +509,6 @@ async def update_config(cfg: ConfigUpdate):
         node_mgr.minimal_set = cfg.minimal_set
     
     logger.info(f"📥 Config updated to v{cfg.version_id}. Allowed: {len(cfg.assigned_adapters)}")
-    
-    # Always sync when config updates (to enforce the new list)
     trigger_sync_all(cfg.version_id)
     return {"status": "ok"}
 

@@ -313,7 +313,7 @@ class MultiLoRAEngine:
             current_len = req["seq_len"] + len(req["tokens_gen"])
             req["past_key_values"] = _slice_past_for_sample(new_past_legacy, i, current_len)
             
-            if token_id == self.tokenizer.eos_token_id or len(req["tokens_gen"]) >= req["max_new_tokens"]:
+            if len(req["tokens_gen"]) >= req["max_new_tokens"]:
                 req["done"] = True
                 if self.on_finish: self.on_finish(req["request_id"], "finished")
 

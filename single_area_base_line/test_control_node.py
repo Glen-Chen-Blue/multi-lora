@@ -96,6 +96,13 @@ async def stream(request_id: str):
 
     return StreamingResponse(gen(), media_type="text/event-stream")
 
+@app.get("/status")
+def status():
+    return {
+        "node_type": "CONTROL_NODE",
+        "active_nodes": len(NODES),
+    }
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=9000)

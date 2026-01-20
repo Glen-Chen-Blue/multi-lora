@@ -14,8 +14,8 @@ CONTROL_URL = "http://localhost:9000"
 ADAPTERS = ["1", "2", "3", "chat", "math", "code"] 
 
 # 流量分佈模式
-TRAFFIC_PATTERN = "skewed"  
-TARGET_ADAPTER = "chat"     
+TRAFFIC_PATTERN = "1"  
+TARGET_ADAPTER = "1"     
 
 TOTAL_REQUESTS = 100
 AVG_RPS = 15.0 
@@ -80,7 +80,7 @@ async def monitor_cluster_usage(client: httpx.AsyncClient):
             await asyncio.sleep(1)
 
 async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
-    if TRAFFIC_PATTERN == "skewed":
+    if TRAFFIC_PATTERN == "1":
         if random.random() < 0.8:
             adapter = TARGET_ADAPTER
         else:
@@ -141,7 +141,10 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
 
         answer = "".join(full_response_text).strip()
         print(f"{GREEN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq} DONE <- {adapter} (Time: {elapsed:.2f}s, TTFT: {final_ttft:.2f}s){RESET}")
-        print(f"{GREY}--- Response Start ---{RESET}\n{answer}\n{GREY}--- Response End ---{RESET}")
+        clean_answer = answer.replace("\n", " ")
+        # print(f"{GREY}{clean_answer}{RESET}")
+        if answer == "responseRequest aborted by system merge.":
+            sys.exit(1)
 
     except Exception as e:
         stats["errors"] += 1
@@ -151,7 +154,7 @@ async def main():
     global is_test_running
     print(f"=== Traffic Simulator ===")
     print(f"Mode: {TRAFFIC_PATTERN.upper()}")
-    if TRAFFIC_PATTERN == "skewed":
+    if TRAFFIC_PATTERN == "1":
         print(f"Target: {TARGET_ADAPTER} (80%)")
     
     background_tasks = set()

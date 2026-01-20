@@ -29,6 +29,10 @@ start() {
   COMPUTE_NODES="http://127.0.0.1:8001,http://127.0.0.1:8002" \
   python test_control_node.py &
   PIDS+=($!)
+#   echo "Starting Control Node (Random Dispatch)..."
+#   COMPUTE_NODES="http://127.0.0.1:8001" \
+#   python test_control_node.py &
+#   PIDS+=($!)
 
   echo "✅ All baseline services started. Press Ctrl+C to stop."
   wait
