@@ -35,6 +35,11 @@ class GlobalState:
         self.node_assignments: Dict[str, List[str]] = {} 
         self.lora_routing: Dict[str, str] = {} 
         
+        # [新增] 紀錄每個節點的區域 ID: url -> area_id
+        self.node_area_map: Dict[str, str] = {} 
+        # [新增] 快取所有 LoRA 的 Type: aid -> type
+        self.lora_types: Dict[str, str] = {} 
+
         self.config_version: int = 0
 
 state = GlobalState()
@@ -54,12 +59,19 @@ def load_mapping_and_affinity():
             
             table = {}
             for aid, info in state.lora_map_data.items():
+                # [新增] 讀取並儲存 Type
+                state.lora_types[aid] = info.get("type", "global")
+                
                 subs = info.get("substitutes", [])
                 valid_subs = [s for s in subs if s in state.lora_map_data]
                 table[aid] = list(set([aid] + valid_subs))
             
             state.affinity_table = table
-            calculate_minimal_set(state.all_loras, state.affinity_table)
+            
+            # 計算 Global 模型的 Minimal Set (Local 模型必須強制分配，不需要計算覆蓋)
+            global_loras = [aid for aid in state.all_loras if state.lora_types.get(aid) == "global"]
+            calculate_minimal_set(global_loras, state.affinity_table)
+            
             logger.info(f"✅ Loaded Mapping. Virtual Adapters: {len(state.all_loras)}")
             return
         except Exception as e:
@@ -81,6 +93,7 @@ def scan_physical_loras():
         table = {}
         for aid in loras:
             table[aid] = [aid]
+            state.lora_types[aid] = "global" # 預設為 Global
         
         state.affinity_table = table
         calculate_minimal_set(loras, table)
@@ -98,7 +111,7 @@ def calculate_minimal_set(universe_list, table):
         candidates = universe_list
         
         for cand in candidates:
-            can_serve = {target for target, subs in table.items() if cand in subs}
+            can_serve = {target for target, subs in table.items() if cand in subs and target in universe}
             diff = can_serve - covered
             if len(diff) > len(best_cover_diff):
                 best_cand = cand
@@ -113,7 +126,7 @@ def calculate_minimal_set(universe_list, table):
         covered.update(best_cover_diff)
             
     state.minimal_set = selected
-    logger.info(f"Updated Minimal Set: {len(selected)} items")
+    logger.info(f"Updated Minimal Set (Global Only): {len(selected)} items")
 
 # ============================================================
 # Rebalance & Broadcast
@@ -123,6 +136,8 @@ async def broadcast_config():
     payload_base = {
         "affinity_table": state.affinity_table,
         "minimal_set": state.minimal_set,
+        # [新增] 廣播所有 LoRA 的類型表，讓 Control Node 做檢查
+        "lora_types": state.lora_types, 
         "version_id": state.config_version
     }
     
@@ -142,19 +157,44 @@ def rebalance_assignments():
     new_node_map = {n: [] for n in nodes}
     new_routing = {}
     
-    # 1. Assign Minimal Set
+    # [修改] 混合分配策略
+    # 1. Global LoRA: 使用 Round-Robin 分配 Minimal Set
     for i, expert in enumerate(state.minimal_set):
         target = nodes[i % len(nodes)]
         new_node_map[target].append(expert)
         
+        # 建立 Routing 表 (只針對 Global)
         for aid, subs in state.affinity_table.items():
-            if expert in subs:
+            if expert in subs and state.lora_types.get(aid) == "global":
                 if aid not in new_routing:
                     new_routing[aid] = target
-    
-    # 2. Assign others (ensure everything is routed)
+
+    # 2. Local LoRA: 強制分配給該區域的所有節點
+    # 這裡我們遍歷所有 LoRA，如果是 Local，就加給對應 Area 的節點
     for aid in state.all_loras:
-        if aid not in new_routing:
+        l_type = state.lora_types.get(aid, "global")
+        
+        if l_type != "global":
+            # 這是區域專用模型
+            target_area = l_type
+            assigned_nodes = []
+            
+            for node_url in nodes:
+                node_area = state.node_area_map.get(node_url, "1")
+                if node_area == target_area:
+                    # 這是我的區域，必須分配給我
+                    if aid not in new_node_map[node_url]:
+                        new_node_map[node_url].append(aid)
+                    assigned_nodes.append(node_url)
+            
+            # Local Routing 可以在這裡做，但通常由 Local Control Node 內部處理
+            # 如果需要跨節點 (同一區內)，可以隨機選一個
+            if assigned_nodes:
+                 new_routing[aid] = assigned_nodes[0]
+
+    # 3. 確保所有 Global LoRA 都有預設路由
+    for aid in state.all_loras:
+        if state.lora_types.get(aid) == "global" and aid not in new_routing:
             target = nodes[0]
             new_routing[aid] = target
             
@@ -175,6 +215,7 @@ async def monitor_nodes():
             for d in dead:
                 del state.registered_nodes[d]
                 state.node_assignments.pop(d, None)
+                state.node_area_map.pop(d, None)
             rebalance_assignments()
 
 # ============================================================
@@ -192,6 +233,7 @@ app = FastAPI(title="EFO Server", lifespan=lifespan)
 
 class RegisterBody(BaseModel):
     control_node_url: str
+    area_id: str = "1" # [新增] 區域 ID
 
 class RelayBody(BaseModel):
     prompt: str
@@ -203,8 +245,12 @@ async def register(body: RegisterBody):
     url = body.control_node_url
     is_new = url not in state.registered_nodes
     state.registered_nodes[url] = time.time()
+    
+    # [新增] 紀錄區域
+    state.node_area_map[url] = body.area_id
+    
     if is_new:
-        logger.info(f"New node registered: {url}")
+        logger.info(f"New node registered: {url} (Area: {body.area_id})")
         rebalance_assignments()
     return {"status": "registered"}
 
@@ -231,10 +277,8 @@ async def relay_request(req: RelayBody):
     async def proxy():
         try:
             # 這裡模擬 EFO/Cloud 處理請求
-            # 實務上可能會在此調用更強大的 Inference Service
             yield f"event: open\ndata: ok\n\n"
             yield f"data: {json.dumps({'type': 'info', 'message': 'Executed by EFO/Cloud'})}\n\n"
-            # 簡單回傳模擬數據，證明 Offloading 發生
             yield f"data: {json.dumps(' [EFO_Cloud_Response] ')}\n\n"
             yield f"event: end\ndata: [DONE]\n\n"
         except Exception as e:
@@ -267,6 +311,7 @@ def status():
         "nodes": list(state.registered_nodes.keys()),
         "loras_count": len(state.all_loras),
         "assignments": state.node_assignments,
+        "node_areas": state.node_area_map, # Debug info
         "version": state.config_version
     }
 

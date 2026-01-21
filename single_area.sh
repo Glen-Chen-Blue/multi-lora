@@ -10,7 +10,7 @@ start() {
   # 0. 準備模擬的分散式儲存環境 & 生成 Mapping
   echo "📂 Checking storage directories..."
   
-  # 生成 Mapping 檔案
+  # 生成 Mapping 檔案 (這會產生包含 type="1"/"global" 的新 map)
   echo "🔮 Generating lora_mapping.json..."
   python gen_lora_map.py
   
@@ -75,11 +75,13 @@ start() {
   sleep 20
 
   # 4. 啟動 Control Node (Port 9000)
-  echo "Starting Control Node..."
+  echo "Starting Control Node (Area 1)..."
+  # [修正] 加入 AREA_ID=1，定義此節點屬於區域 1
   EFO_URL="http://127.0.0.1:9080" \
   MY_NODE_URL="http://127.0.0.1:9000" \
   COMPUTE_NODES="http://127.0.0.1:8001,http://127.0.0.1:8002" \
   LORA_PATH="./lora_repo/control" \
+  AREA_ID="1" \
   uvicorn control_node_server:app --host 0.0.0.0 --port 9000 &
   PIDS+=($!)
 

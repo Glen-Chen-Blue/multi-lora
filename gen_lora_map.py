@@ -7,8 +7,9 @@ import math
 SOURCE_DIR = "./testLoRA"       # 實體 LoRA 來源資料夾
 OUTPUT_FILE = "lora_mapping.json"
 NUM_VIRTUAL = 100               # 模擬 100 個 LoRA
-EMBED_DIM = 2                   # 使用 2 維向量 (方便視覺化與計算)
-SIMILARITY_THRESHOLD = 0.9      # 相似度閾值
+EMBED_DIM = 2                   # 使用 2 維向量
+SIMILARITY_THRESHOLD = 0.99      # 相似度閾值
+NUM_AREAS = 1                   # [新增] 定義總共有幾個 Edge Area
 # =================================================
 
 def cosine_similarity(v1, v2):
@@ -39,25 +40,31 @@ def generate_map():
     # 2. 生成虛擬 LoRA 與 Embeddings
     for i in range(1, NUM_VIRTUAL + 1):
         vid = str(i)
-        # 隨機分配一個實體路徑
         phy_source = random.choice(sources)
         
-        # 隨機生成 2D Embedding (正規化到單位圓上)
         angle = random.uniform(0, 2 * math.pi)
         vec = [math.cos(angle), math.sin(angle)]
+
+        # [新增] 決定 Type: "global" 或是 具體的 Area ID ("1" ~ "n")
+        # 假設 20% 是區域專用，其餘是 Global
+        if random.random() < 0.2:
+            lora_type = str(random.randint(1, NUM_AREAS)) # 例如 "1", "2", "3"
+        else:
+            lora_type = "global"
 
         embeddings[vid] = vec
         lora_map[vid] = {
             "name": vid,
+            "type": lora_type,  # [新增] 寫入類型
             "source_path": os.path.join(SOURCE_DIR, phy_source),
             "embedding": vec,
-            "substitutes": [] # 初始化欄位，稍後填充
+            "substitutes": [] 
         }
 
     # 3. 計算 Affinity 並直接寫入 lora_map
     print("🧮 Calculating Affinity (injecting into lora_map)...")
     
-    all_ids = sorted(list(lora_map.keys()), key=int)
+    all_ids = sorted(list(lora_map.keys()), key=lambda x: int(x) if x.isdigit() else x)
     total_subs = 0
     
     for target_id in all_ids:
@@ -71,12 +78,11 @@ def generate_map():
             if score >= SIMILARITY_THRESHOLD:
                 substitutes.append(cand_id)
         
-        # [關鍵修改] 直接寫入該 LoRA 的資訊中
+        # 寫入 substitues，這裡我們暫時不根據 Type 過濾，因為 EFO/ControlNode 會在 Runtime 處理
         lora_map[target_id]["substitutes"] = substitutes
         total_subs += len(substitutes)
 
     # 4. 輸出 JSON
-    # 結構只包含 lora_map，因為 substitute 資訊已經在裡面了
     output_data = {
         "lora_map": lora_map
     }
@@ -91,8 +97,8 @@ def generate_map():
     # 範例檢查
     example_id = "1"
     if example_id in lora_map:
-        subs = lora_map[example_id]["substitutes"]
-        print(f"   - Example: ID '1' contains substitutes: {subs[:5]}...")
+        info = lora_map[example_id]
+        print(f"   - Example: ID '1' (Type: {info['type']}) has substitutes: {info['substitutes'][:5]}...")
 
 if __name__ == "__main__":
     generate_map()
