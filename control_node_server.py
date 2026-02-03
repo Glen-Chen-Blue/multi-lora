@@ -129,7 +129,6 @@ class NodeManager:
 # ============================================================
 node_mgr = NodeManager()
 adapter_queues: Dict[str, Deque] = defaultdict(deque)
-# [修正] 移除了錯誤的 type hint "requests.Queue"
 stream_queues: Dict[str, Any] = {} 
 
 scheduler_wakeup = threading.Event()
@@ -561,6 +560,33 @@ async def fetch_adapter_for_compute(adapter_id: str):
     if os.path.exists(target_file):
         return FileResponse(target_file, media_type="application/octet-stream", filename="adapter_model.safetensors")
     raise HTTPException(404, "Not found")
+
+@app.post("/debug/reset")
+async def debug_reset():
+    """
+    [Debug] Force reset all queues and propagate to compute nodes.
+    Useful for immediate test teardown without waiting for cooldown.
+    """
+    logger.warning("🚨 SYSTEM RESET TRIGGERED! Clearing all queues...")
+    
+    # 1. Clear local queues
+    with node_mgr.lock:
+        adapter_queues.clear()
+        stream_queues.clear()
+    
+    # 2. Propagate to all known compute nodes
+    all_nodes = list(node_mgr.nodes.keys())
+    
+    async def call_node_reset(url):
+        try:
+            await client.post(f"{url}/debug/reset", timeout=2.0)
+        except Exception as e:
+            logger.error(f"Failed to reset node {url}: {e}")
+
+    if all_nodes:
+        await asyncio.gather(*[call_node_reset(u) for u in all_nodes])
+        
+    return {"status": "system_reset_complete"}
 
 if __name__ == "__main__":
     import uvicorn

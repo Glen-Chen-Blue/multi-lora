@@ -289,6 +289,28 @@ def unmerge(req: UnmergeRequest):
     engine.unmerge_all()
     return {"status": "unmerged"}
 
+@app.post("/debug/reset")
+def debug_reset():
+    """
+    [Debug] Force clear engine queues and stream states.
+    """
+    logger.warning("🚨 NODE RESET TRIGGERED! Clearing local queues...")
+    
+    # 1. Clear Engine Queues (Thread-safe)
+    with engine.lock:
+        engine.request_queue.clear()
+        engine.running_queue.clear()
+    
+    # 2. Reset Merge State (This handles internal locking)
+    engine.unmerge_all()
+    
+    # 3. Clear Stream Buffers
+    with stream_lock:
+        stream_queues.clear()
+        decoding_state.clear()
+        
+    return {"status": "node_reset_complete"}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8001)))

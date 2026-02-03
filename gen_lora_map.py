@@ -7,7 +7,7 @@ import math
 SOURCE_DIR = "./testLoRA"       
 OUTPUT_FILE = "lora_mapping.json"
 NUM_VIRTUAL = 100               
-SIMILARITY_THRESHOLD = 0.90     # 設定為 0.9 以確保 1,2,3 互相涵蓋
+SIMILARITY_THRESHOLD = 0.90     # 門檻值
 # =================================================
 
 def generate_map():
@@ -28,12 +28,15 @@ def generate_map():
     lora_map = {}
     
     # === 設定向量 (固定邏輯) ===
-    # LoRA 1, 2, 3: 強制聚類 (角度非常接近)
+    # LoRA 1, 2, 3: 強制聚類 (角度非常接近, 在 0 度附近)
     cluster_angles = {
         "1": 0.0,
         "2": 0.02,  # 約 1.1 度
         "3": -0.02  # 約 -1.1 度
     }
+    
+    # 定義核心群組 ID
+    core_cluster_ids = {"1", "2", "3"}
 
     for i in range(1, NUM_VIRTUAL + 1):
         vid = str(i)
@@ -43,10 +46,12 @@ def generate_map():
             angle = cluster_angles[vid]
             l_type = "global"
         else:
-            # 其他 LoRA (4~100): 隨機散落在遠處 (避開 0.0 附近)
-            # 使用固定種子確保每次 generate 結果一致 (雖然 exp_runner 會設種子，這裡也設一下保險)
+            # 其他 LoRA (4~100): 
+            # [修改 1] 為了物理上遠離 1,2,3 (0度)，我們將隨機範圍設在背對它們的地方
+            # 0.9 的相似度大約需要角度差 < 0.45 弧度
+            # 我們讓隨機角度從 1.0 開始到 2pi - 1.0，確保絕不會因為隨機而靠近 0 度
             random.seed(i) 
-            angle = random.uniform(0.5, 2 * math.pi)
+            angle = random.uniform(1.0, 2 * math.pi - 1.0)
             l_type = "global"
 
         vec = [math.cos(angle), math.sin(angle)]
@@ -70,6 +75,14 @@ def generate_map():
         for cand_id in all_ids:
             if target_id == cand_id: continue
             
+            # [修改 2] 強制邏輯隔離：確保 1,2,3 與其他群組絕對不互通
+            is_target_core = target_id in core_cluster_ids
+            is_cand_core = cand_id in core_cluster_ids
+            
+            # 如果一個是核心群組，另一個不是，直接跳過，不計算相似度
+            if is_target_core != is_cand_core:
+                continue
+
             cand_vec = lora_map[cand_id]["embedding"]
             # Cosine Similarity
             dot = sum(a*b for a, b in zip(target_vec, cand_vec))
@@ -90,10 +103,14 @@ def generate_map():
         json.dump(output_data, f, indent=2)
     
     print(f"✅ Generated {OUTPUT_FILE}")
-    print(f"   Cluster Check:")
-    print(f"   - LoRA 1 subs: {lora_map['1']['substitutes']} (Should include 2, 3)")
-    print(f"   - LoRA 2 subs: {lora_map['2']['substitutes']} (Should include 1, 3)")
-    print(f"   - LoRA 3 subs: {lora_map['3']['substitutes']} (Should include 1, 2)")
+    print(f"   Cluster Check (Core Group):")
+    print(f"   - LoRA 1 subs: {lora_map['1']['substitutes']}")
+    print(f"   - LoRA 2 subs: {lora_map['2']['substitutes']}")
+    print(f"   - LoRA 3 subs: {lora_map['3']['substitutes']}")
+    
+    # 檢查 4 號有沒有意外混入
+    if "4" in lora_map:
+         print(f"   - LoRA 4 subs: {lora_map['4']['substitutes']} (Should NOT contain 1, 2, 3)")
 
 if __name__ == "__main__":
     generate_map()
