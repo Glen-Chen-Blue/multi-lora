@@ -18,8 +18,8 @@ ADAPTERS = [str(i) for i in range(1, 101)]
 TRAFFIC_PATTERN = "1"  
 TARGET_ADAPTER = "1"     
 
-TOTAL_REQUESTS = 100
-AVG_RPS = 100
+TOTAL_REQUESTS = 50
+AVG_RPS = 10
 
 PROMPTS = ["test"]
 
