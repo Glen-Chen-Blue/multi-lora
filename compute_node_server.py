@@ -32,25 +32,20 @@ logger = logging.getLogger("ComputeNode")
 # ============================================================
 NODE_ID = os.environ.get("NODE_ID", "cn-1")
 MODEL_ID = os.environ.get("MODEL_ID", "unsloth/Meta-Llama-3.1-8B")
-# LORA_PATH is technically not needed for storage anymore, but maybe for fallback or just ignore
 LORA_PATH = os.environ.get("LORA_PATH", "./lora_repo/compute")
 CONTROL_NODE_URL = os.environ.get("CONTROL_NODE_URL", "http://localhost:9000")
 
-# [Auto-Scale] 設定硬上限
 MAX_BATCH_SIZE_LIMIT = int(os.environ.get("MAX_BATCH_SIZE", "32"))
-# [CPU Cache] 設定 CPU LoRA 上限
 MAX_CPU_LORAS = int(os.environ.get("MAX_CPU_LORAS", "10"))
 
 engine: Optional[MultiLoRAEngine] = None
 engine_wakeup = threading.Event()
 shutdown_event = threading.Event()
 
-# Streaming state
 stream_queues: Dict[str, Queue] = {}
 decoding_state: Dict[str, int] = {}
 stream_lock = threading.Lock()
 
-# Config Versioning State
 last_config_version: int = -1
 config_lock = threading.Lock()
 
@@ -82,19 +77,16 @@ def on_finish(rid: str, reason: str):
             else:
                 q.put({"type": "final", "reason": reason})
             q.put(None) 
-        decoding_state.pop(rid, None)
+        # [安全] 確保狀態清除
+        if rid in decoding_state:
+            del decoding_state[rid]
 
 # ============================================================
-# Network Fetcher (Sync for Engine Thread)
+# Network Fetcher
 # ============================================================
 def fetch_adapter_sync(adapter_id: str) -> bytes:
-    """
-    Synchronously fetch adapter bytes from Control Node.
-    This runs inside the engine thread when a cache miss occurs.
-    """
     url = f"{CONTROL_NODE_URL}/fetch_adapter/{adapter_id}"
     try:
-        # Use a fresh sync client for thread safety within the engine loop
         with httpx.Client(timeout=60.0) as sync_client:
             resp = sync_client.get(url)
             if resp.status_code != 200:
@@ -127,9 +119,6 @@ def engine_loop_thread():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global engine
-    # We don't necessarily need to create LORA_PATH directory anymore since we are diskless
-    # os.makedirs(LORA_PATH, exist_ok=True) 
-    
     logger.info(f"Initializing Compute Node {NODE_ID} (Max CPU LoRAs: {MAX_CPU_LORAS}, Diskless Mode)...")
     
     engine = MultiLoRAEngine(
@@ -138,14 +127,10 @@ async def lifespan(app: FastAPI):
         max_batch_size=MAX_BATCH_SIZE_LIMIT,
         max_cpu_loras=MAX_CPU_LORAS,
         enable_monitor=True,
-        adapter_fetcher=fetch_adapter_sync  # Inject the network fetcher
+        adapter_fetcher=fetch_adapter_sync
     )
     engine.on_token = on_token
     engine.on_finish = on_finish
-    
-    # NOTE: We no longer scan local disk.
-    # We wait for 'sync_adapters' to tell us what is available,
-    # or rely on on-demand fetching.
     
     t = threading.Thread(target=engine_loop_thread, daemon=True)
     t.start()
@@ -183,11 +168,16 @@ class SyncAdaptersRequest(BaseModel):
 @app.get("/metrics")
 def metrics():
     if not engine: return {}
+    
+    # [安全] 確保回傳值為標準 int，防止序列化錯誤
+    running_cnt = len(engine.running_queue) if engine else 0
+    waiting_cnt = len(engine.request_queue) if engine else 0
+    
     return {
         "node_id": NODE_ID,
         "load": {
-            "running_batch": len(engine.running_queue),
-            "waiting_queue": len(engine.request_queue)
+            "running_batch": running_cnt,
+            "waiting_queue": waiting_cnt
         },
         "lora_state": {
             "merged_adapter": engine.current_merged_adapter,
@@ -206,18 +196,14 @@ def metrics():
 @app.post("/sync_adapters")
 async def sync_adapters(req: SyncAdaptersRequest):
     global last_config_version
-    
     with config_lock:
         if req.version_id <= last_config_version:
             return {"status": "ignored"}
         last_config_version = req.version_id
 
     try:
-        # Instead of downloading files to disk, we just update the allowed list in Engine.
-        # The Engine will fetch them on-demand if they are needed for inference.
         logger.info(f"🔄 Syncing adapter list (v{req.version_id}): {len(req.adapters)} items")
         engine.update_known_adapters(req.adapters)
-        
         return {
             "status": "ok", 
             "version_applied": req.version_id,
@@ -291,24 +277,14 @@ def unmerge(req: UnmergeRequest):
 
 @app.post("/debug/reset")
 def debug_reset():
-    """
-    [Debug] Force clear engine queues and stream states.
-    """
     logger.warning("🚨 NODE RESET TRIGGERED! Clearing local queues...")
-    
-    # 1. Clear Engine Queues (Thread-safe)
     with engine.lock:
         engine.request_queue.clear()
         engine.running_queue.clear()
-    
-    # 2. Reset Merge State (This handles internal locking)
     engine.unmerge_all()
-    
-    # 3. Clear Stream Buffers
     with stream_lock:
         stream_queues.clear()
         decoding_state.clear()
-        
     return {"status": "node_reset_complete"}
 
 if __name__ == "__main__":

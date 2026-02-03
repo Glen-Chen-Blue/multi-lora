@@ -38,7 +38,7 @@ SCENARIOS = {
 class CostMonitor(threading.Thread):
     """
     獨立的監控執行緒，不受 Async Event Loop 阻塞影響。
-    使用積分方式計算 Cost，即使 sleep 有誤差也能保持準確。
+    [修改] 使用積分方式計算 Cost，只計算有在做事的節點 (Computing Nodes)。
     """
     def __init__(self, scenario_name):
         super().__init__()
@@ -46,7 +46,7 @@ class CostMonitor(threading.Thread):
         self.scenario_name = scenario_name
         self.total_cost = 0.0
         self.lock = threading.Lock()
-        self.daemon = True # 確保主程式結束時它會跟著結束
+        self.daemon = True 
 
     def run(self):
         last_time = time.time()
@@ -56,29 +56,28 @@ class CostMonitor(threading.Thread):
             delta = now - last_time
             last_time = now
             
-            active_nodes = 0
+            busy_nodes = 0
             try:
-                # 使用同步 requests，避免與流量生成的 async client 搶資源
+                # 使用同步 requests
                 resp = requests.get(f"{CONTROL_URL}/status", timeout=1.0)
                 if resp.status_code == 200:
                     data = resp.json()
-                    active_nodes = data.get("active_nodes", 0)
+                    # [修改] 讀取 computing_nodes (正在運算的節點)
+                    # 如果 Control Node 尚未回傳此欄位 (舊版相容)，退回讀取 active_nodes
+                    busy_nodes = data.get("computing_nodes", data.get("active_nodes", 0))
                 else:
-                    active_nodes = self._fallback_nodes()
+                    busy_nodes = self._fallback_nodes()
             except:
-                active_nodes = self._fallback_nodes()
+                busy_nodes = self._fallback_nodes()
 
-            # 積分計算: Cost = 節點數 * 時間區間
+            # 積分計算: Cost = 忙碌節點數 * 時間區間
             with self.lock:
-                self.total_cost += active_nodes * delta
+                self.total_cost += busy_nodes * delta
             
-            time.sleep(1.0) # 這裡的 sleep 不會被 async loop 卡住
+            time.sleep(1.0) 
 
     def _fallback_nodes(self):
-        # 如果請求失敗，根據場景給一個保底值，避免曲線掉到0
-        if "Random" in self.scenario_name:
-            return 2 # 假設 Random 至少有初始節點
-        return 1
+        return 0 # 連線失敗視為無消耗 (或者保留上次值)
 
     def get_cost(self):
         with self.lock:
@@ -91,22 +90,17 @@ class CostMonitor(threading.Thread):
 # Traffic Logic
 # ==========================================
 async def simulate_user(client: httpx.AsyncClient, stats: dict):
-    # [需求] 流量分佈控制: 1, 2, 3 各佔 30%，剩下的 10% 隨機
     rand_val = random.random()
     
-    if rand_val < 0.30:
-        adapter = "1"
-    elif rand_val < 0.60:
-        adapter = "2"
-    elif rand_val < 0.90:
-        adapter = "3"
-    else:
-        adapter = str(random.randint(4, 100))
+    if rand_val < 0.30: adapter = "1"
+    elif rand_val < 0.60: adapter = "2"
+    elif rand_val < 0.90: adapter = "3"
+    else: adapter = str(random.randint(4, 100))
     
     payload = {
         "prompt": "test prompt", 
         "adapter_id": adapter,
-        "max_new_tokens": 64  # [修正] Max New Tokens = 32
+        "max_new_tokens": 64 
     }
     
     try:
@@ -118,10 +112,15 @@ async def simulate_user(client: httpx.AsyncClient, stats: dict):
             request_id = data["request_id"]
             stats["sent"] += 1
             
-            # [修正] 等待請求完成 (Listening for [DONE])
+            # [修正] 嚴格 Timeout 防止請求卡死
+            start_wait = time.time()
             try:
-                async with client.stream("GET", f"{CONTROL_URL}/stream/{request_id}", timeout=60.0) as response:
+                async with client.stream("GET", f"{CONTROL_URL}/stream/{request_id}", timeout=45.0) as response:
                     async for line in response.aiter_lines():
+                        # 超時強制中斷 (防止 SSE 連結卡住不放)
+                        if time.time() - start_wait > 30.0:
+                             break
+                             
                         if line.startswith("data: [DONE]"):
                             stats["finished"] += 1
                             break
@@ -147,19 +146,17 @@ async def traffic_generator(rps, duration, scenario_name):
         
         stats = {"sent": 0, "finished": 0}
         
-        # Phase 1: 流量發送 Loop (持續 duration 秒)
+        # Phase 1: 流量發送
         print(f"      -> Sending traffic for {duration}s...")
         while time.time() < end_time:
-            # 這裡不等待 simulate_user 完成，讓它在背景跑
             asyncio.create_task(simulate_user(client, stats))
             
-            # Poisson Arrival
             sleep_time = random.expovariate(rps)
             await asyncio.sleep(sleep_time)
         
-        # Phase 2: 等待 90% 完成 (Drain Phase)
+        # Phase 2: 等待 90% 完成
         print(f"      -> Waiting for 90% completion (Sent: {stats['sent']})...")
-        timeout_cutoff = time.time() + 120 # 最多等 2 分鐘
+        timeout_cutoff = time.time() + 120 
         while time.time() < timeout_cutoff:
             if stats["sent"] > 0:
                 ratio = stats["finished"] / stats["sent"]
@@ -176,7 +173,7 @@ async def traffic_generator(rps, duration, scenario_name):
         monitor.join()
         final_cost = monitor.get_cost()
         
-        # Phase 3: 清空隊列 (Reset System)
+        # Phase 3: 清空隊列
         print("      -> 🧹 Clearing System Queues...")
         try:
             await client.post(f"{CONTROL_URL}/debug/reset", timeout=5.0)
@@ -192,10 +189,8 @@ def start_system(env_vars):
     print(f"   🚀 Starting system... (Env: Semantic={env_vars.get('ENABLE_SEMANTIC')})")
     current_env = os.environ.copy()
     current_env.update(env_vars)
-    # 這裡會呼叫 single_area.sh
     proc = subprocess.Popen(["bash", "single_area.sh"], env=current_env, preexec_fn=os.setsid, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
-    # 等待 Control Node 上線
     for _ in range(40):
         try:
             r = requests.get(f"{CONTROL_URL}/status", timeout=1)
@@ -225,8 +220,6 @@ def stop_system(proc):
 # ==========================================
 def main():
     final_results = {name: [] for name in SCENARIOS}
-    
-    # 預先生成一次 Map 確保檔案存在
     subprocess.run(["python", "gen_lora_map.py"])
 
     for name, config in SCENARIOS.items():
@@ -240,12 +233,10 @@ def main():
         try:
             for rps in RPS_STEPS:
                 print(f"\n   >>> Testing RPS: {rps}")
-                
-                # [關鍵] 設定固定的 Seed 確保流量一致
                 random.seed(42 + rps)
                 
                 cost = asyncio.run(traffic_generator(rps, STEP_DURATION, name))
-                print(f"   💰 Cost: {cost:.2f} Node-Seconds")
+                print(f"   💰 Cost: {cost:.2f} Busy Node-Seconds")
                 final_results[name].append(cost)
                 
         finally:
@@ -258,9 +249,9 @@ def main():
         cfg = SCENARIOS[name]
         plt.plot(RPS_STEPS, costs, marker=cfg["marker"], label=name, color=cfg["color"], linewidth=2)
     
-    plt.title("Resource Cost vs Load (Semantic Clustering Effect)", fontsize=14)
+    plt.title("Resource Cost vs Load (Computing Time Only)", fontsize=14)
     plt.xlabel("Request Rate (RPS)", fontsize=12)
-    plt.ylabel("Cost (Active Node-Seconds)", fontsize=12)
+    plt.ylabel("Cost (Busy Node-Seconds)", fontsize=12)
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.legend()
     

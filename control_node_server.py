@@ -106,6 +106,7 @@ class NodeManager:
             target = info["target"]
             m = info["metrics"]
             
+            # [修正] 容量檢查：確保沒有超載
             if m["load"]["running_batch"] >= m["capacity"]["max_batch_size"]: return False
             if mode == "SWITCHING": return False 
             
@@ -312,8 +313,10 @@ async def dispatch_request(url: str, req: Dict):
                 if line.startswith("data:"):
                     content = line[len("data:"):].rstrip("\n")
                     if content and content != "[DONE]": _push_stream(req["rid"], content)
-    except Exception as e: _push_stream(req["rid"], json.dumps({"type": "error", "message": str(e)}))
-    finally: _finish_stream(req["rid"])
+    except Exception as e: 
+        _push_stream(req["rid"], json.dumps({"type": "error", "message": str(e)}))
+    finally: 
+        _finish_stream(req["rid"])
 
 def _push_stream(rid, data):
     if rid in stream_queues: stream_queues[rid][0].put(data)
@@ -334,8 +337,12 @@ async def scheduler_loop():
             continue
 
         did_work = False
+        
+        # -----------------------------------------------------------------
+        # Smart Dispatch Strategy
+        # -----------------------------------------------------------------
         if DISPATCH_MODE == "smart":
-            # Smart Dispatch Logic
+            # 1. 優先處理 Merged Assignment
             merged_map = node_mgr.merged_assignment.copy()
             for aid, dedicated_node in merged_map.items():
                 if len(adapter_queues[aid]) > 0:
@@ -348,7 +355,7 @@ async def scheduler_loop():
                             did_work = True
                             dispatched = True
                     if not dispatched:
-                        # Spillover
+                        # Spillover (溢出流量)
                         for url in healthy_nodes:
                             if url == dedicated_node: continue
                             if node_mgr.can_node_accept(url, aid):
@@ -357,6 +364,7 @@ async def scheduler_loop():
                                 did_work = True
                                 break
 
+            # 2. 處理其餘的一般請求
             pending = [a for a, q in adapter_queues.items() if len(q) > 0]
             for aid in pending:
                 if aid in merged_map and len(adapter_queues[aid]) == 0: continue
@@ -366,6 +374,33 @@ async def scheduler_loop():
                         asyncio.create_task(dispatch_request(url, req))
                         did_work = True
                         break
+        
+        # -----------------------------------------------------------------
+        # Random Dispatch Strategy (Modified for Safety)
+        # -----------------------------------------------------------------
+        elif DISPATCH_MODE == "random":
+            # 隨機挑選一個還有東西的 Queue
+            active_queues = [q for q in adapter_queues.values() if len(q) > 0]
+            if active_queues:
+                target_q = random.choice(active_queues)
+                
+                # 隨機挑選一個活著的 Node
+                target_node = random.choice(healthy_nodes)
+                
+                # [關鍵] 檢查容量，避免把 Node 塞爆
+                info = node_mgr.nodes.get(target_node)
+                if info and info.get("metrics"):
+                    cap = info["metrics"]["capacity"]["max_batch_size"]
+                    load = info["metrics"]["load"]["running_batch"]
+                    
+                    if load < cap:
+                        # 容量足夠，發送請求
+                        req = target_q.popleft()
+                        asyncio.create_task(dispatch_request(target_node, req))
+                        did_work = True
+                    else:
+                        # 容量不足，這次不發送 (Wait for next loop)
+                        pass
         
         if not did_work:
             scheduler_wakeup.clear()
@@ -476,19 +511,11 @@ async def send_request(req: AddRequest):
     rid = str(uuid.uuid4())
     stream_queues[rid] = (Queue(), time.time())
     
-    # [實驗修改] Random Mode: 直接亂發
-    if DISPATCH_MODE == "random":
-        actives = node_mgr.get_healthy_active_nodes()
-        if not actives:
-             _push_stream(rid, json.dumps({"type": "error", "message": "No active nodes"}))
-             _finish_stream(rid)
-        else:
-             target = random.choice(actives)
-             logger.info(f"🎲 Random {req.adapter_id} -> {target}")
-             asyncio.create_task(_proxy_request(rid, target, req))
-        return {"request_id": rid}
-
-    # Smart Mode
+    # [修正] 移除 Random 模式的特殊直通邏輯
+    # 所有模式統一進入 Queue，由 Scheduler 決定分發
+    # Smart Mode & Random Mode logic are now unified in scheduler_loop
+    
+    # 檢查是否為本區權責
     target_type = node_mgr.lora_types.get(req.adapter_id, "global")
     if target_type != "global" and target_type != AREA_ID:
         _push_stream(rid, json.dumps({"type": "error", "message": "Security Error"}))
@@ -511,9 +538,11 @@ async def send_request(req: AddRequest):
                 logger.info(f"🔄 Substitute: {req.adapter_id} -> {final_id}")
 
     if not is_hit:
+        # Relay to EFO if not handled locally
         asyncio.create_task(_proxy_request(rid, f"{EFO_URL}/relay_request", req))
         return {"request_id": rid}
 
+    # 加入 Queue
     with node_mgr.lock:
         adapter_queues[final_id].append({
             "rid": rid, "prompt": req.prompt, "adapter_id": final_id, "max_new_tokens": req.max_new_tokens
@@ -541,15 +570,24 @@ async def stream(request_id: str, request: Request):
 @app.get("/status")
 def status():
     with node_mgr.lock:
-        # [實驗修正] 如果是 Random 模式 (全開)，固定回傳節點總數 (不論是否健康)
-        # 這樣 Cost 曲線才不會因為高負載掉下去
-        metric_nodes = len(node_mgr.active_urls)
-        if INITIAL_NODES == "all":
-             metric_nodes = max(metric_nodes, len(ALL_CANDIDATES))
-
+        # [修改] 計算真正正在運算的節點 (Busy Nodes)
+        # 用於 Cost 計算，檢查 running_batch > 0 的節點
+        busy_count = 0
+        active_count = 0
+        
+        for url in node_mgr.active_urls:
+            info = node_mgr.nodes.get(url)
+            if info:
+                active_count += 1
+                # 檢查 Metrics
+                m = info.get("metrics", {}).get("load", {})
+                if m.get("running_batch", 0) > 0:
+                    busy_count += 1
+        
         return {
             "node_type": "CONTROL_NODE",
-            "active_nodes": metric_nodes,
+            "active_nodes": active_count,
+            "computing_nodes": busy_count, # [新增] 提供給監控程式使用
             "queues": {k: len(v) for k, v in adapter_queues.items()},
         }
 
@@ -563,20 +601,12 @@ async def fetch_adapter_for_compute(adapter_id: str):
 
 @app.post("/debug/reset")
 async def debug_reset():
-    """
-    [Debug] Force reset all queues and propagate to compute nodes.
-    Useful for immediate test teardown without waiting for cooldown.
-    """
     logger.warning("🚨 SYSTEM RESET TRIGGERED! Clearing all queues...")
-    
-    # 1. Clear local queues
     with node_mgr.lock:
         adapter_queues.clear()
         stream_queues.clear()
     
-    # 2. Propagate to all known compute nodes
     all_nodes = list(node_mgr.nodes.keys())
-    
     async def call_node_reset(url):
         try:
             await client.post(f"{url}/debug/reset", timeout=2.0)
