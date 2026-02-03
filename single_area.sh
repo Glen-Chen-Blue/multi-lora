@@ -54,7 +54,7 @@ start() {
   CUDA_VISIBLE_DEVICES=0 \
   NODE_ID=cn-1 \
   MAX_BATCH_SIZE=64 \
-  MAX_CPU_LORAS=10 \
+  MAX_CPU_LORAS=32 \
   LORA_PATH="./lora_repo/cn_1" \
   CONTROL_NODE_URL="http://127.0.0.1:9000" \
   uvicorn compute_node_server:app --port 8001 &
@@ -65,7 +65,7 @@ start() {
   CUDA_VISIBLE_DEVICES=1 \
   NODE_ID=cn-2 \
   MAX_BATCH_SIZE=64 \
-  MAX_CPU_LORAS=10 \
+  MAX_CPU_LORAS=32 \
   LORA_PATH="./lora_repo/cn_2" \
   CONTROL_NODE_URL="http://127.0.0.1:9000" \
   uvicorn compute_node_server:app --port 8002 &

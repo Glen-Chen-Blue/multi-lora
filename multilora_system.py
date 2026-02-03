@@ -3,9 +3,9 @@ import torch
 import torch.nn as nn
 import time
 import threading
-from typing import Dict, Optional, Any, List, Tuple, Union, Set
+from typing import Dict, Optional, Any, List, Tuple, Union, Set, Callable
 from collections import OrderedDict, deque
-from safetensors.torch import load_file
+from safetensors.torch import load 
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 # ============================================================
@@ -144,10 +144,10 @@ def _batch_past(past_list: List[Tuple], target_len: int) -> Tuple:
     return tuple(batched)
 
 # ============================================================
-# Multi-LoRA Engine Core (With Dynamic Batch Sizing & CPU LRU)
+# Multi-LoRA Engine Core (Diskless / In-Memory Version)
 # ============================================================
 class MultiLoRAEngine:
-    def __init__(self, model_id: str, r: int = 16, alpha: int = 64, adapter_slots: int = 2, max_batch_size: int = 4, max_cpu_loras: int = 10, device: Optional[str] = None, torch_dtype: torch.dtype = torch.bfloat16, enable_monitor: bool = True):
+    def __init__(self, model_id: str, r: int = 16, alpha: int = 64, adapter_slots: int = 2, max_batch_size: int = 4, max_cpu_loras: int = 10, device: Optional[str] = None, torch_dtype: torch.dtype = torch.bfloat16, enable_monitor: bool = True, adapter_fetcher: Optional[Callable[[str], bytes]] = None):
         self.device = torch.device(device) if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.dtype = torch_dtype if self.device.type == "cuda" else torch.float32
         self.enable_monitor = enable_monitor
@@ -161,6 +161,9 @@ class MultiLoRAEngine:
         # [CPU LRU] Configuration
         self.max_cpu_loras = int(max_cpu_loras)
         self.adapter_slots = int(adapter_slots)
+        
+        # [Network]
+        self.adapter_fetcher = adapter_fetcher  # Callback to fetch bytes from Control Node
         
         # [Auto-Scale] Tracking vars
         self.last_adjust_time = time.time()
@@ -177,9 +180,9 @@ class MultiLoRAEngine:
         self._replace_layers(r, alpha)
 
         # [LRU System]
-        # adapter_paths: aid -> safetensors path (Metadata only)
+        # known_adapters: Set of allowed/available IDs (Metadata only)
         # cpu_cache: aid -> weights dict (OrderedDict for LRU)
-        self.adapter_paths: Dict[str, str] = {}
+        self.known_adapters: Set[str] = set()
         self.cpu_cache: OrderedDict[str, Dict] = OrderedDict()
         
         self.gpu_slots: Dict[int, str] = {} 
@@ -209,74 +212,66 @@ class MultiLoRAEngine:
                 replaced_count += 1
         print(f"🔧 [Engine] Replaced {replaced_count} layers with DynamicLoRALinear.")
 
-    def scan_adapters(self, base_path: str = "./testLoRA", allowed_adapters: Optional[List[str]] = None):
+    def update_known_adapters(self, adapters: List[str]):
         """
-        Scans the base_path for valid adapters and registers their paths.
-        Does NOT load weights into memory immediately.
+        Updates the list of known adapter IDs.
+        If an adapter is removed from the list, we also clear it from caches.
         """
-        if not os.path.exists(base_path): return
+        new_set = set(adapters)
+        # Cleanup removed adapters
+        current = list(self.known_adapters)
+        for aid in current:
+            if aid not in new_set:
+                self.known_adapters.remove(aid)
+                # Remove from RAM
+                if aid in self.cpu_cache: 
+                    del self.cpu_cache[aid]
+                    print(f"🗑️ [Engine] Removed {aid} from CPU Cache (Not in sync list).")
+                # Remove from GPU
+                if aid in self.adapter_to_slot:
+                    slot = self.adapter_to_slot.pop(aid)
+                    if self.gpu_slots.get(slot) == aid: del self.gpu_slots[slot]
+                    self.slot_lru.move_to_end(slot, last=False)
         
-        whitelist = set(allowed_adapters) if allowed_adapters is not None else None
-        
-        # Cleanup removed adapters from path registry
-        if whitelist is not None:
-            current_paths = list(self.adapter_paths.keys())
-            for aid in current_paths:
-                if aid not in whitelist:
-                    del self.adapter_paths[aid]
-                    # Also remove from cache if exists
-                    if aid in self.cpu_cache:
-                        del self.cpu_cache[aid]
-                    # Remove from GPU if exists
-                    if aid in self.adapter_to_slot:
-                        slot = self.adapter_to_slot.pop(aid)
-                        if self.gpu_slots.get(slot) == aid: del self.gpu_slots[slot]
-                        self.slot_lru.move_to_end(slot, last=False)
-
-        try:
-            dirs = sorted([d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d))])
-        except OSError: return
-
-        count = 0
-        for d in dirs:
-            aid = d.split("_")[-1] if "_" in d else d
-            if whitelist is not None and aid not in whitelist: continue
-            
-            safetensor_path = os.path.join(base_path, d, "adapter_model.safetensors")
-            if os.path.exists(safetensor_path):
-                self.adapter_paths[aid] = safetensor_path
-                count += 1
-                
-        print(f"✅ [Engine] Scanned {count} adapters. (Lazy loaded)")
+        self.known_adapters = new_set
+        print(f"✅ [Engine] Updated known adapters list: {len(self.known_adapters)} items.")
 
     def _ensure_cpu_loaded(self, adapter_id: str):
         """
         Ensures the adapter is loaded in CPU RAM.
-        If not, loads it from disk, potentially evicting LRU adapters.
+        If not in RAM, downloads directly from Network (Diskless).
         """
         # 1. Hit: Already in CPU Cache
         if adapter_id in self.cpu_cache:
             self.cpu_cache.move_to_end(adapter_id) # Mark as recently used
             return
 
-        # 2. Check existence
-        if adapter_id not in self.adapter_paths:
-            raise KeyError(f"Adapter {adapter_id} path not found in registry.")
+        # 2. Check metadata
+        if adapter_id not in self.known_adapters:
+            # We assume if it's requested, we should try to fetch it if we have a fetcher,
+            # but strictly speaking it should be synced first.
+            # We'll allow it to try fetching if configured.
+            pass
 
-        path = self.adapter_paths[adapter_id]
-        
         # 3. Evict if full
         while len(self.cpu_cache) >= self.max_cpu_loras:
             evicted_aid, _ = self.cpu_cache.popitem(last=False) # FIFO (LRU)
-            # Note: We don't necessarily force eviction from GPU here, 
-            # because GPU has its own slots. But if we want to be strict, we could.
-            # Usually we keep GPU cache independent until slot contention occurs.
-            # print(f"♻️ [CPU LRU] Evicted {evicted_aid} from CPU RAM")
+            # Since we are diskless, eviction means complete data loss.
+            print(f"♻️ [CPU LRU] Evicted {evicted_aid} from CPU RAM (Dropped).")
 
-        # 4. Load from disk
+        # 4. Fetch from Network (Diskless Load)
         try:
-            # print(f"📂 [CPU LRU] Loading {adapter_id} from disk...")
-            weights = load_file(path, device="cpu")
+            if not self.adapter_fetcher:
+                raise ValueError("No adapter fetcher configured for diskless loading.")
+            
+            print(f"⬇️ [Network] Fetching {adapter_id} from Control Node...")
+            t0 = time.time()
+            model_bytes = self.adapter_fetcher(adapter_id)
+            fetch_time = time.time() - t0
+            
+            # Load safetensors from bytes
+            weights = load(model_bytes)
+            
             adapter_weights = {}
             for n, m in self.model.named_modules():
                 if isinstance(m, DynamicLoRALinear):
@@ -289,8 +284,10 @@ class MultiLoRAEngine:
                         }
             if adapter_weights:
                 self.cpu_cache[adapter_id] = adapter_weights
+                print(f"✅ [Memory] Loaded {adapter_id} into CPU RAM ({fetch_time:.2f}s, {len(model_bytes)/1024/1024:.2f}MB)")
+                
         except Exception as e:
-            print(f"❌ [Engine] Failed to load {adapter_id} from disk: {e}")
+            print(f"❌ [Engine] Failed to fetch/load {adapter_id}: {e}")
             raise e
 
     def _evict_slot(self, slot_id: int):
@@ -333,7 +330,7 @@ class MultiLoRAEngine:
 
     @torch.no_grad()
     def merge_adapter(self, adapter_id: str, force: bool = False):
-        # Ensure it's available (Disk -> CPU -> Merge)
+        # Ensure it's available (Network -> CPU -> Merge)
         self._ensure_cpu_loaded(adapter_id)
         
         if not force:
@@ -370,8 +367,12 @@ class MultiLoRAEngine:
 
     def add_request(self, prompt: str, adapter_id: str, request_id: str, max_new_tokens: int = 128):
         # [Check Metadata Only] 
-        # We only check if path exists. CPU loading is deferred to execution.
-        if adapter_id not in self.adapter_paths: raise KeyError(f"Adapter {adapter_id} unavailable (not found in paths).")
+        # We only check if it's in the known list. CPU loading is deferred.
+        if adapter_id not in self.known_adapters: 
+             # Check if we can just fetch it? 
+             # For system stability, we might warn, but let's try.
+             # Ideally the Control Node syncs it first.
+             pass
         
         inputs = self.tokenizer(prompt, return_tensors="pt")
         with self.lock:
@@ -465,6 +466,7 @@ class MultiLoRAEngine:
             else:
                 required = sorted(list({r["adapter_id"] for r in self.running_queue}))
                 # [CPU LRU Logic happens inside here]
+                # If diskless, this will fetch from network if missing
                 self._ensure_adapters_resident(required)
 
             # 4. 執行模型

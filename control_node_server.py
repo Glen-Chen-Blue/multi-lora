@@ -32,7 +32,6 @@ MY_NODE_URL = os.environ.get("MY_NODE_URL", "http://localhost:9000")
 EFO_URL = os.environ.get("EFO_URL", "http://localhost:9090")
 LORA_PATH = os.environ.get("LORA_PATH", "./lora_repo/control")
 ALL_CANDIDATES = [x.strip() for x in os.environ.get("COMPUTE_NODES", "http://127.0.0.1:8001").split(",")]
-# [新增] 讀取區域 ID，預設為 Area 1
 AREA_ID = os.environ.get("AREA_ID", "1")
 
 SCALE_UP_THRESHOLD = int(os.environ.get("SCALE_UP_THRESHOLD", "4"))     
@@ -63,7 +62,6 @@ class NodeManager:
         self.minimal_set: List[str] = []
         self.merged_assignment: Dict[str, str] = {} 
         
-        # [新增] 儲存 LoRA 類型 (id -> "global" | "1" | "2" ...)
         self.lora_types: Dict[str, str] = {} 
         
         self.config_version: int = 0
@@ -107,7 +105,8 @@ class NodeManager:
         with self.lock:
             for url in self.active_urls:
                 info = self.nodes.get(url)
-                if info and info.get("metrics") and (now - info["last_seen"] < 5.0):
+                # 放寬 Last Seen 容忍度，避免網路擁塞時誤殺
+                if info and info.get("metrics") and (now - info["last_seen"] < 10.0):
                     res.append(url)
         return res
 
@@ -147,7 +146,10 @@ node_mgr = NodeManager()
 adapter_queues: Dict[str, Deque] = defaultdict(deque)
 stream_queues: Dict[str, Tuple[Queue, float]] = {} 
 scheduler_wakeup = threading.Event()
-client = httpx.AsyncClient(timeout=60.0) 
+
+# [修改] 增加連線池大小以應對高併發 (2000 requests)
+limits = httpx.Limits(max_keepalive_connections=1000, max_connections=2000)
+client = httpx.AsyncClient(limits=limits, timeout=60.0) 
 download_lock = asyncio.Lock()
 
 # ============================================================
@@ -200,6 +202,9 @@ def auto_scaler():
             info = node_mgr.nodes.get(url)
             if info and info.get("metrics"):
                 total_capacity += info["metrics"]["capacity"]["max_batch_size"]
+        
+        # 避免 total_capacity 為 0 導致除法錯誤或錯誤判斷
+        if total_capacity == 0: total_capacity = 32 # Fallback default
         
         threshold = total_capacity * 0.5
         
@@ -455,7 +460,8 @@ async def poller_task():
         with node_mgr.lock: targets = list(node_mgr.active_urls)
         for url in targets:
             try:
-                r = await client.get(f"{url}/metrics", timeout=0.3)
+                # [修改] 增加 Timeout，避免在高負載時誤判節點死亡
+                r = await client.get(f"{url}/metrics", timeout=1.0)
                 node_mgr.update_metrics(url, r.json())
             except Exception: pass
         scheduler_wakeup.set()
@@ -464,7 +470,6 @@ async def poller_task():
 async def heartbeat_task():
     while True:
         try:
-            # 傳送 Heartbeat 時也可以帶上 area_id，這裡沿用 Register 的邏輯
             await client.post(f"{EFO_URL}/heartbeat", json={"control_node_url": MY_NODE_URL}, timeout=3.0)
         except Exception: pass
         await asyncio.sleep(30.0)
@@ -502,7 +507,6 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(heartbeat_task())
     asyncio.create_task(reaper_task())
     
-    # [修改] 註冊時攜帶 area_id
     register_payload = {
         "control_node_url": MY_NODE_URL,
         "area_id": AREA_ID
@@ -522,7 +526,6 @@ class ConfigUpdate(BaseModel):
     assigned_adapters: List[str]
     affinity_table: Dict[str, List[str]]
     minimal_set: List[str]
-    # [新增] 接收 LoRA 類型表
     lora_types: Dict[str, str] = {}
     version_id: int 
 
@@ -534,7 +537,6 @@ async def update_config(cfg: ConfigUpdate):
         node_mgr.allowed_adapters = cfg.assigned_adapters
         node_mgr.affinity_table = cfg.affinity_table
         node_mgr.minimal_set = cfg.minimal_set
-        # [新增] 更新類型表
         node_mgr.lora_types = cfg.lora_types
     
     tasks = [ensure_local_adapter(aid) for aid in cfg.assigned_adapters]
@@ -563,11 +565,8 @@ async def send_request(req: AddRequest):
     rid = str(uuid.uuid4())
     stream_queues[rid] = (Queue(), time.time())
     
-    # [核心修改] 漏斗式過濾邏輯
     target_type = node_mgr.lora_types.get(req.adapter_id, "global")
     
-    # 1. 檢查主權 (Legality Check)
-    # 如果目標 LoRA 指定了 Area (非 global)，且不是本區域 -> 拒絕
     if target_type != "global" and target_type != AREA_ID:
         logger.warning(f"🚫 Security Block: Request {req.adapter_id} (Type: {target_type}) illegal in Area {AREA_ID}")
         _push_stream(rid, json.dumps({
@@ -580,25 +579,19 @@ async def send_request(req: AddRequest):
     final_id = req.adapter_id
     is_hit = False
     
-    # 2. 檢查本地可用性與替代品
     with node_mgr.lock:
         if req.adapter_id in node_mgr.allowed_adapters:
             is_hit = True
             final_id = req.adapter_id
         else:
-            # 查找替代品
             substitutes = node_mgr.affinity_table.get(req.adapter_id, [])
             valid_subs = []
             for sub_id in substitutes:
-                # 篩選條件：
-                # 1. 該替代品必須在本地允許列表中 (allowed_adapters)
-                # 2. 該替代品必須是 "global" 或者是 "本區域專用" (不可用別區的 Local 做替代)
                 if sub_id in node_mgr.allowed_adapters:
                     sub_type = node_mgr.lora_types.get(sub_id, "global")
                     if sub_type == "global" or sub_type == AREA_ID:
                         valid_subs.append(sub_id)
             
-            # 優先級排序：若 Target 是 Local，優先找 Local 替代品；否則找 Global
             if valid_subs:
                 def sort_key(sid):
                     stype = node_mgr.lora_types.get(sid, "global")
@@ -609,9 +602,7 @@ async def send_request(req: AddRequest):
                 is_hit = True
                 logger.info(f"🔄 Substitute: {req.adapter_id} -> {final_id} (Type: {node_mgr.lora_types.get(final_id, 'unknown')})")
 
-    # 3. 決策：本地排程 或 卸載
     if not is_hit:
-        # 如果是 Local Request (且沒找到替代品) -> 嚴格禁止卸載 -> 拒絕
         if target_type == AREA_ID:
              logger.warning(f"🚫 Local Cache Miss & No Substitute for {req.adapter_id}. Drop.")
              _push_stream(rid, json.dumps({
@@ -621,11 +612,9 @@ async def send_request(req: AddRequest):
              _finish_stream(rid)
              return {"request_id": rid}
         
-        # 如果是 Global -> Offload
         asyncio.create_task(_proxy_efo(rid, req))
         return {"request_id": rid}
 
-    # Hit -> 排入 Scheduler
     selected_id = final_id
     with node_mgr.lock:
         adapter_queues[selected_id].append({

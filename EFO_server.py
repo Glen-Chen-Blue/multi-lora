@@ -136,7 +136,6 @@ async def broadcast_config():
     payload_base = {
         "affinity_table": state.affinity_table,
         "minimal_set": state.minimal_set,
-        # [新增] 廣播所有 LoRA 的類型表，讓 Control Node 做檢查
         "lora_types": state.lora_types, 
         "version_id": state.config_version
     }

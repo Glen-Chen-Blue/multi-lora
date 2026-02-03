@@ -32,6 +32,7 @@ logger = logging.getLogger("ComputeNode")
 # ============================================================
 NODE_ID = os.environ.get("NODE_ID", "cn-1")
 MODEL_ID = os.environ.get("MODEL_ID", "unsloth/Meta-Llama-3.1-8B")
+# LORA_PATH is technically not needed for storage anymore, but maybe for fallback or just ignore
 LORA_PATH = os.environ.get("LORA_PATH", "./lora_repo/compute")
 CONTROL_NODE_URL = os.environ.get("CONTROL_NODE_URL", "http://localhost:9000")
 
@@ -84,6 +85,26 @@ def on_finish(rid: str, reason: str):
         decoding_state.pop(rid, None)
 
 # ============================================================
+# Network Fetcher (Sync for Engine Thread)
+# ============================================================
+def fetch_adapter_sync(adapter_id: str) -> bytes:
+    """
+    Synchronously fetch adapter bytes from Control Node.
+    This runs inside the engine thread when a cache miss occurs.
+    """
+    url = f"{CONTROL_NODE_URL}/fetch_adapter/{adapter_id}"
+    try:
+        # Use a fresh sync client for thread safety within the engine loop
+        with httpx.Client(timeout=60.0) as sync_client:
+            resp = sync_client.get(url)
+            if resp.status_code != 200:
+                raise Exception(f"HTTP {resp.status_code} from {url}")
+            return resp.content
+    except Exception as e:
+        logger.error(f"❌ Failed to fetch adapter {adapter_id}: {e}")
+        raise e
+
+# ============================================================
 # Engine Loop
 # ============================================================
 def engine_loop_thread():
@@ -106,20 +127,25 @@ def engine_loop_thread():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global engine
-    os.makedirs(LORA_PATH, exist_ok=True)
-    logger.info(f"Initializing Compute Node {NODE_ID} (Max CPU LoRAs: {MAX_CPU_LORAS})...")
+    # We don't necessarily need to create LORA_PATH directory anymore since we are diskless
+    # os.makedirs(LORA_PATH, exist_ok=True) 
+    
+    logger.info(f"Initializing Compute Node {NODE_ID} (Max CPU LoRAs: {MAX_CPU_LORAS}, Diskless Mode)...")
     
     engine = MultiLoRAEngine(
         model_id=MODEL_ID,
         adapter_slots=8,
         max_batch_size=MAX_BATCH_SIZE_LIMIT,
         max_cpu_loras=MAX_CPU_LORAS,
-        enable_monitor=True
+        enable_monitor=True,
+        adapter_fetcher=fetch_adapter_sync  # Inject the network fetcher
     )
     engine.on_token = on_token
     engine.on_finish = on_finish
     
-    engine.scan_adapters(LORA_PATH)
+    # NOTE: We no longer scan local disk.
+    # We wait for 'sync_adapters' to tell us what is available,
+    # or rely on on-demand fetching.
     
     t = threading.Thread(target=engine_loop_thread, daemon=True)
     t.start()
@@ -150,34 +176,6 @@ class UnmergeRequest(BaseModel):
 class SyncAdaptersRequest(BaseModel):
     adapters: List[str]
     version_id: int 
-
-# ============================================================
-# Download Logic
-# ============================================================
-async def download_missing_adapters(adapters: List[str]):
-    for aid in adapters:
-        target_dir = os.path.join(LORA_PATH, aid)
-        target_file = os.path.join(target_dir, "adapter_model.safetensors")
-        
-        if os.path.exists(target_file):
-            continue
-            
-        logger.info(f"📥 Missing {aid}, downloading from {CONTROL_NODE_URL}...")
-        os.makedirs(target_dir, exist_ok=True)
-        
-        try:
-            async with client.stream("GET", f"{CONTROL_NODE_URL}/fetch_adapter/{aid}") as resp:
-                if resp.status_code != 200:
-                    logger.error(f"Failed to fetch {aid} from Control Node: {resp.status_code}")
-                    continue
-                
-                with open(target_file, "wb") as f:
-                    async for chunk in resp.aiter_bytes():
-                        f.write(chunk)
-            logger.info(f"✅ Downloaded {aid} successfully.")
-        except Exception as e:
-            logger.error(f"Download error for {aid}: {e}")
-            if os.path.exists(target_file): os.remove(target_file)
 
 # ============================================================
 # Endpoints
@@ -215,8 +213,10 @@ async def sync_adapters(req: SyncAdaptersRequest):
         last_config_version = req.version_id
 
     try:
-        await download_missing_adapters(req.adapters)
-        engine.scan_adapters(LORA_PATH, allowed_adapters=req.adapters)
+        # Instead of downloading files to disk, we just update the allowed list in Engine.
+        # The Engine will fetch them on-demand if they are needed for inference.
+        logger.info(f"🔄 Syncing adapter list (v{req.version_id}): {len(req.adapters)} items")
+        engine.update_known_adapters(req.adapters)
         
         return {
             "status": "ok", 
@@ -243,7 +243,7 @@ def add_request(req: AddRequest):
         with stream_lock:
             stream_queues.pop(rid, None)
             decoding_state.pop(rid, None)
-        raise HTTPException(400, f"Adapter {req.adapter_id} unavailable (not found in paths): {e}")
+        raise HTTPException(400, f"Adapter {req.adapter_id} error: {e}")
 
     def event_generator():
         try:

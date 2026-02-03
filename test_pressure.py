@@ -19,7 +19,7 @@ TRAFFIC_PATTERN = "1"
 TARGET_ADAPTER = "1"     
 
 TOTAL_REQUESTS = 100
-AVG_RPS = 15.0 
+AVG_RPS = 100
 
 PROMPTS = ["test"]
 
@@ -80,7 +80,7 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
 
     raw_prompt = random.choice(PROMPTS)
     formatted_prompt = format_alpaca_prompt(raw_prompt)
-    current_max_tokens = random.randint(64, 128)
+    current_max_tokens = random.randint(1, 64)
     
     payload = {
         "prompt": formatted_prompt, 
