@@ -1,3 +1,7 @@
 testLoRA/
 lora_repo/
+unsloth_compiled_cache/
 __pycache__/
+data/
+plots/
+results/
