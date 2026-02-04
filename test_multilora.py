@@ -13,8 +13,8 @@ import numpy as np
 # ==========================================
 # Experiment Configuration
 # ==========================================
-RPS_STEPS = [i for i in range(1, 9)] 
-STEP_DURATION = 60
+RPS_STEPS = [i*2 for i in range(1, 9)] 
+STEP_DURATION = 30
 CONTROL_URL = "http://127.0.0.1:9000"
 MAXNEWTOKENS = 64
 
