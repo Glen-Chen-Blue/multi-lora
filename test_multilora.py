@@ -13,9 +13,10 @@ import numpy as np
 # ==========================================
 # Experiment Configuration
 # ==========================================
-RPS_STEPS = list(range(1, 17))  # 1 to 16
-STEP_DURATION = 30
+RPS_STEPS = [i for i in range(1, 9)] 
+STEP_DURATION = 60
 CONTROL_URL = "http://127.0.0.1:9000"
+MAXNEWTOKENS = 64
 
 SCENARIOS = {
     "Smart Mechanism (Ours)": {
@@ -100,7 +101,7 @@ async def simulate_user(client: httpx.AsyncClient, stats: dict):
     payload = {
         "prompt": "test prompt", 
         "adapter_id": adapter,
-        "max_new_tokens": 64 
+        "max_new_tokens": MAXNEWTOKENS
     }
     
     try:
@@ -154,14 +155,14 @@ async def traffic_generator(rps, duration, scenario_name):
             sleep_time = random.expovariate(rps)
             await asyncio.sleep(sleep_time)
         
-        # Phase 2: 等待 90% 完成
-        print(f"      -> Waiting for 90% completion (Sent: {stats['sent']})...")
+        # Phase 2: 等待 95% 完成
+        print(f"      -> Waiting for 95% completion (Sent: {stats['sent']})...")
         timeout_cutoff = time.time() + 120 
         while time.time() < timeout_cutoff:
             if stats["sent"] > 0:
                 ratio = stats["finished"] / stats["sent"]
-                if ratio >= 0.9:
-                    print(f"      ✅ Reached 90% completion ({stats['finished']}/{stats['sent']})")
+                if ratio >= 0.95:
+                    print(f"      ✅ Reached 95% completion ({stats['finished']}/{stats['sent']})")
                     break
             elif stats["sent"] == 0:
                 break
