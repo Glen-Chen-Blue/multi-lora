@@ -9,12 +9,13 @@ import random
 import threading
 import matplotlib.pyplot as plt
 import numpy as np
+import json  # [新增] 用於儲存數據
 
 # ==========================================
 # Experiment Configuration
 # ==========================================
 RPS_STEPS = [i*2 for i in range(1, 9)] 
-STEP_DURATION = 30
+STEP_DURATION = 40
 CONTROL_URL = "http://127.0.0.1:9000"
 MAXNEWTOKENS = 64
 
@@ -243,6 +244,23 @@ def main():
         finally:
             stop_system(proc)
 
+    # ==========================================
+    # [新增] 儲存實驗數據到 JSON
+    # ==========================================
+    data_to_save = {
+        "rps_steps": RPS_STEPS,
+        "results": final_results,
+        "scenarios_config": SCENARIOS
+    }
+    
+    json_filename = "experiment_data.json"
+    with open(json_filename, "w", encoding="utf-8") as f:
+        json.dump(data_to_save, f, indent=4, ensure_ascii=False)
+    print(f"\n💾 Data saved to {json_filename}")
+
+    # ==========================================
+    # 繪圖 (保留作為即時檢查用)
+    # ==========================================
     print("\n📊 Generating Plot...")
     plt.figure(figsize=(10, 6))
     
