@@ -58,6 +58,10 @@ class DynamicLoRALinear(nn.Module):
             return base_out
 
         x_lora = x.to(self.lora_As.dtype)
+        # Ensure mapping is on the correct device
+        if adapter_mapping.device != self.lora_As.device:
+            adapter_mapping = adapter_mapping.to(self.lora_As.device)
+
         A_selected = self.lora_As.index_select(0, adapter_mapping)
         B_selected = self.lora_Bs.index_select(0, adapter_mapping)
 
@@ -116,6 +120,7 @@ def _to_model_cache(past_legacy: Any) -> Any:
 def _slice_past_for_sample(past_legacy: Tuple, sample_idx: int, seq_len: int) -> Tuple:
     out = []
     for layer_k, layer_v in past_legacy:
+        # standard layout: (batch, heads, seq, dim)
         ks = layer_k[sample_idx:sample_idx+1, :, -seq_len:, :].contiguous()
         vs = layer_v[sample_idx:sample_idx+1, :, -seq_len:, :].contiguous()
         out.append((ks, vs))
@@ -125,6 +130,7 @@ def _left_pad_kv(k: torch.Tensor, v: torch.Tensor, target_len: int) -> Tuple[tor
     cur_len = k.shape[2]
     if cur_len >= target_len: return k, v
     pad_len = target_len - cur_len
+    # Padding with zeros
     k_pad = torch.zeros((k.shape[0], k.shape[1], pad_len, k.shape[3]), device=k.device, dtype=k.dtype)
     v_pad = torch.zeros((v.shape[0], v.shape[1], pad_len, v.shape[3]), device=v.device, dtype=v.dtype)
     return torch.cat([k_pad, k], dim=2), torch.cat([v_pad, v], dim=2)
@@ -144,32 +150,32 @@ def _batch_past(past_list: List[Tuple], target_len: int) -> Tuple:
     return tuple(batched)
 
 # ============================================================
-# Multi-LoRA Engine Core (Diskless / In-Memory Version)
+# Multi-LoRA Engine Core (Slot-Based Management)
 # ============================================================
 class MultiLoRAEngine:
-    def __init__(self, model_id: str, r: int = 16, alpha: int = 64, adapter_slots: int = 2, max_batch_size: int = 4, max_cpu_loras: int = 10, device: Optional[str] = None, torch_dtype: torch.dtype = torch.bfloat16, enable_monitor: bool = True, adapter_fetcher: Optional[Callable[[str], bytes]] = None):
+    def __init__(self, model_id: str, r: int = 16, alpha: int = 64, device: Optional[str] = None, torch_dtype: torch.dtype = torch.bfloat16, enable_monitor: bool = True, adapter_fetcher: Optional[Callable[[str], bytes]] = None):
         self.device = torch.device(device) if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.dtype = torch_dtype if self.device.type == "cuda" else torch.float32
-        self.enable_monitor = enable_monitor
-        self.step_counter = 0
         
-        # [Auto-Scale] Configuration
-        self.limit_max_batch_size = int(max_batch_size) 
-        self.max_batch_size = min(32, self.limit_max_batch_size)
-        self.min_batch_size = 1
+        # [Capacity Configuration]
+        # Merged Mode: 20 slots (Requests only)
+        # Unmerged Mode: 16 slots (Requests + LoRA Adapters)
+        self.merged_capacity = 15
+        self.unmerged_capacity = 12
         
-        # [CPU LRU] Configuration
-        self.max_cpu_loras = int(max_cpu_loras)
-        self.adapter_slots = int(adapter_slots)
+        # Hardware slots must match the max possible unmerged LoRAs to avoid index errors.
+        # Max theoretical LoRAs = 12 (if 0 requests, though unlikely).
+        self.adapter_slots = self.unmerged_capacity 
+        
+        # [CPU Memory Configuration]
+        self.max_cpu_loras = 30
         
         # [Network]
-        self.adapter_fetcher = adapter_fetcher  # Callback to fetch bytes from Control Node
-        
-        # [Auto-Scale] Tracking vars
-        self.last_adjust_time = time.time()
-        self.adjust_interval = 1.0  
-        self.vram_high_threshold = 0.95 
-        self.vram_safe_threshold = 0.8 
+        self.adapter_fetcher = adapter_fetcher 
+
+        # [Constraints]
+        self.FIXED_INPUT_LEN = 512
+        self.FIXED_OUTPUT_LEN = 256
 
         print(f"⏳ [Engine] Loading base model: {model_id} on {self.device}...")
         self.tokenizer = AutoTokenizer.from_pretrained(model_id, use_fast=True)
@@ -180,18 +186,17 @@ class MultiLoRAEngine:
         self._replace_layers(r, alpha)
 
         # [LRU System]
-        # known_adapters: Set of allowed/available IDs (Metadata only)
-        # cpu_cache: aid -> weights dict (OrderedDict for LRU)
         self.known_adapters: Set[str] = set()
         self.cpu_cache: OrderedDict[str, Dict] = OrderedDict()
         
+        # GPU Management
         self.gpu_slots: Dict[int, str] = {} 
         self.adapter_to_slot: Dict[str, int] = {} 
+        # slot_lru tracks usage for replacement strategy (not fully used in strict slot logic but kept for safety)
         self.slot_lru = OrderedDict((i, 0) for i in range(self.adapter_slots))
         
         self.request_queue: List[Dict] = []
         self.running_queue: List[Dict] = []
-        self.finished_results = deque(maxlen=1000)
         
         self.current_merged_adapter: Optional[str] = None
         self.lock = threading.RLock()
@@ -210,66 +215,35 @@ class MultiLoRAEngine:
                 new_layer = DynamicLoRALinear(module, self.adapter_slots, r, alpha).to(self.device)
                 setattr(parent, target_name, new_layer)
                 replaced_count += 1
-        print(f"🔧 [Engine] Replaced {replaced_count} layers with DynamicLoRALinear.")
+        print(f"🔧 [Engine] Replaced {replaced_count} layers with DynamicLoRALinear (Slots={self.adapter_slots}).")
 
     def update_known_adapters(self, adapters: List[str]):
-        """
-        Updates the list of known adapter IDs.
-        If an adapter is removed from the list, we also clear it from caches.
-        """
         new_set = set(adapters)
-        # Cleanup removed adapters
         current = list(self.known_adapters)
         for aid in current:
             if aid not in new_set:
                 self.known_adapters.remove(aid)
-                # Remove from RAM
                 if aid in self.cpu_cache: 
                     del self.cpu_cache[aid]
-                    print(f"🗑️ [Engine] Removed {aid} from CPU Cache (Not in sync list).")
-                # Remove from GPU
                 if aid in self.adapter_to_slot:
-                    slot = self.adapter_to_slot.pop(aid)
-                    if self.gpu_slots.get(slot) == aid: del self.gpu_slots[slot]
-                    self.slot_lru.move_to_end(slot, last=False)
-        
+                    self._evict_from_gpu(aid)
         self.known_adapters = new_set
-        print(f"✅ [Engine] Updated known adapters list: {len(self.known_adapters)} items.")
 
     def _ensure_cpu_loaded(self, adapter_id: str):
-        """
-        Ensures the adapter is loaded in CPU RAM.
-        If not in RAM, downloads directly from Network (Diskless).
-        """
-        # 1. Hit: Already in CPU Cache
         if adapter_id in self.cpu_cache:
-            self.cpu_cache.move_to_end(adapter_id) # Mark as recently used
             return
 
-        # 2. Check metadata
-        if adapter_id not in self.known_adapters:
-            # We assume if it's requested, we should try to fetch it if we have a fetcher,
-            # but strictly speaking it should be synced first.
-            # We'll allow it to try fetching if configured.
-            pass
-
-        # 3. Evict if full
-        while len(self.cpu_cache) >= self.max_cpu_loras:
-            evicted_aid, _ = self.cpu_cache.popitem(last=False) # FIFO (LRU)
-            # Since we are diskless, eviction means complete data loss.
-            print(f"♻️ [CPU LRU] Evicted {evicted_aid} from CPU RAM (Dropped).")
-
-        # 4. Fetch from Network (Diskless Load)
         try:
             if not self.adapter_fetcher:
-                raise ValueError("No adapter fetcher configured for diskless loading.")
+                raise ValueError("No adapter fetcher configured.")
             
-            print(f"⬇️ [Network] Fetching {adapter_id} from Control Node...")
-            t0 = time.time()
+            # LRU Eviction for CPU
+            while len(self.cpu_cache) >= self.max_cpu_loras:
+                evicted_aid, _ = self.cpu_cache.popitem(last=False)
+                print(f"♻️ [CPU LRU] Evicted {evicted_aid} from CPU RAM.")
+
+            # print(f"⬇️ [Network] Fetching {adapter_id}...") 
             model_bytes = self.adapter_fetcher(adapter_id)
-            fetch_time = time.time() - t0
-            
-            # Load safetensors from bytes
             weights = load(model_bytes)
             
             adapter_weights = {}
@@ -284,25 +258,28 @@ class MultiLoRAEngine:
                         }
             if adapter_weights:
                 self.cpu_cache[adapter_id] = adapter_weights
-                print(f"✅ [Memory] Loaded {adapter_id} into CPU RAM ({fetch_time:.2f}s, {len(model_bytes)/1024/1024:.2f}MB)")
                 
         except Exception as e:
-            print(f"❌ [Engine] Failed to fetch/load {adapter_id}: {e}")
+            print(f"❌ [Engine] Failed to load {adapter_id}: {e}")
             raise e
 
-    def _evict_slot(self, slot_id: int):
-        if slot_id in self.gpu_slots:
-            old_adapter = self.gpu_slots.pop(slot_id)
-            self.adapter_to_slot.pop(old_adapter, None)
-        if slot_id in self.slot_lru:
-            self.slot_lru.move_to_end(slot_id, last=False)
+    def _evict_from_gpu(self, adapter_id: str):
+        if adapter_id in self.adapter_to_slot:
+            slot = self.adapter_to_slot.pop(adapter_id)
+            del self.gpu_slots[slot]
+            self.slot_lru.move_to_end(slot, last=False) # Mark slot as free
+            # print(f"🧹 [VRAM Cleanup] Unloaded {adapter_id} from Slot {slot}.")
 
     @torch.no_grad()
     def _load_adapter_to_slot(self, adapter_id: str, slot_id: int):
-        # [CPU LRU Hook] Ensure data is in CPU before copying to GPU
         self._ensure_cpu_loaded(adapter_id)
         
-        if slot_id in self.gpu_slots and self.gpu_slots[slot_id] != adapter_id: self._evict_slot(slot_id)
+        if adapter_id in self.cpu_cache:
+            self.cpu_cache.move_to_end(adapter_id)
+
+        # Collision check
+        if slot_id in self.gpu_slots and self.gpu_slots[slot_id] != adapter_id: 
+            self._evict_from_gpu(self.gpu_slots[slot_id])
 
         for n, m in self.model.named_modules():
             if isinstance(m, DynamicLoRALinear) and n in self.cpu_cache[adapter_id]:
@@ -312,32 +289,25 @@ class MultiLoRAEngine:
         
         self.gpu_slots[slot_id] = adapter_id
         self.adapter_to_slot[adapter_id] = slot_id
-        self.slot_lru.move_to_end(slot_id, last=True)
 
     def _ensure_adapters_resident(self, required_adapters: List[str]):
-        required_set = set(required_adapters)
-        # Only consider missing if NOT in GPU slots
-        missing = [aid for aid in required_adapters if aid not in self.adapter_to_slot]
-        
-        if not missing:
-            for aid in required_adapters: self.slot_lru.move_to_end(self.adapter_to_slot[aid], last=True)
-            return
-
-        evictable_slots = [s for s in self.slot_lru if self.gpu_slots.get(s) not in required_set]
-        for aid in missing:
-            if not evictable_slots: raise RuntimeError("No available slots to load required adapters!")
-            self._load_adapter_to_slot(aid, evictable_slots.pop(0))
+        for aid in required_adapters:
+            if aid not in self.adapter_to_slot:
+                available_slots = [s for s in range(self.adapter_slots) if s not in self.gpu_slots]
+                if not available_slots:
+                    raise RuntimeError(f"No VRAM slots available for {aid}. Capacity logic failure.")
+                self._load_adapter_to_slot(aid, available_slots[0])
 
     @torch.no_grad()
     def merge_adapter(self, adapter_id: str, force: bool = False):
-        # Ensure it's available (Network -> CPU -> Merge)
         self._ensure_cpu_loaded(adapter_id)
         
         if not force:
             with self.lock: self.is_draining = True
-            for _ in range(1000):
+            for _ in range(100): # Wait max 10s
                 if len(self.running_queue) == 0: break
                 time.sleep(0.1)
+        
         with self.lock:
             if force:
                 kept = []
@@ -347,15 +317,21 @@ class MultiLoRAEngine:
                         req["done"] = True
                         if self.on_finish: self.on_finish(req["request_id"], "aborted_by_merge")
                 self.running_queue = kept
+            
             self.is_draining = False
+            
             if adapter_id not in self.adapter_to_slot:
-                self._load_adapter_to_slot(adapter_id, next(iter(self.slot_lru)))
+                self._load_adapter_to_slot(adapter_id, 0)
+            
             slot_id = self.adapter_to_slot[adapter_id]
             if self.current_merged_adapter and self.current_merged_adapter != adapter_id: self.unmerge_all()
+            
             if self.current_merged_adapter != adapter_id:
                 for m in self.model.modules():
                     if isinstance(m, DynamicLoRALinear): m.manual_merge(slot_id)
                 self.current_merged_adapter = adapter_id
+                self._evict_from_gpu(adapter_id) 
+                torch.cuda.empty_cache() # Clean up after merge
 
     @torch.no_grad()
     def unmerge_all(self):
@@ -364,112 +340,145 @@ class MultiLoRAEngine:
                 for m in self.model.modules():
                     if isinstance(m, DynamicLoRALinear): m.manual_unmerge()
                 self.current_merged_adapter = None
+                torch.cuda.empty_cache()
 
-    def add_request(self, prompt: str, adapter_id: str, request_id: str, max_new_tokens: int = 128):
-        # [Check Metadata Only] 
-        # We only check if it's in the known list. CPU loading is deferred.
-        if adapter_id not in self.known_adapters: 
-             # Check if we can just fetch it? 
-             # For system stability, we might warn, but let's try.
-             # Ideally the Control Node syncs it first.
-             pass
+    def add_request(self, prompt: str, adapter_id: str, request_id: str, max_new_tokens: int = 256):
+        # [Constraint] Force Output Fixed Length
+        max_new_tokens = self.FIXED_OUTPUT_LEN 
+
+        # [Constraint] Force Input Fixed Length (512)
+        # We manually tokenize and handle padding/truncation to ensure exact 512 shape
+        tokens = self.tokenizer.encode(prompt, add_special_tokens=False)
         
-        inputs = self.tokenizer(prompt, return_tensors="pt")
+        target_len = self.FIXED_INPUT_LEN
+        current_len = len(tokens)
+        
+        if current_len > target_len:
+            # Truncate (keep last 512)
+            tokens = tokens[-target_len:]
+            input_ids = torch.tensor([tokens], device=self.device)
+            attention_mask = torch.ones((1, target_len), device=self.device)
+        elif current_len < target_len:
+            # Left Pad
+            pad_len = target_len - current_len
+            pad_id = self.tokenizer.pad_token_id
+            padding = [pad_id] * pad_len
+            tokens = padding + tokens
+            input_ids = torch.tensor([tokens], device=self.device)
+            # Mask: 0 for pad, 1 for real
+            attention_mask = torch.tensor([[0]*pad_len + [1]*current_len], device=self.device)
+        else:
+            # Exact match
+            input_ids = torch.tensor([tokens], device=self.device)
+            attention_mask = torch.ones((1, target_len), device=self.device)
+
         with self.lock:
             self.request_queue.append({
                 "request_id": str(request_id),
                 "adapter_id": str(adapter_id),
-                "input_ids": inputs.input_ids.to(self.device),
-                "seq_len": int(inputs.input_ids.shape[1]),
+                "input_ids": input_ids,
+                "attention_mask": attention_mask, # Store for first forward pass
+                "seq_len": target_len,
                 "past_key_values": None,
                 "tokens_gen": [],
-                "max_new_tokens": int(max_new_tokens),
+                "max_new_tokens": max_new_tokens,
                 "done": False
             })
 
     def is_idle(self) -> bool:
         with self.lock: return len(self.request_queue) == 0 and len(self.running_queue) == 0
 
-    # ============================================================
-    # [Auto-Scale] Dynamic Batch Logic
-    # ============================================================
-    def _auto_tune_batch_size(self):
-        if self.device.type != "cuda": return
+    def _cleanup_unused_adapters(self):
+        """
+        Evict LoRAs from VRAM if they are not needed by any active or pending request.
+        """
+        active_aids = {r["adapter_id"] for r in self.running_queue}
+        pending_aids = {r["adapter_id"] for r in self.request_queue}
+        needed_aids = active_aids.union(pending_aids)
         
-        now = time.time()
-        if now - self.last_adjust_time < self.adjust_interval: return
+        cleaned = False
+        # [Bug Fix] Use list(items) to copy keys, preventing "dictionary changed size during iteration"
+        for slot, aid in list(self.gpu_slots.items()):
+            if aid not in needed_aids:
+                self._evict_from_gpu(aid)
+                cleaned = True
         
-        total = torch.cuda.get_device_properties(self.device).total_memory
-        reserved = torch.cuda.memory_reserved(self.device)
-        ratio = reserved / total
-        
-        current_load = len(self.running_queue) + len(self.request_queue)
-        changed = False
-        
-        # 1. Scale Down
-        if ratio > self.vram_high_threshold:
-            if self.max_batch_size > self.min_batch_size:
-                new_size = max(self.min_batch_size, int(self.max_batch_size * 0.8))
-                if new_size != self.max_batch_size:
-                    print(f"📉 [Auto-Scale] VRAM {ratio:.1%} > {self.vram_high_threshold:.1%}. Batch {self.max_batch_size}->{new_size}")
-                    self.max_batch_size = new_size
-                    torch.cuda.empty_cache() 
-                    changed = True
-
-        # 2. Scale Up
-        elif ratio < self.vram_safe_threshold and current_load >= self.max_batch_size:
-            if self.max_batch_size < self.limit_max_batch_size:
-                new_size = self.max_batch_size + 8
-                print(f"📈 [Auto-Scale] Saturation detected ({current_load}/{self.max_batch_size}). VRAM {ratio:.1%} OK. Batch -> {new_size}")
-                self.max_batch_size = new_size
-                changed = True
-        
-        if changed:
-            self.last_adjust_time = now
+        if cleaned:
+            # [OOM Prevent] If we cleaned something, explicitly free memory to allow new loads
+            torch.cuda.empty_cache()
 
     @torch.no_grad()
     def step(self) -> bool:
         with self.lock:
-            # 1. 每次 step 前調整 Batch Size
-            self.step_counter += 1
-            if self.step_counter % 5 == 0:
-                self._auto_tune_batch_size()
+            # 1. Cleanup VRAM first to make space
+            if not self.current_merged_adapter:
+                self._cleanup_unused_adapters()
             
             self.running_queue = [r for r in self.running_queue if not r["done"]]
 
-            # 2. 調度邏輯
-            if not self.is_draining:
+            if self.is_draining:
+                if not self.running_queue: return False
+            else:
+                # 2. Scheduling Logic
                 if self.current_merged_adapter:
-                    # Merged Mode
-                    while len(self.running_queue) < self.max_batch_size and self.request_queue:
+                    # [Merged Mode] Capacity = 15
+                    remaining_slots = self.merged_capacity - len(self.running_queue)
+                    
+                    while remaining_slots > 0 and self.request_queue:
                         cand_idx = -1
                         for i, req in enumerate(self.request_queue):
                             if req["adapter_id"] == self.current_merged_adapter:
                                 cand_idx = i
                                 break
-                        if cand_idx != -1: self.running_queue.append(self.request_queue.pop(cand_idx))
-                        else: break
-                else:
-                    # Mixed Mode
-                    while len(self.running_queue) < self.max_batch_size and self.request_queue:
-                        req = self.request_queue[0]
-                        current_aids = {r["adapter_id"] for r in self.running_queue}
-                        if req["adapter_id"] not in current_aids and len(current_aids) >= self.adapter_slots:
+                        
+                        if cand_idx != -1:
+                            self.running_queue.append(self.request_queue.pop(cand_idx))
+                            remaining_slots -= 1
+                        else:
                             break 
-                        self.running_queue.append(self.request_queue.pop(0))
+
+                else:
+                    # [Unmerged Mode] Capacity = 12 (Reqs + Unique LoRAs)
+                    current_reqs = len(self.running_queue)
+                    active_loras = {r["adapter_id"] for r in self.running_queue}
+                    current_lora_count = len(active_loras)
+                    
+                    idx_to_remove = []
+                    
+                    for i, req in enumerate(self.request_queue):
+                        aid = req["adapter_id"]
+                        
+                        new_req_cost = 1
+                        new_lora_cost = 0
+                        if aid not in active_loras:
+                            new_lora_cost = 1
+                        
+                        total_cost = (current_reqs + new_req_cost) + (current_lora_count + new_lora_cost)
+                        
+                        # [OOM Strict] Only admit if within capacity
+                        if total_cost <= self.unmerged_capacity:
+                            self.running_queue.append(req)
+                            current_reqs += 1
+                            if new_lora_cost > 0:
+                                active_loras.add(aid)
+                                current_lora_count += 1
+                            idx_to_remove.append(i)
+                        else:
+                            break # FIFO strict
+                    
+                    for i in reversed(idx_to_remove):
+                        self.request_queue.pop(i)
 
             if not self.running_queue: return False
 
-            # 3. 準備資源 (LoRA loading)
+            # 3. Load Resources
             if self.current_merged_adapter:
                 LoRAContext.set_mapping(None)
             else:
                 required = sorted(list({r["adapter_id"] for r in self.running_queue}))
-                # [CPU LRU Logic happens inside here]
-                # If diskless, this will fetch from network if missing
                 self._ensure_adapters_resident(required)
 
-            # 4. 執行模型
+            # 4. Execution
             try:
                 # Prefill Phase
                 prefill_reqs = [r for r in self.running_queue if r["past_key_values"] is None]
@@ -482,17 +491,11 @@ class MultiLoRAEngine:
                         mapping = torch.tensor([self.adapter_to_slot[r["adapter_id"]] for r in target_group], device=self.device)
                         LoRAContext.set_mapping(mapping)
 
-                    input_ids_list = [r["input_ids"] for r in target_group]
-                    max_len = max(x.shape[1] for x in input_ids_list)
-                    padded_input = torch.full((len(target_group), max_len), self.tokenizer.pad_token_id, device=self.device)
-                    attention_mask = torch.zeros((len(target_group), max_len), device=self.device)
+                    # Because we force fixed size in add_request, we can just stack
+                    input_ids = torch.cat([r["input_ids"] for r in target_group], dim=0)
+                    attention_mask = torch.cat([r["attention_mask"] for r in target_group], dim=0)
                     
-                    for i, ids in enumerate(input_ids_list):
-                        L = ids.shape[1]
-                        padded_input[i, -L:] = ids[0]
-                        attention_mask[i, -L:] = 1
-                    
-                    out = self.model(input_ids=padded_input, attention_mask=attention_mask, use_cache=True)
+                    out = self.model(input_ids=input_ids, attention_mask=attention_mask, use_cache=True)
 
                 elif decode_reqs:
                     target_group = decode_reqs
@@ -502,10 +505,12 @@ class MultiLoRAEngine:
                         LoRAContext.set_mapping(mapping)
 
                     past_list = [r["past_key_values"] for r in target_group]
+                    # Batched past needs alignment, but since max_len is fixed (512 + 256), memory is predictable
                     max_past_len = max(p[0][0].shape[2] for p in past_list)
                     batched_past = _to_model_cache(_batch_past(past_list, max_past_len))
                     
                     input_ids = torch.cat([r["input_ids"][:, -1:] for r in target_group], dim=0)
+                    # Decode mask: ones for (past + 1)
                     attention_mask = torch.ones((len(target_group), max_past_len + 1), device=self.device)
                     
                     out = self.model(input_ids=input_ids, attention_mask=attention_mask, past_key_values=batched_past, use_cache=True)
@@ -518,18 +523,12 @@ class MultiLoRAEngine:
                 return True
 
             except RuntimeError as e:
-                # [Auto-Scale] OOM Rescue
                 if "out of memory" in str(e).lower():
-                    print(f"🚨 [OOM RESCUE] Out of memory! Reducing batch size and retrying.")
-                    self.max_batch_size = max(1, self.max_batch_size // 2)
-                    
-                    cutoff = self.max_batch_size
-                    if len(self.running_queue) > cutoff:
-                        excess_reqs = self.running_queue[cutoff:]
-                        self.running_queue = self.running_queue[:cutoff]
-                        for r in reversed(excess_reqs):
-                            self.request_queue.insert(0, r)
-
+                    print(f"🚨 [OOM] Batch too large. Dropping last request to recover.")
+                    if self.running_queue:
+                        drop = self.running_queue.pop()
+                        # Re-queue it at front
+                        self.request_queue.insert(0, drop)
                     LoRAContext.set_mapping(None)
                     torch.cuda.empty_cache()
                     return False
@@ -546,10 +545,14 @@ class MultiLoRAEngine:
             req["tokens_gen"].append(token_id)
             if self.on_token: self.on_token(req["request_id"], req["tokens_gen"])
             
+            # Update inputs and past
             req["input_ids"] = torch.cat([req["input_ids"], new_tokens[i:i+1].view(1, 1)], dim=-1)
-            current_len = req["seq_len"] + len(req["tokens_gen"])
-            req["past_key_values"] = _slice_past_for_sample(new_past_legacy, i, current_len)
             
+            # Since input was fixed 512, seq_len starts at 512
+            current_total_len = req["seq_len"] + len(req["tokens_gen"])
+            req["past_key_values"] = _slice_past_for_sample(new_past_legacy, i, current_total_len)
+            
+            # [Constraint] Strict check against fixed output length
             if len(req["tokens_gen"]) >= req["max_new_tokens"]:
                 req["done"] = True
                 if self.on_finish: self.on_finish(req["request_id"], "finished")
