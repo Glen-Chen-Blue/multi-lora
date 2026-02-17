@@ -32,11 +32,11 @@ logger = logging.getLogger("ComputeNode")
 # ============================================================
 NODE_ID = os.environ.get("NODE_ID", "cn-1")
 MODEL_ID = os.environ.get("MODEL_ID", "unsloth/Meta-Llama-3.1-8B")
+# Research Note: 輸出固定為 256 tokens
+FIXED_OUTPUT_LEN = 256 
+
 LORA_PATH = os.environ.get("LORA_PATH", "./lora_repo/compute")
 CONTROL_NODE_URL = os.environ.get("CONTROL_NODE_URL", "http://localhost:9000")
-
-MAX_BATCH_SIZE_LIMIT = int(os.environ.get("MAX_BATCH_SIZE", "32"))
-MAX_CPU_LORAS = int(os.environ.get("MAX_CPU_LORAS", "10"))
 
 engine: Optional[MultiLoRAEngine] = None
 engine_wakeup = threading.Event()
@@ -60,6 +60,7 @@ def on_token(rid: str, tokens_list: List[int]):
         q = stream_queues[rid]
         
         start_len = decoding_state.get(rid, 0)
+        # 注意: 這裡僅作解碼顯示用，系統內部狀態由 engine 維護
         full_text = engine.tokenizer.decode(tokens_list, skip_special_tokens=True)
         
         if len(full_text) > start_len:
@@ -119,15 +120,13 @@ def engine_loop_thread():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global engine
-    logger.info(f"Initializing Compute Node {NODE_ID} (Max CPU LoRAs: {MAX_CPU_LORAS}, Diskless Mode)...")
+    # [Modify] 移除了 max_batch_size 與 max_cpu_loras 參數，改用 system 內建預設值
+    logger.info(f"Initializing Compute Node {NODE_ID} (Research Note Config: Merged=15, Unmerged=12)...")
     
     engine = MultiLoRAEngine(
         model_id=MODEL_ID,
-        adapter_slots=8,
-        max_batch_size=MAX_BATCH_SIZE_LIMIT,
-        max_cpu_loras=MAX_CPU_LORAS,
-        enable_monitor=True,
-        adapter_fetcher=fetch_adapter_sync
+        adapter_fetcher=fetch_adapter_sync,
+        enable_monitor=True
     )
     engine.on_token = on_token
     engine.on_finish = on_finish
@@ -149,7 +148,7 @@ app = FastAPI(title=f"Compute Node {NODE_ID}", lifespan=lifespan)
 class AddRequest(BaseModel):
     prompt: str
     adapter_id: str
-    max_new_tokens: int = 128
+    max_new_tokens: int = 256 # Default to 256 as per Research Note
 
 class MergeRequest(BaseModel):
     adapter_id: str
@@ -169,23 +168,49 @@ class SyncAdaptersRequest(BaseModel):
 def metrics():
     if not engine: return {}
     
-    # [安全] 確保回傳值為標準 int，防止序列化錯誤
-    running_cnt = len(engine.running_queue) if engine else 0
-    waiting_cnt = len(engine.request_queue) if engine else 0
-    
+    # 使用 lock 確保讀取 running_queue 時的狀態一致性
+    with engine.lock:
+        running_cnt = len(engine.running_queue)
+        waiting_cnt = len(engine.request_queue)
+        
+        # [New] Determine Mode
+        current_mode = "merge" if engine.current_merged_adapter else "unmerge"
+        
+        # [New] Construct Request Set for Time-Window Projection
+        # Logic: Remaining = Fixed_Output_Len (256) - Generated_So_Far
+        request_set = []
+        for req in engine.running_queue:
+            gen_count = len(req.get("tokens_gen", []))
+            remaining = max(0, FIXED_OUTPUT_LEN - gen_count)
+            request_set.append({
+                "adapter_id": req["adapter_id"],
+                "remaining_tokens": remaining
+            })
+            
+        # Get loaded adapters from CPU cache
+        loaded_adapters = list(engine.cpu_cache.keys())
+        running_adapters_list = list({str(r["adapter_id"]) for r in engine.running_queue})
+
+        # Capacity info (Now dynamic based on system.py)
+        # Merged=15, Unmerged=12 (hardcoded in system.py)
+        # 這裡我們回傳 engine 內部的 capacity 值供參考
+        current_max_batch = engine.merged_capacity if engine.current_merged_adapter else engine.unmerged_capacity
+
     return {
         "node_id": NODE_ID,
+        "mode": current_mode,           # [New]
+        "request_set": request_set,     # [New]
         "load": {
             "running_batch": running_cnt,
             "waiting_queue": waiting_cnt
         },
         "lora_state": {
             "merged_adapter": engine.current_merged_adapter,
-            "running_adapters": list({str(r["adapter_id"]) for r in engine.running_queue}),
-            "loaded_adapters": list(engine.cpu_cache.keys()) 
+            "running_adapters": running_adapters_list,
+            "loaded_adapters": loaded_adapters
         },
         "capacity": {
-            "max_batch_size": engine.max_batch_size,
+            "max_batch_size": current_max_batch,
             "max_cpu_loras": engine.max_cpu_loras
         },
         "idle": engine.is_idle(),
@@ -223,6 +248,8 @@ def add_request(req: AddRequest):
         decoding_state[rid] = 0
     
     try:
+        # Note: multilora_system force-sets output length to FIXED_OUTPUT_LEN (256)
+        # regardless of req.max_new_tokens, but we pass it for compatibility.
         engine.add_request(req.prompt, req.adapter_id, rid, req.max_new_tokens)
         engine_wakeup.set()
     except KeyError as e:
