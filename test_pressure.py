@@ -13,13 +13,14 @@ CONTROL_URL = "http://localhost:9000"
 
 # [Modified] Use virtual IDs 1-100
 ADAPTERS = [str(i) for i in range(1, 101)]
+ADAPTERS = ["LoRA_1", "LoRA_2", "LoRA_3"]  # For testing, we can use these names instead of numeric IDs
 
 # 流量分佈模式
 TRAFFIC_PATTERN = "1"  
-TARGET_ADAPTER = "1"     
+TARGET_ADAPTER = "LoRA_1"     
 
-TOTAL_REQUESTS = 50
-AVG_RPS = 10
+TOTAL_REQUESTS = 5
+AVG_RPS = 2
 
 PROMPTS = ["test"]
 
@@ -40,11 +41,30 @@ resource_stats = {
 }
 is_test_running = True
 
+# =========================
+# NEW: fixed token lengths
+# =========================
+FIXED_PROMPT_TOKENS = 512
+FIXED_OUTPUT_TOKENS = 256
+
 def format_alpaca_prompt(user_prompt):
     return (
         f"### Instruction:\n{user_prompt}\n\n"
         f"### Response:\n"
     )
+
+# =========================
+# NEW: naive tokenizer helper
+# NOTE: this is whitespace-based, not BPE.
+# =========================
+def fit_prompt_to_tokens(text: str, target_tokens: int) -> str:
+    tokens = text.split()
+    if len(tokens) >= target_tokens:
+        tokens = tokens[:target_tokens]
+    else:
+        # pad with a harmless filler token
+        tokens += ["<pad>"] * (target_tokens - len(tokens))
+    return " ".join(tokens)
 
 async def monitor_cluster_usage(client: httpx.AsyncClient):
     print(f"{YELLOW}[Monitor] Started tracking cluster resource usage...{RESET}")
@@ -80,7 +100,16 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
 
     raw_prompt = random.choice(PROMPTS)
     formatted_prompt = format_alpaca_prompt(raw_prompt)
-    current_max_tokens = random.randint(1, 64)
+
+    # =========================
+    # CHANGED: input fixed to 512 tokens (naive)
+    # =========================
+    formatted_prompt = fit_prompt_to_tokens(formatted_prompt, FIXED_PROMPT_TOKENS)
+
+    # =========================
+    # CHANGED: output fixed to 256 tokens
+    # =========================
+    current_max_tokens = FIXED_OUTPUT_TOKENS
     
     payload = {
         "prompt": formatted_prompt, 
@@ -100,16 +129,19 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
         
         stats["sent"] += 1
         short_prompt = (raw_prompt[:30] + '..') if len(raw_prompt) > 30 else raw_prompt
-        print(f"{CYAN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq}/{TOTAL_REQUESTS} SENT -> {adapter} (T:{current_max_tokens}) (ID: {request_id[:8]}...){RESET}")
+        print(f"{CYAN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq}/{TOTAL_REQUESTS} SENT -> {adapter} (In:{FIXED_PROMPT_TOKENS}tok Out:{current_max_tokens}tok) (ID: {request_id[:8]}...){RESET}")
 
         async with client.stream("GET", f"{CONTROL_URL}/stream/{request_id}", timeout=120.0) as response:
             async for line in response.aiter_lines():
-                if not line: continue
-                if line.startswith("data: [DONE]"): break
+                if not line: 
+                    continue
+                if line.startswith("data: [DONE]"): 
+                    break
                 
                 if line.startswith("data:"):
                     raw_content = line[len("data:"):].rstrip("\n")
-                    if raw_content.strip() == "ok": continue 
+                    if raw_content.strip() == "ok": 
+                        continue 
 
                     try:
                         content = json.loads(raw_content)
@@ -117,10 +149,11 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
                         content = raw_content
 
                     if isinstance(content, str) and (content.startswith("[ERROR]") or "Processing aborted" in content):
-                         full_response_text.append(f"{RED}{content}{RESET}")
-                         continue
+                        full_response_text.append(f"{RED}{content}{RESET}")
+                        continue
 
-                    if ttft == 0.0: ttft = time.time() - start_ts
+                    if ttft == 0.0: 
+                        ttft = time.time() - start_ts
                     full_response_text.append(str(content))
 
         elapsed = time.time() - start_ts
@@ -170,7 +203,8 @@ async def main():
 
         except KeyboardInterrupt:
             print("\nStopping...")
-            for t in background_tasks: t.cancel()
+            for t in background_tasks: 
+                t.cancel()
         finally:
             is_test_running = False
             await monitor_task

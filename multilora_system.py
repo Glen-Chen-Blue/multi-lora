@@ -158,8 +158,8 @@ class MultiLoRAEngine:
         self.dtype = torch_dtype if self.device.type == "cuda" else torch.float32
         
         # [Capacity Configuration]
-        # Merged Mode: 20 slots (Requests only)
-        # Unmerged Mode: 16 slots (Requests + LoRA Adapters)
+        # Merged Mode: 15 slots (Requests only)
+        # Unmerged Mode: 12 slots (Requests + LoRA Adapters)
         self.merged_capacity = 15
         self.unmerged_capacity = 12
         

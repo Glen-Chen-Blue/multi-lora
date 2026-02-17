@@ -51,7 +51,7 @@ start() {
 
   # 2. 啟動 Compute Node 1 (Port 8001)
   echo "Starting Compute Node 1..."
-  CUDA_VISIBLE_DEVICES=0 \
+  CUDA_VISIBLE_DEVICES=1 \
   NODE_ID=cn-1 \
   MAX_BATCH_SIZE=8 \
   MAX_CPU_LORAS=8 \
@@ -62,7 +62,7 @@ start() {
 
   # 3. 啟動 Compute Node 2 (Port 8002)
   echo "Starting Compute Node 2..."
-  CUDA_VISIBLE_DEVICES=1 \
+  CUDA_VISIBLE_DEVICES=0 \
   NODE_ID=cn-2 \
   MAX_BATCH_SIZE=8 \
   MAX_CPU_LORAS=8 \
