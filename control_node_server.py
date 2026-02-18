@@ -189,7 +189,7 @@ async def dispatch_task(node_url: str, req_data: dict):
         if user_q: await user_q.put(None) 
 
 # ============================================================
-# Scheduler Loop (Core SP2 Logic)
+# Scheduler Loop (Core SP2 Logic with Anti-Starvation)
 # ============================================================
 
 async def scheduler_loop():
@@ -206,24 +206,29 @@ async def scheduler_loop():
             await asyncio.sleep(1.0)
             continue
 
+        # 計算目前的狀態統計
+        total_pending_count = sum(len(q) for q in request_queues.values())
+        # [防鎖死] 統計目前 Unmerge 的節點數量
+        unmerged_node_count = sum(1 for n in virtual_nodes if n.mode == "unmerge")
+
         # =========================================================
         # Phase 0: Mode Switching Logic (Auto Merge/Unmerge)
         # =========================================================
-        
-        total_pending_count = sum(len(q) for q in request_queues.values())
         
         for v_node in virtual_nodes:
             # --- Case A: Check for MERGE Trigger ---
             # 條件: Unmerged Mode 且 (Batch >= 10) 且 (Unique LoRA == 1)
             # 意義: 節點已經被單一 LoRA 塞滿，轉換為 Dedicated 可提升容量 (12 -> 15)
             if v_node.mode == "unmerge":
-                if v_node.running_batch >= 10 and len(v_node.active_loras) == 1:
+                # [保護機制] 確保 Merge 後至少還有 1 個 Unmerge 節點活著，避免餓死新進 LoRA
+                if unmerged_node_count > 1 and v_node.running_batch >= 10 and len(v_node.active_loras) == 1:
                     target_lora = list(v_node.active_loras)[0]
                     # 優化: 只有當該 LoRA 還有待處理請求時，Merge 才有價值
                     if len(request_queues[target_lora]) > 0:
-                        logger.info(f"🔥 [Auto-Merge] Node {v_node.url} is saturated ({v_node.running_batch} reqs) with {target_lora}. Merging!")
+                        logger.info(f"🔥 [Auto-Merge] Node {v_node.url} saturated with {target_lora}. Merging! (Unmerged Left: {unmerged_node_count-1})")
                         asyncio.create_task(do_merge_node(v_node.url, target_lora))
-                        v_node.mode = "switching" # 標記為切換中，避免本輪再次調度
+                        v_node.mode = "switching" 
+                        unmerged_node_count -= 1 # 扣除計數
 
             # --- Case B: Check for UNMERGE Trigger ---
             # 條件: Merged Mode 且 (Batch < 10) 且 (本 LoRA 無排隊) 且 (有其他 LoRA 在排隊)
@@ -234,9 +239,10 @@ async def scheduler_loop():
                 others_pending = total_pending_count - my_queue_len
                 
                 if v_node.running_batch < 10 and my_queue_len == 0 and others_pending > 0:
-                    logger.info(f"🧊 [Auto-Unmerge] Node {v_node.url} cooling down (Batch={v_node.running_batch}, Q=0). Others waiting ({others_pending}). Unmerging!")
+                    logger.info(f"🧊 [Auto-Unmerge] Node {v_node.url} cooling down. Others waiting ({others_pending}). Unmerging!")
                     asyncio.create_task(do_unmerge_node(v_node.url))
                     v_node.mode = "switching"
+                    unmerged_node_count += 1 # 增加計數
 
         # =========================================================
         # Phase 1: Hot Dispatch (Cost = 1)
@@ -271,14 +277,17 @@ async def scheduler_loop():
         # 處理剩餘請求，這會增加 Unique LoRA
         
         remaining_adapters = [aid for aid, q in request_queues.items() if len(q) > 0]
-        # 依照需求量排序 (High Demand First)
-        remaining_adapters.sort(key=lambda aid: len(request_queues[aid]), reverse=True)
+        
+        # [排序策略變更] Oldest Request First (Fairness)
+        # 依照每個 Adapter 佇列中 "最老請求" 的等待時間排序
+        # 這樣即使是冷門 LoRA，只要等得夠久，也能優先獲得分配新節點的權利
+        remaining_adapters.sort(key=lambda aid: request_queues[aid][0]['arrival_time'])
         
         for aid in remaining_adapters:
             queue = request_queues[aid]
             if len(queue) == 0: continue
             
-            # 尋找候選節點
+            # 尋找候選節點 (只選 Unmerged)
             candidates = []
             for v_node in virtual_nodes:
                 if v_node.mode == "switching": continue
@@ -289,21 +298,23 @@ async def scheduler_loop():
             
             if not candidates: continue
             
-            # 排序: 優先選 Shared Node (entropy 高)
+            # 排序: 優先選 Shared Node (entropy 高)，反碎片化
             candidates.sort(key=lambda n: (len(n.active_loras), n.get_free_slots(aid)), reverse=True)
             target_node = candidates[0]
             
             # 集中派發 (Bundling)
+            # 在這個 Time Window 內，鎖定這個節點為該 LoRA 的服務點
+            # 只要節點還有空位，就繼續塞同一個 LoRA 的請求
             dispatched_count = 0
             while len(queue) > 0:
                 if target_node.get_free_slots(aid) > 0:
                     req = queue.popleft()
-                    logger.info(f"❄️ [Cold] {req['request_id'][:8]} ({aid}) -> {target_node.url}")
+                    logger.info(f"❄️ [Cold] {req['request_id'][:8]} ({aid}) -> {target_node.url} (Waited: {time.time()-req['arrival_time']:.2f}s)")
                     target_node.commit_request(aid)
                     asyncio.create_task(dispatch_task(target_node.url, req))
                     dispatched_count += 1
                 else:
-                    break
+                    break # 這個節點滿了，換下一個 Adapter (公平性：不獨佔所有空閒節點)
 
         await asyncio.sleep(1.0)
 
@@ -344,7 +355,8 @@ async def send_request(req: AddRequest):
         "request_id": rid,
         "prompt": req.prompt,
         "adapter_id": req.adapter_id,
-        "max_new_tokens": req.max_new_tokens
+        "max_new_tokens": req.max_new_tokens,
+        "arrival_time": time.time() # [新增] 用於防飢餓排序
     })
     logger.info(f"📥 Received Request {rid} for {req.adapter_id}. Queued.")
     return {"request_id": rid}
