@@ -44,12 +44,12 @@ start() {
   # 3. 啟動 Compute Nodes
   echo "🚀 Starting Compute Nodes..."
   
-#   CUDA_VISIBLE_DEVICES=0 \
-#   NODE_ID=cn-1 \
-#   LORA_PATH="./lora_repo/cn_1" \
-#   CONTROL_NODE_URL="http://127.0.0.1:9000" \
-#   uvicorn compute_node_server:app --port 8001 &
-#   PIDS+=($!)
+  CUDA_VISIBLE_DEVICES=0 \
+  NODE_ID=cn-1 \
+  LORA_PATH="./lora_repo/cn_1" \
+  CONTROL_NODE_URL="http://127.0.0.1:9000" \
+  uvicorn compute_node_server:app --port 8001 &
+  PIDS+=($!)
 
   CUDA_VISIBLE_DEVICES=1 \
   NODE_ID=cn-2 \

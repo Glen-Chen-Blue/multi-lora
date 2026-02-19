@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from multilora_system import MultiLoRAEngine
+from _multilora_system import MultiLoRAEngine
 
 # ============================================================
 # Logging
