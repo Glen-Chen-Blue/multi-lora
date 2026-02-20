@@ -11,16 +11,15 @@ from datetime import datetime
 # ==========================================
 CONTROL_URL = "http://localhost:9000"
 
-# [Modified] Use virtual IDs 1-100
-ADAPTERS = [str(i) for i in range(1, 101)]
-ADAPTERS = ["LoRA_1", "LoRA_2", "LoRA_3"]  # For testing, we can use these names instead of numeric IDs
+# [Modified] 改用我們在 Control Node 裡面設定好的 10 個 LoRA
+ADAPTERS = [f"LoRA_{i}" for i in range(1, 11)]
 
 # 流量分佈模式
 TRAFFIC_PATTERN = "1"  
-TARGET_ADAPTER = "LoRA_1"     
+TARGET_ADAPTER = "LoRA_1"    
 
 TOTAL_REQUESTS = 100
-AVG_RPS = 5
+AVG_RPS = 10
 
 PROMPTS = ["test"]
 
@@ -31,7 +30,8 @@ RED = "\033[91m"
 RESET = "\033[0m"
 GREY = "\033[90m"
 
-stats = {"sent": 0, "finished": 0, "errors": 0}
+# 🚀 [新增] dropped 統計
+stats = {"sent": 0, "finished": 0, "dropped": 0, "errors": 0}
 ttft_records = [] 
 
 resource_stats = {
@@ -53,16 +53,11 @@ def format_alpaca_prompt(user_prompt):
         f"### Response:\n"
     )
 
-# =========================
-# NEW: naive tokenizer helper
-# NOTE: this is whitespace-based, not BPE.
-# =========================
 def fit_prompt_to_tokens(text: str, target_tokens: int) -> str:
     tokens = text.split()
     if len(tokens) >= target_tokens:
         tokens = tokens[:target_tokens]
     else:
-        # pad with a harmless filler token
         tokens += ["<pad>"] * (target_tokens - len(tokens))
     return " ".join(tokens)
 
@@ -112,6 +107,10 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
     ttft = 0.0 
     full_response_text = []
     
+    # 🚀 [新增] 紀錄 Drop 狀態
+    is_dropped = False
+    drop_reason = ""
+    
     try:
         resp = await client.post(f"{CONTROL_URL}/send_request", json=payload, timeout=30.0)
         resp.raise_for_status()
@@ -119,7 +118,7 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
         request_id = data["request_id"]
         
         stats["sent"] += 1
-        print(f"{CYAN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq}/{TOTAL_REQUESTS} SENT -> {adapter} (In:{FIXED_PROMPT_TOKENS}tok Out:{current_max_tokens}tok) (ID: {request_id[:8]}...){RESET}")
+        print(f"{CYAN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq}/{TOTAL_REQUESTS} SENT -> {adapter} (ID: {request_id[:8]}...){RESET}")
 
         async with client.stream("GET", f"{CONTROL_URL}/stream/{request_id}", timeout=120.0) as response:
             async for line in response.aiter_lines():
@@ -131,7 +130,6 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
                 if line.startswith("data:"):
                     raw_content = line[len("data:"):].rstrip("\n")
                     
-                    # 🚀 [關鍵修復] 忽略 Control Node 發送的 "connected" 狀態訊息
                     if raw_content.strip() in ["ok", "connected"]: 
                         continue 
 
@@ -140,23 +138,33 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
                     except json.JSONDecodeError:
                         content = raw_content
 
-                    if isinstance(content, str) and (content.startswith("[ERROR]") or "Processing aborted" in content):
-                        full_response_text.append(f"{RED}{content}{RESET}")
-                        continue
+                    # 🚀 [關鍵修復] 攔截 Control Node 發送的 JSON 格式 Error
+                    if isinstance(content, dict) and content.get("type") == "error":
+                        is_dropped = True
+                        drop_reason = content.get("message", "Unknown Drop Reason")
+                        break # 中斷串流，因為被拒絕了
 
-                    # 現在這裡才會真正抓到 Compute Node 吐出的第一個 Token (word)
+                    if isinstance(content, str) and (content.startswith("[ERROR]") or "Processing aborted" in content):
+                        is_dropped = True
+                        drop_reason = content
+                        break
+
                     if ttft == 0.0: 
                         ttft = time.time() - start_ts
                     full_response_text.append(str(content))
 
         elapsed = time.time() - start_ts
-        stats["finished"] += 1
         
-        final_ttft = ttft if ttft > 0 else elapsed
-        ttft_records.append(final_ttft)
-
-        token_count = len(full_response_text)
-        print(f"{GREEN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq} DONE <- {adapter} (Time: {elapsed:.2f}s, TTFT: {final_ttft:.2f}s, Tokens: {token_count}){RESET}")
+        # 🚀 [新增] 根據結果分流顯示
+        if is_dropped:
+            stats["dropped"] += 1
+            print(f"{RED}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq} DROPPED <- {adapter} (Reason: {drop_reason}){RESET}")
+        else:
+            stats["finished"] += 1
+            final_ttft = ttft if ttft > 0 else elapsed
+            ttft_records.append(final_ttft)
+            token_count = len(full_response_text)
+            print(f"{GREEN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq} DONE <- {adapter} (Time: {elapsed:.2f}s, TTFT: {final_ttft:.2f}s, Tokens: {token_count}){RESET}")
         
     except Exception as e:
         stats["errors"] += 1
@@ -164,7 +172,7 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
 
 async def main():
     global is_test_running
-    print(f"=== Traffic Simulator (1-100 Virtual IDs) ===")
+    print(f"=== Traffic Simulator (Dynamic Admission Control) ===")
     print(f"Mode: {TRAFFIC_PATTERN.upper()}")
     
     background_tasks = set()
@@ -203,7 +211,8 @@ async def main():
             await monitor_task
             total_duration = time.time() - start_time
 
-    print(f"\n=== Summary: Sent {stats['sent']} / Fin {stats['finished']} / Err {stats['errors']} ===")
+    # 🚀 [修改] Summary 加入 Drop 統計
+    print(f"\n=== Summary: Sent {stats['sent']} / Fin {stats['finished']} / Drop {stats['dropped']} / Err {stats['errors']} ===")
     
     if ttft_records:
         avg_ttft = sum(ttft_records) / len(ttft_records)
@@ -216,14 +225,16 @@ async def main():
         print(f"{CYAN}=== Latency Statistics ({TRAFFIC_PATTERN}) ==={RESET}")
         print(f"Average TTFT : {avg_ttft:.4f} s")
         print(f"P95 TTFT     : {p95_ttft:.4f} s")
+    else:
+        print(f"{CYAN}=== No successful requests to calculate Latency ==={RESET}")
         
-        node_seconds = resource_stats['node_seconds']
-        avg_nodes = node_seconds / total_duration if total_duration > 0 else 0
-        
-        print(f"\n{YELLOW}=== Resource Consumption Stats ==={RESET}")
-        print(f"Test Duration        : {total_duration:.2f} s")
-        print(f"Total Resource Usage : {node_seconds:.2f} Node-Seconds")
-        print(f"Average Active Nodes : {avg_nodes:.2f}")
+    node_seconds = resource_stats['node_seconds']
+    avg_nodes = node_seconds / total_duration if total_duration > 0 else 0
+    
+    print(f"\n{YELLOW}=== Resource Consumption Stats ==={RESET}")
+    print(f"Test Duration        : {total_duration:.2f} s")
+    print(f"Total Resource Usage : {node_seconds:.2f} Node-Seconds")
+    print(f"Average Active Nodes : {avg_nodes:.2f}")
 
 if __name__ == "__main__":
     asyncio.run(main())

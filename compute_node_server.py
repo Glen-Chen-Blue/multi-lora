@@ -50,7 +50,38 @@ config_lock = threading.Lock()
 client = httpx.AsyncClient(timeout=120.0)
 
 # ============================================================
-# Callbacks
+# Background Registration Task
+# ============================================================
+async def register_with_control_node():
+    """
+    背景任務：在啟動時不斷嘗試向 Control Node 註冊自己的存在
+    """
+    # 允許外部直接給定完整 URL，否則預設使用 127.0.0.1 加上 PORT
+    port = os.environ.get("PORT", "8001")
+    my_url = os.environ.get("COMPUTE_NODE_URL", f"http://127.0.0.1:{port}")
+    
+    logger.info(f"🔄 Attempting to register to Control Node at {CONTROL_NODE_URL} with my URL: {my_url}")
+    
+    while not shutdown_event.is_set():
+        try:
+            async with httpx.AsyncClient() as c:
+                resp = await c.post(
+                    f"{CONTROL_NODE_URL}/register_node", 
+                    json={"url": my_url}, 
+                    timeout=5.0
+                )
+                if resp.status_code == 200:
+                    logger.info(f"✅ Successfully registered to Control Node!")
+                    break  # 註冊成功，跳出迴圈
+                else:
+                    logger.warning(f"⚠️ Registration rejected: {resp.text}, retrying in 3s...")
+        except Exception as e:
+            logger.warning(f"⚠️ Control Node unreachable ({e}), retrying in 3s...")
+        
+        await asyncio.sleep(3.0)
+
+# ============================================================
+# Callbacks & Network Fetcher
 # ============================================================
 def on_token(rid: str, tokens_list: List[int]):
     with stream_lock:
@@ -78,9 +109,6 @@ def on_finish(rid: str, reason: str):
         if rid in decoding_state:
             del decoding_state[rid]
 
-# ============================================================
-# Network Fetcher
-# ============================================================
 def fetch_adapter_sync(adapter_id: str) -> bytes:
     url = f"{CONTROL_NODE_URL}/fetch_adapter/{adapter_id}"
     try:
@@ -94,7 +122,7 @@ def fetch_adapter_sync(adapter_id: str) -> bytes:
         raise e
 
 # ============================================================
-# Engine Loop
+# Engine Loop & Lifecycle
 # ============================================================
 def engine_loop_thread():
     logger.info("🚀 Engine loop started.")
@@ -110,9 +138,6 @@ def engine_loop_thread():
             logger.error(f"❌ Engine step error: {e}", exc_info=True)
             time.sleep(1)
 
-# ============================================================
-# Lifecycle
-# ============================================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global engine
@@ -128,6 +153,10 @@ async def lifespan(app: FastAPI):
     
     t = threading.Thread(target=engine_loop_thread, daemon=True)
     t.start()
+    
+    # 🚀 [新增] 啟動背景註冊任務
+    asyncio.create_task(register_with_control_node())
+    
     yield
     logger.info("Shutting down...")
     shutdown_event.set()
@@ -168,7 +197,6 @@ def metrics():
         waiting_cnt = len(engine.request_queue)
         current_mode = "merge" if engine.current_merged_adapter else "unmerge"
         
-        # 🚀 [防卡死關鍵 1] 合併正在跑的跟在排隊的請求，提供精準預測
         all_reqs = engine.running_queue + engine.request_queue
         
         request_set = []
@@ -181,10 +209,7 @@ def metrics():
             })
             
         loaded_adapters = list(engine.cpu_cache.keys())
-        
-        # 🚀 [防卡死關鍵 2] 讓 Control Node 知道目前緩衝區有哪些 LoRA
         running_adapters_list = list({str(r["adapter_id"]) for r in all_reqs})
-        
         current_max_batch = engine.merged_capacity if engine.current_merged_adapter else engine.unmerged_capacity
 
     return {
@@ -192,7 +217,6 @@ def metrics():
         "mode": current_mode,
         "request_set": request_set, 
         "load": {
-            # 🚀 [防卡死關鍵 3] running_batch 現在包含排隊的數量，避免 Control Node 超賣
             "running_batch": running_cnt + waiting_cnt,
             "waiting_queue": waiting_cnt
         },
@@ -303,4 +327,6 @@ def debug_reset():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8001)))
+    # [修改] 從環境變數讀取 PORT，確保 uvicorn 跑在正確的 port 上
+    port = int(os.environ.get("PORT", 8001))
+    uvicorn.run(app, host="0.0.0.0", port=port)
