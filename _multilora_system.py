@@ -93,12 +93,12 @@ class MultiLoRAEngine:
             
             while len(self.cpu_cache) >= self.max_cpu_loras:
                 evicted_aid, _ = self.cpu_cache.popitem(last=False)
-                # print(f"♻️ [CPU LRU] Evicted {evicted_aid} from CPU RAM.")
 
+            # 模擬載入成功
             self.cpu_cache[adapter_id] = True
                 
         except Exception as e:
-            print(f"❌ [Engine] Failed to load {adapter_id}: {e}")
+            print(f"❌ [Engine] Failed to simulate loading {adapter_id}: {e}")
             raise e
 
     def _evict_from_gpu(self, adapter_id: str):
@@ -130,10 +130,18 @@ class MultiLoRAEngine:
     def merge_adapter(self, adapter_id: str, force: bool = False):
         """
         Seamless Merge (Simulated)
+        Convert the model to dedicated mode WITHOUT interrupting running requests.
         """
         self._ensure_cpu_loaded(adapter_id)
         
         with self.lock:
+            # 🚀 [防卡死安全機制]
+            # 檢查是否有不屬於目標 adapter_id 的請求存在於佇列中。
+            conflicting_reqs = [r for r in self.running_queue + self.request_queue if r["adapter_id"] != adapter_id]
+            if conflicting_reqs and not force:
+                raise RuntimeError(f"Cannot merge {adapter_id}: Found {len(conflicting_reqs)} conflicting requests from other LoRAs.")
+
+            # 確保該 Adapter 已經載入虛擬 VRAM
             if adapter_id not in self.adapter_to_slot:
                 available_slots = [s for s in range(self.adapter_slots) if s not in self.gpu_slots]
                 if not available_slots:
@@ -144,12 +152,14 @@ class MultiLoRAEngine:
                 
                 self._load_adapter_to_slot(adapter_id, available_slots[0])
             
+            # 如果已經有別的 Merged，先 Unmerge 它
             if self.current_merged_adapter and self.current_merged_adapter != adapter_id:
                 self.unmerge_all()
             
             if self.current_merged_adapter != adapter_id:
                 print(f"🔀 [Simulated Seamless] Merging {adapter_id} into base model on-the-fly...")
                 self.current_merged_adapter = adapter_id
+                # 不 Evict Slot，保留供 Unmerge 使用
 
     def unmerge_all(self):
         """
@@ -161,13 +171,12 @@ class MultiLoRAEngine:
                 self.current_merged_adapter = None
 
     def add_request(self, prompt: str, adapter_id: str, request_id: str, max_new_tokens: int = 256):
-        # 因為是純模擬，我們不再需要建立 PyTorch 張量，只存紀錄即可
         with self.lock:
             self.request_queue.append({
                 "request_id": str(request_id),
                 "adapter_id": str(adapter_id),
                 "seq_len": self.FIXED_INPUT_LEN,
-                "past_key_values": None, # 代表這是一個新的 Request (尚未 Prefill)
+                "past_key_values": None, # None 代表這是一個新的 Request (尚未 Prefill)
                 "tokens_gen": [],
                 "max_new_tokens": self.FIXED_OUTPUT_LEN,
                 "done": False
@@ -182,6 +191,7 @@ class MultiLoRAEngine:
         pending_aids = {r["adapter_id"] for r in self.request_queue}
         needed_aids = active_aids.union(pending_aids)
         
+        # [Protection] Merged Adapter is needed for Unmerge
         if self.current_merged_adapter:
             needed_aids.add(self.current_merged_adapter)
         
@@ -254,40 +264,48 @@ class MultiLoRAEngine:
 
     def _execute_batch(self, target_group):
         """
-        核心時間模擬邏輯
+        核心時間模擬邏輯 (已修正：Prefill 完緊接著 Decode 形成完整 Step)
         """
         prefill_reqs = [r for r in target_group if r["past_key_values"] is None]
         decode_reqs = [r for r in target_group if r["past_key_values"] is not None]
 
-        # Merge 的速度是 Unmerge 的 5/4 倍，因此花費時間為 4/5 (0.8)
+        # ⏳ Merge 的速度是 Unmerge 的 5/4 倍，因此花費時間為 4/5 (0.8)
         multiplier = 0.8 if self.current_merged_adapter else 1.0
+        step_sleep_time = 0.0
 
+        # =================================================
+        # 1. Prefill 階段
+        # =================================================
         if prefill_reqs:
-            batch_reqs = prefill_reqs
-            # ⏳ [模擬延遲] 每個 Request 的 Prefill 為 50ms
-            sleep_time = (0.050 * len(batch_reqs)) * multiplier
-            time.sleep(sleep_time)
+            # ⏳ [模擬延遲] 每個進入的 Request 的 Prefill 為 50ms
+            step_sleep_time += (0.050 * len(prefill_reqs)) * multiplier
             
-            # 標記為已經預填充
-            for r in batch_reqs:
+            # 將剛 prefill 完的 request 標記並加入 decode_reqs
+            # 確保它們在這個 step 中也能產出第一個 Token
+            for r in prefill_reqs:
                 r["past_key_values"] = True
-                
-        elif decode_reqs:
-            batch_reqs = decode_reqs
-            batch_size = len(batch_reqs)
-            
-            # ⏳ [模擬延遲] Decode 時間：25 + 1.2 * batch_size ms
-            sleep_time = (0.025 + 0.0012 * batch_size) * multiplier
-            time.sleep(sleep_time)
-            
-        else:
-            return
+                decode_reqs.append(r)
 
-        self._process_outputs(batch_reqs)
+        # =================================================
+        # 2. Decode 階段
+        # =================================================
+        if decode_reqs:
+            batch_size = len(decode_reqs)
+            # ⏳ [模擬延遲] Decode 時間：25 + 1.2 * batch_size ms
+            step_sleep_time += (0.025 + 0.0012 * batch_size) * multiplier
+
+        # =================================================
+        # 3. 執行等待與產出
+        # =================================================
+        if step_sleep_time > 0:
+            time.sleep(step_sleep_time)
+
+        if decode_reqs:
+            self._process_outputs(decode_reqs)
 
     def _process_outputs(self, reqs):
         for req in reqs:
-            # 加入假 Token
+            # 加入 1 個假 Token
             req["tokens_gen"].append(1)
             
             if self.on_token: 

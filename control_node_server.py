@@ -18,10 +18,12 @@ from pydantic import BaseModel
 # ============================================================
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] CONTROL: %(message)s")
 logger = logging.getLogger("ControlNode")
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 
 LORA_PATH = os.environ.get("LORA_PATH", "./testLoRA")
 # 這裡設定允許的 Adapter ID，對應您測試腳本或真實資料夾名稱
-ALLOWED_ADAPTERS = ["LoRA_1", "LoRA_2", "LoRA_3"] 
+ALLOWED_ADAPTERS = ["LoRA_1", "LoRA_2", "LoRA_3", "1", "2", "3"] 
 INITIAL_NODES = [x.strip() for x in os.environ.get("COMPUTE_NODES", "http://127.0.0.1:8001").split(",") if x.strip()]
 
 limits = httpx.Limits(max_keepalive_connections=100, max_connections=200)
@@ -123,14 +125,13 @@ class VirtualNodeState:
         self.active_loras.add(target_lora)
 
 # ============================================================
-# State Transition Helpers
+# State Transition & Network Helpers
 # ============================================================
 
 async def do_merge_node(url: str, adapter_id: str):
     """發送 Merge 指令"""
     try:
         logger.info(f"🔄 [State Change] Triggering MERGE on {url} for {adapter_id}")
-        # 注意：Compute Node 的 merge 實作通常會自動 unmerge，但這裡直接呼叫 merge 即可
         resp = await client.post(f"{url}/merge", json={"adapter_id": adapter_id, "force": False})
         if resp.status_code == 200:
             logger.info(f"✅ {url} merged successfully.")
@@ -149,20 +150,16 @@ async def do_unmerge_node(url: str):
     except Exception as e:
         logger.error(f"❌ Unmerge request error {url}: {e}")
 
-# ============================================================
-# Background Tasks
-# ============================================================
-
-async def metrics_poller():
-    while True:
-        for url in list(node_mgr.nodes.keys()):
-            try:
-                resp = await client.get(f"{url}/metrics", timeout=5.0)
-                if resp.status_code == 200:
-                    node_mgr.update_metrics(url, resp.json())
-            except Exception:
-                pass
-        await asyncio.sleep(1)
+async def fetch_node_metrics(url: str):
+    """單一節點的 Metrics 拉取函數"""
+    try:
+        # 設定極短的 timeout，確保不會卡住整個 scheduling loop
+        resp = await client.get(f"{url}/metrics", timeout=2.0)
+        if resp.status_code == 200:
+            node_mgr.update_metrics(url, resp.json())
+    except Exception:
+        # 連線失敗等錯誤直接忽略，該節點將使用舊資料或被視為下線
+        pass
 
 async def dispatch_task(node_url: str, req_data: dict):
     rid = req_data["request_id"]
@@ -189,13 +186,21 @@ async def dispatch_task(node_url: str, req_data: dict):
         if user_q: await user_q.put(None) 
 
 # ============================================================
-# Scheduler Loop (Core SP2 Logic with Anti-Starvation)
+# Scheduler Loop (Core SP2 Logic)
 # ============================================================
 
 async def scheduler_loop():
     logger.info("⏳ SP2-Aligned Scheduler loop started (1s interval).")
     
     while True:
+        # =========================================================
+        # Phase -1: 即時拉取最新 Metrics (消除 TOCTTOU 時間差)
+        # =========================================================
+        node_urls = list(node_mgr.nodes.keys())
+        if node_urls:
+            # 使用 asyncio.gather 並發發送請求，確保在一瞬間同時更新所有節點
+            await asyncio.gather(*(fetch_node_metrics(url) for url in node_urls))
+
         # 1. 建立虛擬狀態快照 (Snapshot)
         virtual_nodes: List[VirtualNodeState] = []
         for url, data in node_mgr.nodes.items():
@@ -217,8 +222,6 @@ async def scheduler_loop():
         
         for v_node in virtual_nodes:
             # --- Case A: Check for MERGE Trigger ---
-            # 條件: Unmerged Mode 且 (Batch >= 10) 且 (Unique LoRA == 1)
-            # 意義: 節點已經被單一 LoRA 塞滿，轉換為 Dedicated 可提升容量 (12 -> 15)
             if v_node.mode == "unmerge":
                 # [保護機制] 確保 Merge 後至少還有 1 個 Unmerge 節點活著，避免餓死新進 LoRA
                 if unmerged_node_count > 1 and v_node.running_batch >= 10 and len(v_node.active_loras) == 1:
@@ -228,11 +231,9 @@ async def scheduler_loop():
                         logger.info(f"🔥 [Auto-Merge] Node {v_node.url} saturated with {target_lora}. Merging! (Unmerged Left: {unmerged_node_count-1})")
                         asyncio.create_task(do_merge_node(v_node.url, target_lora))
                         v_node.mode = "switching" 
-                        unmerged_node_count -= 1 # 扣除計數
+                        unmerged_node_count -= 1
 
             # --- Case B: Check for UNMERGE Trigger ---
-            # 條件: Merged Mode 且 (Batch < 10) 且 (本 LoRA 無排隊) 且 (有其他 LoRA 在排隊)
-            # 意義: 專用節點負載降低，且外部有需求，釋放資源回歸共享池
             elif v_node.mode == "merge":
                 my_lora = v_node.merged_adapter
                 my_queue_len = len(request_queues[my_lora])
@@ -242,7 +243,7 @@ async def scheduler_loop():
                     logger.info(f"🧊 [Auto-Unmerge] Node {v_node.url} cooling down. Others waiting ({others_pending}). Unmerging!")
                     asyncio.create_task(do_unmerge_node(v_node.url))
                     v_node.mode = "switching"
-                    unmerged_node_count += 1 # 增加計數
+                    unmerged_node_count += 1
 
         # =========================================================
         # Phase 1: Hot Dispatch (Cost = 1)
@@ -278,9 +279,7 @@ async def scheduler_loop():
         
         remaining_adapters = [aid for aid, q in request_queues.items() if len(q) > 0]
         
-        # [排序策略變更] Oldest Request First (Fairness)
-        # 依照每個 Adapter 佇列中 "最老請求" 的等待時間排序
-        # 這樣即使是冷門 LoRA，只要等得夠久，也能優先獲得分配新節點的權利
+        # [排序策略] Oldest Request First (Fairness)
         remaining_adapters.sort(key=lambda aid: request_queues[aid][0]['arrival_time'])
         
         for aid in remaining_adapters:
@@ -303,8 +302,6 @@ async def scheduler_loop():
             target_node = candidates[0]
             
             # 集中派發 (Bundling)
-            # 在這個 Time Window 內，鎖定這個節點為該 LoRA 的服務點
-            # 只要節點還有空位，就繼續塞同一個 LoRA 的請求
             dispatched_count = 0
             while len(queue) > 0:
                 if target_node.get_free_slots(aid) > 0:
@@ -314,7 +311,7 @@ async def scheduler_loop():
                     asyncio.create_task(dispatch_task(target_node.url, req))
                     dispatched_count += 1
                 else:
-                    break # 這個節點滿了，換下一個 Adapter (公平性：不獨佔所有空閒節點)
+                    break # 這個節點滿了，換下一個 Adapter
 
         await asyncio.sleep(1.0)
 
@@ -324,12 +321,12 @@ async def scheduler_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     os.makedirs(LORA_PATH, exist_ok=True)
-    asyncio.create_task(metrics_poller())
+    # [修改] 不再啟動獨立的 metrics_poller，已整合至 scheduler_loop 中
     asyncio.create_task(scheduler_loop())
     yield
     await client.aclose()
 
-app = FastAPI(title="Control Node (SP2 Complete)", lifespan=lifespan)
+app = FastAPI(title="Control Node (SP2 Complete - Inline Polling)", lifespan=lifespan)
 
 class AddRequest(BaseModel):
     prompt: str
@@ -356,7 +353,7 @@ async def send_request(req: AddRequest):
         "prompt": req.prompt,
         "adapter_id": req.adapter_id,
         "max_new_tokens": req.max_new_tokens,
-        "arrival_time": time.time() # [新增] 用於防飢餓排序
+        "arrival_time": time.time() # 用於防飢餓排序
     })
     logger.info(f"📥 Received Request {rid} for {req.adapter_id}. Queued.")
     return {"request_id": rid}

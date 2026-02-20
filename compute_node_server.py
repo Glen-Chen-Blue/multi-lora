@@ -32,10 +32,8 @@ logger = logging.getLogger("ComputeNode")
 # ============================================================
 NODE_ID = os.environ.get("NODE_ID", "cn-1")
 MODEL_ID = os.environ.get("MODEL_ID", "unsloth/Meta-Llama-3.1-8B")
-# Research Note: 輸出固定為 256 tokens
 FIXED_OUTPUT_LEN = 256 
 
-LORA_PATH = os.environ.get("LORA_PATH", "./lora_repo/compute")
 CONTROL_NODE_URL = os.environ.get("CONTROL_NODE_URL", "http://localhost:9000")
 
 engine: Optional[MultiLoRAEngine] = None
@@ -60,7 +58,6 @@ def on_token(rid: str, tokens_list: List[int]):
         q = stream_queues[rid]
         
         start_len = decoding_state.get(rid, 0)
-        # 注意: 這裡僅作解碼顯示用，系統內部狀態由 engine 維護
         full_text = engine.tokenizer.decode(tokens_list, skip_special_tokens=True)
         
         if len(full_text) > start_len:
@@ -78,7 +75,6 @@ def on_finish(rid: str, reason: str):
             else:
                 q.put({"type": "final", "reason": reason})
             q.put(None) 
-        # [安全] 確保狀態清除
         if rid in decoding_state:
             del decoding_state[rid]
 
@@ -120,7 +116,6 @@ def engine_loop_thread():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global engine
-    # [Modify] 移除了 max_batch_size 與 max_cpu_loras 參數，改用 system 內建預設值
     logger.info(f"Initializing Compute Node {NODE_ID} (Research Note Config: Merged=15, Unmerged=12)...")
     
     engine = MultiLoRAEngine(
@@ -148,7 +143,7 @@ app = FastAPI(title=f"Compute Node {NODE_ID}", lifespan=lifespan)
 class AddRequest(BaseModel):
     prompt: str
     adapter_id: str
-    max_new_tokens: int = 256 # Default to 256 as per Research Note
+    max_new_tokens: int = 256
 
 class MergeRequest(BaseModel):
     adapter_id: str
@@ -168,18 +163,16 @@ class SyncAdaptersRequest(BaseModel):
 def metrics():
     if not engine: return {}
     
-    # 使用 lock 確保讀取 running_queue 時的狀態一致性
     with engine.lock:
         running_cnt = len(engine.running_queue)
         waiting_cnt = len(engine.request_queue)
-        
-        # [New] Determine Mode
         current_mode = "merge" if engine.current_merged_adapter else "unmerge"
         
-        # [New] Construct Request Set for Time-Window Projection
-        # Logic: Remaining = Fixed_Output_Len (256) - Generated_So_Far
+        # 🚀 [防卡死關鍵 1] 合併正在跑的跟在排隊的請求，提供精準預測
+        all_reqs = engine.running_queue + engine.request_queue
+        
         request_set = []
-        for req in engine.running_queue:
+        for req in all_reqs:
             gen_count = len(req.get("tokens_gen", []))
             remaining = max(0, FIXED_OUTPUT_LEN - gen_count)
             request_set.append({
@@ -187,21 +180,20 @@ def metrics():
                 "remaining_tokens": remaining
             })
             
-        # Get loaded adapters from CPU cache
         loaded_adapters = list(engine.cpu_cache.keys())
-        running_adapters_list = list({str(r["adapter_id"]) for r in engine.running_queue})
-
-        # Capacity info (Now dynamic based on system.py)
-        # Merged=15, Unmerged=12 (hardcoded in system.py)
-        # 這裡我們回傳 engine 內部的 capacity 值供參考
+        
+        # 🚀 [防卡死關鍵 2] 讓 Control Node 知道目前緩衝區有哪些 LoRA
+        running_adapters_list = list({str(r["adapter_id"]) for r in all_reqs})
+        
         current_max_batch = engine.merged_capacity if engine.current_merged_adapter else engine.unmerged_capacity
 
     return {
         "node_id": NODE_ID,
-        "mode": current_mode,           # [New]
-        "request_set": request_set,     # [New]
+        "mode": current_mode,
+        "request_set": request_set, 
         "load": {
-            "running_batch": running_cnt,
+            # 🚀 [防卡死關鍵 3] running_batch 現在包含排隊的數量，避免 Control Node 超賣
+            "running_batch": running_cnt + waiting_cnt,
             "waiting_queue": waiting_cnt
         },
         "lora_state": {
@@ -214,7 +206,6 @@ def metrics():
             "max_cpu_loras": engine.max_cpu_loras
         },
         "idle": engine.is_idle(),
-        "draining": engine.is_draining,
         "config_version": last_config_version
     }
 
@@ -248,8 +239,6 @@ def add_request(req: AddRequest):
         decoding_state[rid] = 0
     
     try:
-        # Note: multilora_system force-sets output length to FIXED_OUTPUT_LEN (256)
-        # regardless of req.max_new_tokens, but we pass it for compatibility.
         engine.add_request(req.prompt, req.adapter_id, rid, req.max_new_tokens)
         engine_wakeup.set()
     except KeyError as e:
@@ -297,8 +286,6 @@ def merge(req: MergeRequest):
 
 @app.post("/unmerge")
 def unmerge(req: UnmergeRequest):
-    if not req.force and not engine.is_idle():
-        raise HTTPException(409, "Engine not idle")
     engine.unmerge_all()
     return {"status": "unmerged"}
 

@@ -19,8 +19,8 @@ ADAPTERS = ["LoRA_1", "LoRA_2", "LoRA_3"]  # For testing, we can use these names
 TRAFFIC_PATTERN = "1"  
 TARGET_ADAPTER = "LoRA_1"     
 
-TOTAL_REQUESTS = 5
-AVG_RPS = 2
+TOTAL_REQUESTS = 100
+AVG_RPS = 5
 
 PROMPTS = ["test"]
 
@@ -88,7 +88,6 @@ async def monitor_cluster_usage(client: httpx.AsyncClient):
             await asyncio.sleep(1)
 
 async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
-    # Traffic Pattern: 80% to TARGET, 20% Uniform to others
     if TRAFFIC_PATTERN == "1":
         if random.random() < 0.8:
             adapter = TARGET_ADAPTER
@@ -100,15 +99,7 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
 
     raw_prompt = random.choice(PROMPTS)
     formatted_prompt = format_alpaca_prompt(raw_prompt)
-
-    # =========================
-    # CHANGED: input fixed to 512 tokens (naive)
-    # =========================
     formatted_prompt = fit_prompt_to_tokens(formatted_prompt, FIXED_PROMPT_TOKENS)
-
-    # =========================
-    # CHANGED: output fixed to 256 tokens
-    # =========================
     current_max_tokens = FIXED_OUTPUT_TOKENS
     
     payload = {
@@ -128,7 +119,6 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
         request_id = data["request_id"]
         
         stats["sent"] += 1
-        short_prompt = (raw_prompt[:30] + '..') if len(raw_prompt) > 30 else raw_prompt
         print(f"{CYAN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq}/{TOTAL_REQUESTS} SENT -> {adapter} (In:{FIXED_PROMPT_TOKENS}tok Out:{current_max_tokens}tok) (ID: {request_id[:8]}...){RESET}")
 
         async with client.stream("GET", f"{CONTROL_URL}/stream/{request_id}", timeout=120.0) as response:
@@ -140,7 +130,9 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
                 
                 if line.startswith("data:"):
                     raw_content = line[len("data:"):].rstrip("\n")
-                    if raw_content.strip() == "ok": 
+                    
+                    # 🚀 [關鍵修復] 忽略 Control Node 發送的 "connected" 狀態訊息
+                    if raw_content.strip() in ["ok", "connected"]: 
                         continue 
 
                     try:
@@ -152,6 +144,7 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
                         full_response_text.append(f"{RED}{content}{RESET}")
                         continue
 
+                    # 現在這裡才會真正抓到 Compute Node 吐出的第一個 Token (word)
                     if ttft == 0.0: 
                         ttft = time.time() - start_ts
                     full_response_text.append(str(content))
