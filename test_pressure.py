@@ -18,7 +18,7 @@ ADAPTERS = [f"LoRA_{i}" for i in range(1, 11)]
 TRAFFIC_PATTERN = "1"  
 TARGET_ADAPTER = "LoRA_1"    
 
-TOTAL_REQUESTS = 100
+TOTAL_REQUESTS = 300
 AVG_RPS = 10
 
 PROMPTS = ["test"]

@@ -27,14 +27,13 @@ client = httpx.AsyncClient(limits=limits, timeout=60.0)
 # ============================================================
 # Lyapunov & TTFT Hyperparameters
 # ============================================================
-T_MAX = 4.0                  
+T_MAX = 5.5                 
 EPSILON = 0.05               
-PSI_DROP = 1.0              
+PSI_DROP = 10.0              
 
 Z_debt = 0.0
 z_lock = asyncio.Lock()
 
-# 🚀 用於追蹤正在切換狀態的節點，防止重複發送 POST /merge
 switching_nodes: Set[str] = set()
 
 # ============================================================
@@ -76,7 +75,7 @@ global_request_list: List[Dict] = []
 stream_queues: Dict[str, Dict] = {} 
 
 # ============================================================
-# 🔮 精細化 TTFT 預測與虛擬狀態
+# 🔮 記憶體感知虛擬狀態機
 # ============================================================
 class VirtualNodeState:
     def __init__(self, url: str, metrics: Dict):
@@ -84,63 +83,173 @@ class VirtualNodeState:
         self.mode = metrics.get("mode", "unmerge")
         load_data = metrics.get("load", {})
         lora_data = metrics.get("lora_state", {})
+        
         self.running_batch = load_data.get("running_batch", 0)
         self.merged_adapter = lora_data.get("merged_adapter")
         self.active_loras = set(lora_data.get("running_adapters", []))
+        self.loaded_adapters = set(lora_data.get("loaded_adapters", []))
         self.request_set = metrics.get("request_set", [])
+        
+        self.lora_request_counts = defaultdict(int)
+        for req in self.request_set:
+            self.lora_request_counts[req["adapter_id"]] += 1
+
         self.capacity_merged = 15
         self.capacity_unmerged_base = 12
 
     def get_free_slots(self, target_lora: str) -> int:
         if self.mode == "merge":
             return max(0, self.capacity_merged - self.running_batch) if self.merged_adapter == target_lora else 0
+        
         current_cost = self.running_batch + len(self.active_loras)
         margin = self.capacity_unmerged_base - current_cost
         if target_lora not in self.active_loras:
-            return (margin - 1) if margin >= 2 else 0 # 1 Context slot + 1 Req slot
+            return (margin - 1) if margin >= 2 else 0 
         return max(0, margin)
 
-    def commit_request(self, target_lora: str, is_new_lora: bool = True):
-        """🚀 修正：區分是否為新模型，避免 Bundling 時重複扣除 Context Slot"""
+    def commit_request(self, target_lora: str):
         self.running_batch += 1
-        if is_new_lora:
-            self.active_loras.add(target_lora)
+        self.active_loras.add(target_lora)
+        self.loaded_adapters.add(target_lora)
+        self.lora_request_counts[target_lora] += 1
 
-    def rollback_request(self, is_new_lora: bool = True):
+    def rollback_request(self, target_lora: str):
         self.running_batch = max(0, self.running_batch - 1)
+        if self.lora_request_counts[target_lora] > 0:
+            self.lora_request_counts[target_lora] -= 1
+            if self.lora_request_counts[target_lora] == 0:
+                self.active_loras.discard(target_lora)
 
-def predict_ttft_for_node(node: VirtualNodeState, target_lora: str, total_pending: int, num_nodes: int) -> float:
-    """🚀 核心改進：使用每個 Request 的剩餘 Token 進行確定性預測"""
-    if node.mode == "merge" and node.merged_adapter != target_lora: return 999.0
-    loaded = {node.merged_adapter} if node.mode == "merge" else node.active_loras
-    is_hit = (target_lora in loaded) or any(target_lora in LORA_METADATA_TABLE.get(l, {}).get("substitutes", []) for l in loaded)
+# ============================================================
+# 🔮 完美 TTFT 預測 (基於全域排隊深度的多週期推演)
+# ============================================================
+def predict_cluster_ttft(nodes: List[VirtualNodeState], target_lora: str, global_pending_ahead: int) -> float:
+    SCHEDULER_OVERHEAD = 0.300 
+    DECODE_P95_SPEED = 0.040   
+    DISK_LOAD_DELAY = 0.200    
+
+    node_scores = []
+    total_free = 0
+    cluster_concurrent_capacity = 0
     
-    multiplier = 0.8 if node.mode == "merge" else 1.0
-    load_delay = 0.200 if not is_hit else 0.0 
-    my_prefill = 0.050 * multiplier           
-    
-    # 計算前面排隊造成的 Prefill 延遲
-    avg_pending_ahead = total_pending / num_nodes
-    queue_prefill_delay = avg_pending_ahead * 0.050 * multiplier
-    
-    # 預測等待 Slot 釋放的時間
-    current_free = node.get_free_slots(target_lora)
-    needed_to_finish = int(max(0, avg_pending_ahead - current_free)) + 1
-    
-    wait_decode_time = 0.0
-    if needed_to_finish > 0:
-        if node.request_set:
-            # 🚀 排序剩餘 Token，找出第 N 個釋放的 Slot
-            sorted_remains = sorted([r.get("remaining_tokens", 256) for r in node.request_set])
-            idx = min(len(sorted_remains) - 1, needed_to_finish - 1)
-            # 速度預估使用 Batch+1 以求逼真
-            v_token = (0.025 + 0.0012 * (node.running_batch + 1)) * multiplier
-            wait_decode_time = sorted_remains[idx] * v_token
+    for node in nodes:
+        if node.url in switching_nodes or node.mode == "switching": continue
+        
+        is_merge = (node.mode == "merge" and node.merged_adapter == target_lora)
+        if node.mode == "merge" and not is_merge: continue 
+        
+        is_in_vram = (node.mode == "unmerge" and target_lora in node.active_loras)
+        is_in_cpu = (node.mode == "unmerge" and target_lora in node.loaded_adapters)
+        is_empty = (node.mode == "unmerge" and len(node.active_loras) == 0)
+        
+        free_slots = node.get_free_slots(target_lora)
+        
+        if is_merge:
+            cluster_concurrent_capacity += node.capacity_merged
+        elif node.mode == "unmerge":
+            cluster_concurrent_capacity += max(0, node.capacity_unmerged_base - 1)
+
+        if free_slots > 0:
+            score = (1 if is_merge else 0, 1 if is_in_vram else 0, 1 if is_in_cpu else 0, 1 if is_empty else 0, free_slots)
+            node_scores.append({"score": score, "free": free_slots})
+            total_free += free_slots
+
+    my_position = global_pending_ahead + 1
+
+    if my_position <= total_free:
+        node_scores.sort(key=lambda x: x["score"], reverse=True)
+        allocated = 0
+        landing_score = None
+        take_at_landing = 0
+        
+        for ns in node_scores:
+            take = min(ns["free"], my_position - allocated)
+            allocated += take
+            if allocated == my_position:
+                landing_score = ns["score"]
+                take_at_landing = take
+                break
+                
+        is_merge = landing_score[0] == 1
+        is_in_cpu = landing_score[2] == 1
+        multiplier = 0.8 if is_merge else 1.0
+        
+        load_delay = 0.0 if (is_in_cpu or is_merge) else DISK_LOAD_DELAY
+        prefill_time = 0.050 * take_at_landing * multiplier
+        
+        return SCHEDULER_OVERHEAD + load_delay + prefill_time
+
+    else:
+        needed_to_finish = my_position - total_free
+        if cluster_concurrent_capacity == 0: cluster_concurrent_capacity = 12
+        
+        full_cycles = needed_to_finish // cluster_concurrent_capacity
+        remainder = needed_to_finish % cluster_concurrent_capacity
+        
+        all_remains = []
+        for node in nodes:
+            if node.url in switching_nodes or node.mode == "switching": continue
+            if (node.mode == "merge" and node.merged_adapter == target_lora) or (node.mode == "unmerge"):
+                all_remains.extend([r.get("remaining_tokens", 256) for r in node.request_set])
+                
+        if not all_remains: 
+            current_wait = 1.0
         else:
-            # 節點目前無執行中請求但沒位子(通常在切換中)
-            wait_decode_time = 1.0 if node.url in switching_nodes else 0.0
+            all_remains.sort()
+            idx = min(len(all_remains) - 1, max(0, remainder - 1))
+            current_wait = all_remains[idx] * DECODE_P95_SPEED
             
-    return load_delay + my_prefill + queue_prefill_delay + wait_decode_time
+        total_wait_time = current_wait + (full_cycles * 256 * DECODE_P95_SPEED)
+        return SCHEDULER_OVERHEAD + total_wait_time + 0.050
+
+# ============================================================
+# 🚨 統一 Task Offloading & Drop 決策樞紐
+# ============================================================
+async def handle_offload_or_drop(
+    rid: str, 
+    is_local: bool, 
+    best_ttft: float, 
+    z_current: float, 
+    q: asyncio.Queue, 
+    force_offload: bool = False,
+    force_drop_reason: str = None
+) -> bool:
+    """
+    統一處理所有的 Drop 或 Offload。
+    回傳 True 表示請求已被處理（丟棄或轉發），不需要加入本地 Queue。
+    回傳 False 表示要留在本地排隊硬吞。
+    """
+    # 1. 絕對的 Drop 條件 (例如違反資料主權，別區的 Local LoRA)
+    if force_drop_reason:
+        logger.warning(f"🚫 [Drop] {rid[:8]} | Reason: {force_drop_reason}")
+        await q.put({"type": "error", "message": force_drop_reason})
+        await q.put(None)
+        return True
+
+    # 2. 強制卸載 (例如本地缺乏檔案的 Global LoRA)
+    if force_offload:
+        # TODO: 未來實作 HTTP 轉發給 EFO 或有檔案的 Cluster
+        logger.warning(f"🌐 [Offload] Global LoRA {rid[:8]} | Reason: Artifact Missing")
+        await q.put({"type": "error", "message": "Artifact Missing (Offload Not Implemented)"})
+        await q.put(None)
+        return True
+
+    # 3. 算力不足造成的超載 (Z > PSI_DROP)
+    if z_current > PSI_DROP:
+        if is_local:
+            # 本區的機密資料，算力不足只能捨棄
+            logger.warning(f"🚫 [Drop] Local LoRA {rid[:8]} | Pred TTFT: {best_ttft:.1f}s | Z: {z_current:.2f}")
+            await q.put({"type": "error", "message": "System Congested (Local Drop)"})
+        else:
+            # Global 資料，算力不足就丟給鄰居
+            # TODO: 未來實作跨區轉發 (Task Offloading)
+            logger.warning(f"🌐 [Offload] Global LoRA {rid[:8]} | Pred TTFT: {best_ttft:.1f}s | Z: {z_current:.2f}")
+            await q.put({"type": "error", "message": "System Congested (Offload Not Implemented)"})
+        
+        await q.put(None)
+        return True
+        
+    return False
 
 # ============================================================
 # Scheduler & Dispatch Core
@@ -160,9 +269,9 @@ async def safe_mode_switch(node_url: str, endpoint: str, payload: Dict):
         await asyncio.sleep(0.5)
         switching_nodes.discard(node_url)
 
-async def dispatch_task(v_node_url: str, req_data: dict, v_node_ptr: Optional[VirtualNodeState] = None, is_new_lora: bool = True):
+async def dispatch_task(v_node_url: str, req_data: dict, v_node_ptr: Optional[VirtualNodeState] = None, target_lora: str = None):
     rid = req_data["request_id"]
-    target_lora = req_data["adapter_id"]
+    if not target_lora: target_lora = req_data["adapter_id"]
     user_data = stream_queues.get(rid)
     if not user_data: return
     user_q = user_data["q"]
@@ -171,7 +280,7 @@ async def dispatch_task(v_node_url: str, req_data: dict, v_node_ptr: Optional[Vi
         payload = {"prompt": req_data["prompt"], "adapter_id": target_lora, "max_new_tokens": req_data.get("max_new_tokens", 256)}
         async with client.stream("POST", f"{v_node_url}/add_request", json=payload, timeout=120.0) as resp:
             if resp.status_code != 200:
-                if v_node_ptr: v_node_ptr.rollback_request(is_new_lora)
+                if v_node_ptr: v_node_ptr.rollback_request(target_lora)
                 await user_q.put({"type": "error", "message": f"Node Error {resp.status_code}"})
                 return
             async for line in resp.aiter_lines():
@@ -179,12 +288,13 @@ async def dispatch_task(v_node_url: str, req_data: dict, v_node_ptr: Optional[Vi
                     content = line[len("data:"):].strip()
                     if content: await user_q.put(content)
     except Exception as e:
-        if v_node_ptr: v_node_ptr.rollback_request(is_new_lora)
+        if v_node_ptr: v_node_ptr.rollback_request(target_lora)
         if user_q: await user_q.put({"type": "error", "message": str(e)})
     finally:
         if user_q: await user_q.put(None)
 
 async def scheduler_loop():
+    global global_request_list
     logger.info("⏳ SP2 Full-Function Scheduler loop started.")
     while True:
         try:
@@ -202,14 +312,11 @@ async def scheduler_loop():
             total_pending = sum(len(q) for q in request_queues.values())
             unmerged_count = sum(1 for n in v_nodes if n.mode == "unmerge")
 
-            # 2. 自動模式切換 (🚀 補強：檢查該 LoRA 是否有待處理請求)
             for v in v_nodes:
                 if v.url in switching_nodes: continue 
-                
-                if v.mode == "unmerge" and unmerged_count > 1 and v.running_batch >= 10:
-                    aid = next(iter(v.active_loras)) if v.active_loras else None
-                    # 🚀 修正：必須 Pending Queue > 0 才切換，防止飢餓模式切換
-                    if aid and len(request_queues[aid]) > 0:
+                if v.mode == "unmerge" and unmerged_count > 1 and v.running_batch >= 10 and len(v.active_loras) == 1:
+                    aid = next(iter(v.active_loras))
+                    if len(request_queues[aid]) > 0:
                         asyncio.create_task(safe_mode_switch(v.url, "/merge", {"adapter_id": aid, "force": False}))
                         v.mode = "switching"; unmerged_count -= 1
                 elif v.mode == "merge" and v.running_batch < 5:
@@ -217,50 +324,70 @@ async def scheduler_loop():
                         asyncio.create_task(safe_mode_switch(v.url, "/unmerge", {"force": False}))
                         v.mode = "switching"; unmerged_count += 1
 
-            # 3. 嚴謹 FIFO 公平分派
-            global_request_list.sort(key=lambda x: x["arrival_time"])
-            for req_meta in list(global_request_list):
-                aid = req_meta["original_aid"]
-                if not request_queues[aid]:
-                    if req_meta in global_request_list: global_request_list.remove(req_meta)
-                    continue
+            dispatched_any = True
+            while dispatched_any and global_request_list:
+                dispatched_any = False
                 
-                req = request_queues[aid][0] 
-                target = None
+                for req_meta in list(global_request_list):
+                    target_aid = req_meta["original_aid"]
+                    
+                    meta = LORA_METADATA_TABLE.get(target_aid, {})
+                    valid_aids = [target_aid] + [s for s in meta.get("substitutes", []) if s in LOCAL_AVAILABLE_LORAS]
+                    valid_aids = [aid for aid in valid_aids if aid in LOCAL_AVAILABLE_LORAS]
+                    if not valid_aids: valid_aids = [target_aid]
 
-                # 1. Hot Hit (Exact/Sub)
-                for v in v_nodes:
-                    if v.url in switching_nodes or v.mode == "switching": continue
-                    loaded = {v.merged_adapter} if v.mode=="merge" else v.active_loras
-                    is_hit = (aid in loaded) or any(aid in LORA_METADATA_TABLE.get(l,{}).get("substitutes",[]) for l in loaded)
-                    if is_hit:
-                        actual_id = aid if aid in loaded else next(l for l in loaded if aid in LORA_METADATA_TABLE.get(l,{}).get("substitutes",[]))
-                        if v.get_free_slots(actual_id) > 0:
-                            req["adapter_id"] = actual_id; target = v; break
-                
-                # 2. Cold Start (🚀 修正：精確的 Bundling 記帳)
-                if not target:
-                    cands = [v for v in v_nodes if v.mode=="unmerge" and v.url not in switching_nodes and aid not in v.active_loras and v.get_free_slots(aid) > 0]
-                    if cands:
-                        cands.sort(key=lambda x: (len(x.active_loras), x.get_free_slots(aid)), reverse=True)
-                        target = cands[0]
-                        subs = [aid] + LORA_METADATA_TABLE.get(aid, {}).get("substitutes", [])
-                        for s_aid in subs:
-                            while request_queues[s_aid] and target.get_free_slots(aid) > 0:
-                                if s_aid != aid:
-                                    sub_req = request_queues[s_aid].popleft()
-                                    global_request_list[:] = [x for x in global_request_list if x["request_id"] != sub_req["request_id"]]
-                                    sub_req["adapter_id"] = aid
-                                    # 🚀 修正：此處僅增加 batch，不應視為「新 LoRA」重複扣除 Context Slot
-                                    target.commit_request(aid, is_new_lora=False)
-                                    asyncio.create_task(dispatch_task(target.url, sub_req, target, is_new_lora=False))
-                                else: break
-
-                if target:
-                    request_queues[aid].popleft()
-                    if req_meta in global_request_list: global_request_list.remove(req_meta)
-                    target.commit_request(req.get("adapter_id", aid), is_new_lora=True)
-                    asyncio.create_task(dispatch_task(target.url, req, target, is_new_lora=True))
+                    best_plan = None
+                    
+                    for aid in valid_aids:
+                        candidate_reqs = []
+                        for q_aid, q_reqs in request_queues.items():
+                            if aid == q_aid or aid in LORA_METADATA_TABLE.get(q_aid, {}).get("substitutes", []):
+                                candidate_reqs.extend(q_reqs)
+                        
+                        if not candidate_reqs: continue
+                        candidate_reqs.sort(key=lambda x: x["arrival_time"])
+                        
+                        for v in v_nodes:
+                            if v.url in switching_nodes or v.mode == "switching": continue
+                            
+                            free_slots = v.get_free_slots(aid)
+                            if free_slots <= 0: continue
+                            
+                            can_take = min(free_slots, len(candidate_reqs))
+                            if can_take == 0: continue
+                            
+                            is_merge = (v.mode == "merge" and v.merged_adapter == aid)
+                            is_in_vram = (v.mode == "unmerge" and aid in v.active_loras)
+                            is_in_cpu = (v.mode == "unmerge" and aid in v.loaded_adapters)
+                            is_empty = (v.mode == "unmerge" and len(v.active_loras) == 0)
+                            
+                            # 🚀 5-Tier 終極派發評分
+                            score = (1 if is_merge else 0, 1 if is_in_vram else 0, 1 if is_in_cpu else 0, 1 if is_empty else 0, can_take)
+                            
+                            if best_plan is None or score > best_plan["score"]:
+                                best_plan = {
+                                    "node": v,
+                                    "lora": aid,
+                                    "requests": candidate_reqs[:can_take],
+                                    "score": score
+                                }
+                    
+                    if best_plan:
+                        node = best_plan["node"]
+                        aid = best_plan["lora"]
+                        reqs_to_dispatch = best_plan["requests"]
+                        
+                        for req in reqs_to_dispatch:
+                            q_aid = req["original_aid"]
+                            request_queues[q_aid] = deque([r for r in request_queues[q_aid] if r["request_id"] != req["request_id"]])
+                            global_request_list = [r for r in global_request_list if r["request_id"] != req["request_id"]]
+                            
+                            req["adapter_id"] = aid
+                            node.commit_request(aid)
+                            asyncio.create_task(dispatch_task(node.url, req, node, target_lora=aid))
+                        
+                        dispatched_any = True
+                        break 
 
         except Exception as e: logger.error(f"🔥 Scheduler Error: {e}")
         await asyncio.sleep(0.5)
@@ -296,36 +423,51 @@ async def send_request(req: AddRequest):
     stream_queues[rid] = {"q": asyncio.Queue(), "ts": time.time()}
     meta = LORA_METADATA_TABLE.get(req.adapter_id)
     
-    if not meta or (meta["type"]=="local" and meta.get("cluster")!=CLUSTER_ID):
-        await stream_queues[rid]["q"].put({"type": "error", "message": "Sovereignty Violation"})
-        await stream_queues[rid]["q"].put(None); return {"request_id": rid}
+    is_local = (meta and meta.get("type") == "local")
 
-    valid_subs = [req.adapter_id] + [s for s in meta.get("substitutes", []) if s in LOCAL_AVAILABLE_LORAS]
-    actual_valid = [s for s in valid_subs if s in LOCAL_AVAILABLE_LORAS]
-    if not actual_valid:
-        await stream_queues[rid]["q"].put({"type": "error", "message": "LoRA unavailable locally"}); await stream_queues[rid]["q"].put(None)
+    # 1. Rule 1: Data Sovereignty (資料主權審查：嚴禁處理別區的 Local LoRA)
+    if not meta or (is_local and meta.get("cluster") != CLUSTER_ID):
+        # 🚀 觸發強制 Drop，不列入算力債 Z_debt
+        await handle_offload_or_drop(rid, is_local, 999.0, Z_debt, stream_queues[rid]["q"], force_drop_reason="Sovereignty Violation")
         return {"request_id": rid}
 
-    # 🚀 執行確定性預測 (使用剩餘 Token)
+    # 2. 檢查本地是否有檔案 (或替代檔案)
+    valid_subs = [req.adapter_id] + [s for s in meta.get("substitutes", []) if s in LOCAL_AVAILABLE_LORAS]
+    actual_valid = [s for s in valid_subs if s in LOCAL_AVAILABLE_LORAS]
+    
+    if not actual_valid:
+        # 🚀 觸發強制卸載 (Force Offload)，因為缺乏檔案而非算力不足，不列入算力債 Z_debt
+        await handle_offload_or_drop(rid, is_local, 999.0, Z_debt, stream_queues[rid]["q"], force_offload=True)
+        return {"request_id": rid}
+
+    # 3. 進入真實物理算力評估 (Virtual Dry-Run)
     nodes = [VirtualNodeState(u, d["metrics"]) for u, d in node_mgr.nodes.items() if d.get("metrics")]
     best_ttft = 999.0
-    total_pending = sum(len(q) for q in request_queues.values())
+    global_pending = len(global_request_list)
+    
     if nodes:
         for aid in actual_valid:
-            for node in nodes:
-                ttft = predict_ttft_for_node(node, aid, total_pending, len(nodes))
-                if ttft < best_ttft: best_ttft = ttft
+            ttft = predict_cluster_ttft(nodes, aid, global_pending)
+            if ttft < best_ttft: 
+                best_ttft = ttft
     
     s_eff = 1.0 if best_ttft <= T_MAX else -1.0
 
     async with z_lock:
-        if s_eff < 0 and Z_debt > PSI_DROP:
-            logger.warning(f"🚫 [Drop] {rid[:8]} | Pred TTFT: {best_ttft:.1f}s | Z: {Z_debt:.2f}")
-            await stream_queues[rid]["q"].put({"type": "error", "message": "System Congested"}); await stream_queues[rid]["q"].put(None)
-            return {"request_id": rid}
-        if s_eff > 0: Z_debt = max(0.0, Z_debt - EPSILON)
-        else: Z_debt = max(0.0, Z_debt + 1.0 - EPSILON)
+        if s_eff < 0:
+            # 算力不足，交給流控樞紐決策 (會檢查 Z_debt 是否 > PSI_DROP)
+            handled = await handle_offload_or_drop(rid, is_local, best_ttft, Z_debt, stream_queues[rid]["q"])
+            if handled:
+                # 已被丟棄或轉發，結束生命週期
+                return {"request_id": rid}
+                
+            # 選擇留在本地硬吞，增加延遲債務 Z(t)
+            Z_debt = max(0.0, Z_debt + 1.0 - EPSILON)
+        else:
+            # 預期不超時，順利收下，降低延遲債務 Z(t)
+            Z_debt = max(0.0, Z_debt - EPSILON)
 
+    # 成功通過所有的審查與保護機制，正式排入全域隊列
     req_obj = {
         "request_id": rid, "prompt": req.prompt, "adapter_id": req.adapter_id,
         "original_aid": req.adapter_id, "max_new_tokens": req.max_new_tokens, "arrival_time": time.time()
@@ -352,11 +494,17 @@ async def stream(request_id: str):
 
 @app.post("/register_node")
 async def register(data: dict): node_mgr.register_node(data["url"]); return {"ok": True}
+
 @app.get("/status")
-async def status(): return {"active_nodes": len([n for n, d in node_mgr.nodes.items() if d.get("metrics")]), "z_debt": round(Z_debt, 2)}
+async def status(): 
+    return {
+        "active_nodes": len([n for n, d in node_mgr.nodes.items() if d.get("metrics")]), 
+        "z_debt": round(Z_debt, 2),
+        "global_pending": len(global_request_list)
+    }
+
 @app.get("/fetch_adapter/{adapter_id}")
 async def fetch(adapter_id: str): 
-    # 正確模擬權重路徑
     path = os.path.join(LORA_PATH, "LoRA_1", "adapter_model.safetensors")
     return FileResponse(path)
 
