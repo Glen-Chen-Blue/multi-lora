@@ -49,6 +49,9 @@ config_lock = threading.Lock()
 
 client = httpx.AsyncClient(timeout=120.0)
 
+# [新增] 狀態機狀態：active | standby | draining
+current_status = "standby"
+
 # ============================================================
 # Background Registration Task
 # ============================================================
@@ -56,7 +59,6 @@ async def register_with_control_node():
     """
     背景任務：在啟動時不斷嘗試向 Control Node 註冊自己的存在
     """
-    # 允許外部直接給定完整 URL，否則預設使用 127.0.0.1 加上 PORT
     port = os.environ.get("PORT", "8001")
     my_url = os.environ.get("COMPUTE_NODE_URL", f"http://127.0.0.1:{port}")
     
@@ -125,12 +127,19 @@ def fetch_adapter_sync(adapter_id: str) -> bytes:
 # Engine Loop & Lifecycle
 # ============================================================
 def engine_loop_thread():
+    global current_status
     logger.info("🚀 Engine loop started.")
     while not shutdown_event.is_set():
         engine_wakeup.wait(timeout=1.0)
         if shutdown_event.is_set(): break
         try:
             did_work = engine.step()
+            
+            # [核心機制] 如果處於排空模式，且手上的任務都清空了，自動轉為 Standby
+            if current_status == "draining" and engine.is_idle():
+                logger.info("❄️ 所有任務已排空，節點自動轉為 Standby")
+                current_status = "standby"
+                
             if not did_work:
                 if engine.is_idle(): engine_wakeup.clear()
                 else: time.sleep(0.001) 
@@ -154,7 +163,6 @@ async def lifespan(app: FastAPI):
     t = threading.Thread(target=engine_loop_thread, daemon=True)
     t.start()
     
-    # 🚀 [新增] 啟動背景註冊任務
     asyncio.create_task(register_with_control_node())
     
     yield
@@ -185,11 +193,31 @@ class SyncAdaptersRequest(BaseModel):
     adapters: List[str]
     version_id: int 
 
+class SetStatusRequest(BaseModel):
+    status: str
+
 # ============================================================
 # Endpoints
 # ============================================================
+@app.post("/set_status")
+def set_status(req: SetStatusRequest):
+    """由 Control Node 主動呼叫，用於直接指派狀態 (例如 Wake up)"""
+    global current_status
+    current_status = req.status
+    logger.info(f"🔄 狀態變更為: {current_status}")
+    return {"ok": True}
+
+@app.post("/drain")
+def drain():
+    """由 Control Node 呼叫，開始執行優雅排空"""
+    global current_status
+    current_status = "draining"
+    logger.info("🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...")
+    return {"ok": True}
+
 @app.get("/metrics")
 def metrics():
+    """回報節點的狀態與負載，Control Node 將以這裡的 status 為準"""
     if not engine: return {}
     
     with engine.lock:
@@ -215,6 +243,7 @@ def metrics():
     return {
         "node_id": NODE_ID,
         "mode": current_mode,
+        "status": current_status,  # [新增] 回報當前狀態，讓 Control Node 同步
         "request_set": request_set, 
         "load": {
             "running_batch": running_cnt + waiting_cnt,
@@ -234,7 +263,7 @@ def metrics():
     }
 
 @app.post("/sync_adapters")
-async def sync_adapters(req: SyncAdaptersRequest):
+def sync_adapters(req: SyncAdaptersRequest):
     global last_config_version
     with config_lock:
         if req.version_id <= last_config_version:
@@ -255,6 +284,10 @@ async def sync_adapters(req: SyncAdaptersRequest):
 
 @app.post("/add_request")
 def add_request(req: AddRequest):
+    # [安全防護] 只有 Active 狀態才允許接收新 Request
+    if current_status != "active":
+        raise HTTPException(status_code=503, detail=f"Node is not active (current: {current_status})")
+
     rid = str(uuid.uuid4())
     q = Queue()
     
@@ -302,6 +335,7 @@ def add_request(req: AddRequest):
 
 @app.post("/merge")
 def merge(req: MergeRequest):
+    if current_status != "active": return {"status": "error", "reason": "Not active"}
     try:
         engine.merge_adapter(req.adapter_id, force=req.force)
         return {"status": "merged", "adapter": req.adapter_id}
@@ -310,6 +344,7 @@ def merge(req: MergeRequest):
 
 @app.post("/unmerge")
 def unmerge(req: UnmergeRequest):
+    if current_status != "active": return {"status": "error", "reason": "Not active"}
     engine.unmerge_all()
     return {"status": "unmerged"}
 
@@ -327,6 +362,5 @@ def debug_reset():
 
 if __name__ == "__main__":
     import uvicorn
-    # [修改] 從環境變數讀取 PORT，確保 uvicorn 跑在正確的 port 上
     port = int(os.environ.get("PORT", 8001))
     uvicorn.run(app, host="0.0.0.0", port=port)

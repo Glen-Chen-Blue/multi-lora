@@ -25,16 +25,31 @@ limits = httpx.Limits(max_keepalive_connections=100, max_connections=200)
 client = httpx.AsyncClient(limits=limits, timeout=60.0)
 
 # ============================================================
-# Lyapunov & TTFT Hyperparameters
+# Lyapunov, TTFT & Auto-Scaling Hyperparameters
 # ============================================================
 T_MAX = 5.5                 
 EPSILON = 0.05               
 PSI_DROP = 10.0              
 
+# Scale Up/Down 參數設定
+SCALE_UP_DROP_THRESHOLD = 5
+SCALE_DOWN_SURPLUS_THRESHOLD = 15  # 一台機器的基準容量(12) + 緩衝(3)
+
 Z_debt = 0.0
 z_lock = asyncio.Lock()
 
 switching_nodes: Set[str] = set()
+
+recent_capacity_drops: Deque[float] = deque()
+
+def record_capacity_drop():
+    recent_capacity_drops.append(time.time())
+
+def get_recent_capacity_drops_count(window: float = 6.0) -> int:
+    now = time.time()
+    while recent_capacity_drops and now - recent_capacity_drops[0] > window:
+        recent_capacity_drops.popleft()
+    return len(recent_capacity_drops)
 
 # ============================================================
 # 模擬 EFO 資訊表
@@ -55,28 +70,87 @@ LORA_METADATA_TABLE = {
 LOCAL_AVAILABLE_LORAS = {"LoRA_1", "LoRA_2", "LoRA_3", "LoRA_4", "LoRA_5", "LoRA_7", "LoRA_9"}
 
 # ============================================================
-# Global State
+# Global State (含待機與 Draining 機制)
 # ============================================================
 class NodeManager:
-    def __init__(self): self.nodes: Dict[str, Dict] = {}
+    def __init__(self): 
+        self.nodes: Dict[str, Dict] = {}
+        
     def register_node(self, url: str):
         if url not in self.nodes:
-            self.nodes[url] = {"metrics": None, "last_seen": time.time()}
-            logger.info(f"✅ Registered Node: {url}")
-        else: self.nodes[url]["last_seen"] = time.time()
+            has_active = any(d["status"] == "active" for d in self.nodes.values())
+            status = "standby" if has_active else "active"
+            self.nodes[url] = {"metrics": None, "last_seen": time.time(), "status": status}
+            logger.info(f"✅ Registered Node: {url} | Assigned Status: {status}")
+            
+            # 主動通知 Compute Node 切換到指定狀態
+            asyncio.create_task(client.post(f"{url}/set_status", json={"status": status}))
+        else: 
+            self.nodes[url]["last_seen"] = time.time()
+            
     def update_metrics(self, url: str, metrics: Dict):
         if url in self.nodes:
             self.nodes[url]["metrics"] = metrics
             self.nodes[url]["last_seen"] = time.time()
+            
+            # 以 Compute Node 回報的真實狀態為主
+            reported_status = metrics.get("status", "standby")
+            if self.nodes[url]["status"] == "draining" and reported_status == "standby":
+                logger.info(f"❄️ [Scale Down] 節點已完全排空，自動轉為 Standby: {url}")
+            self.nodes[url]["status"] = reported_status
+            
+    async def scale_up_one_node(self) -> bool:
+        for url, data in self.nodes.items():
+            if data["status"] == "standby":
+                try:
+                    resp = await client.post(f"{url}/set_status", json={"status": "active"}, timeout=2.0)
+                    if resp.status_code == 200:
+                        self.nodes[url]["status"] = "active"
+                        logger.info(f"🚀 [Scale Up] 成功喚醒待機節點: {url}")
+                        return True
+                except Exception as e:
+                    logger.error(f"喚醒節點 {url} 失敗: {e}")
+        logger.warning("⚠️ [Scale Up] 擴容失敗：沒有可用的待機節點！")
+        return False
+
+    async def trigger_drain_best_node(self, v_nodes: List['VirtualNodeState']) -> bool:
+        active_nodes = [n for n in v_nodes if self.nodes[n.url]["status"] == "active"]
+        if len(active_nodes) <= 1:
+            return False # 保留至少一台
+            
+        global_lora_counts = defaultdict(int)
+        for n in active_nodes:
+            for lora in n.active_loras:
+                global_lora_counts[lora] += 1
+                
+        current_unmerge_count = sum(1 for n in active_nodes if n.mode == "unmerge")
+                
+        def drain_score(n: VirtualNodeState):
+            orphan_count = sum(1 for lora in n.active_loras if global_lora_counts[lora] == 1)
+            is_last_unmerge = (n.mode == "unmerge" and current_unmerge_count <= 1)
+            last_unmerge_penalty = 10000 if is_last_unmerge else 0
+            mode_penalty = 100 if n.mode == "merge" else 0
+            
+            return (orphan_count * 1000) + last_unmerge_penalty + mode_penalty + n.running_batch
+            
+        best_node = sorted(active_nodes, key=drain_score)[0]
+        
+        try:
+            resp = await client.post(f"{best_node.url}/drain", timeout=2.0)
+            if resp.status_code == 200:
+                self.nodes[best_node.url]["status"] = "draining"
+                logger.info(f"🚰 [Scale Down] 節點進入 Draining: {best_node.url} (孤兒:{sum(1 for lora in best_node.active_loras if global_lora_counts[lora] == 1)}, 負載:{best_node.running_batch}, 模式:{best_node.mode})")
+                return True
+        except Exception as e:
+            logger.error(f"Drain 節點 {best_node.url} 失敗: {e}")
+            
+        return False
 
 node_mgr = NodeManager()
 request_queues: Dict[str, Deque] = defaultdict(deque)
 global_request_list: List[Dict] = [] 
 stream_queues: Dict[str, Dict] = {} 
 
-# ============================================================
-# 🔮 記憶體感知虛擬狀態機
-# ============================================================
 class VirtualNodeState:
     def __init__(self, url: str, metrics: Dict):
         self.url = url
@@ -100,7 +174,6 @@ class VirtualNodeState:
     def get_free_slots(self, target_lora: str) -> int:
         if self.mode == "merge":
             return max(0, self.capacity_merged - self.running_batch) if self.merged_adapter == target_lora else 0
-        
         current_cost = self.running_batch + len(self.active_loras)
         margin = self.capacity_unmerged_base - current_cost
         if target_lora not in self.active_loras:
@@ -120,9 +193,6 @@ class VirtualNodeState:
             if self.lora_request_counts[target_lora] == 0:
                 self.active_loras.discard(target_lora)
 
-# ============================================================
-# 🔮 完美 TTFT 預測 (基於全域排隊深度的多週期推演)
-# ============================================================
 def predict_cluster_ttft(nodes: List[VirtualNodeState], target_lora: str, global_pending_ahead: int) -> float:
     SCHEDULER_OVERHEAD = 0.300 
     DECODE_P95_SPEED = 0.040   
@@ -134,7 +204,6 @@ def predict_cluster_ttft(nodes: List[VirtualNodeState], target_lora: str, global
     
     for node in nodes:
         if node.url in switching_nodes or node.mode == "switching": continue
-        
         is_merge = (node.mode == "merge" and node.merged_adapter == target_lora)
         if node.mode == "merge" and not is_merge: continue 
         
@@ -178,11 +247,9 @@ def predict_cluster_ttft(nodes: List[VirtualNodeState], target_lora: str, global
         prefill_time = 0.050 * take_at_landing * multiplier
         
         return SCHEDULER_OVERHEAD + load_delay + prefill_time
-
     else:
         needed_to_finish = my_position - total_free
         if cluster_concurrent_capacity == 0: cluster_concurrent_capacity = 12
-        
         full_cycles = needed_to_finish // cluster_concurrent_capacity
         remainder = needed_to_finish % cluster_concurrent_capacity
         
@@ -202,58 +269,31 @@ def predict_cluster_ttft(nodes: List[VirtualNodeState], target_lora: str, global
         total_wait_time = current_wait + (full_cycles * 256 * DECODE_P95_SPEED)
         return SCHEDULER_OVERHEAD + total_wait_time + 0.050
 
-# ============================================================
-# 🚨 統一 Task Offloading & Drop 決策樞紐
-# ============================================================
-async def handle_offload_or_drop(
-    rid: str, 
-    is_local: bool, 
-    best_ttft: float, 
-    z_current: float, 
-    q: asyncio.Queue, 
-    force_offload: bool = False,
-    force_drop_reason: str = None
-) -> bool:
-    """
-    統一處理所有的 Drop 或 Offload。
-    回傳 True 表示請求已被處理（丟棄或轉發），不需要加入本地 Queue。
-    回傳 False 表示要留在本地排隊硬吞。
-    """
-    # 1. 絕對的 Drop 條件 (例如違反資料主權，別區的 Local LoRA)
+async def handle_offload_or_drop(rid: str, is_local: bool, best_ttft: float, z_current: float, q: asyncio.Queue, force_offload: bool = False, force_drop_reason: str = None) -> bool:
     if force_drop_reason:
         logger.warning(f"🚫 [Drop] {rid[:8]} | Reason: {force_drop_reason}")
         await q.put({"type": "error", "message": force_drop_reason})
         await q.put(None)
         return True
 
-    # 2. 強制卸載 (例如本地缺乏檔案的 Global LoRA)
     if force_offload:
-        # TODO: 未來實作 HTTP 轉發給 EFO 或有檔案的 Cluster
         logger.warning(f"🌐 [Offload] Global LoRA {rid[:8]} | Reason: Artifact Missing")
         await q.put({"type": "error", "message": "Artifact Missing (Offload Not Implemented)"})
         await q.put(None)
         return True
 
-    # 3. 算力不足造成的超載 (Z > PSI_DROP)
     if z_current > PSI_DROP:
+        record_capacity_drop()
         if is_local:
-            # 本區的機密資料，算力不足只能捨棄
             logger.warning(f"🚫 [Drop] Local LoRA {rid[:8]} | Pred TTFT: {best_ttft:.1f}s | Z: {z_current:.2f}")
             await q.put({"type": "error", "message": "System Congested (Local Drop)"})
         else:
-            # Global 資料，算力不足就丟給鄰居
-            # TODO: 未來實作跨區轉發 (Task Offloading)
             logger.warning(f"🌐 [Offload] Global LoRA {rid[:8]} | Pred TTFT: {best_ttft:.1f}s | Z: {z_current:.2f}")
             await q.put({"type": "error", "message": "System Congested (Offload Not Implemented)"})
-        
         await q.put(None)
         return True
-        
     return False
 
-# ============================================================
-# Scheduler & Dispatch Core
-# ============================================================
 async def safe_mode_switch(node_url: str, endpoint: str, payload: Dict):
     if node_url in switching_nodes: return
     switching_nodes.add(node_url)
@@ -261,8 +301,6 @@ async def safe_mode_switch(node_url: str, endpoint: str, payload: Dict):
         resp = await client.post(f"{node_url}{endpoint}", json=payload, timeout=5.0)
         if resp.status_code == 200:
             logger.info(f"✅ Mode Switch {endpoint} Success: {node_url}")
-        else:
-            logger.warning(f"⚠️ Mode Switch {endpoint} Failed ({resp.status_code}): {node_url}")
     except Exception as e:
         logger.error(f"❌ Mode Switch Error: {e}")
     finally:
@@ -298,15 +336,19 @@ async def scheduler_loop():
     logger.info("⏳ SP2 Full-Function Scheduler loop started.")
     while True:
         try:
-            node_urls = list(node_mgr.nodes.keys())
-            if node_urls:
-                tasks = [client.get(f"{u}/metrics", timeout=1.0) for u in node_urls]
+            # 輪詢「所有」節點，包含 standby，用以更新最真實的狀態 (包含 draining 自動轉回 standby)
+            all_node_urls = list(node_mgr.nodes.keys())
+            if all_node_urls:
+                tasks = [client.get(f"{u}/metrics", timeout=1.0) for u in all_node_urls]
                 responses = await asyncio.gather(*tasks, return_exceptions=True)
                 for i, r in enumerate(responses):
                     if isinstance(r, httpx.Response) and r.status_code == 200:
-                        node_mgr.update_metrics(node_urls[i], r.json())
+                        node_mgr.update_metrics(all_node_urls[i], r.json())
 
-            v_nodes = [VirtualNodeState(u, d["metrics"]) for u, d in node_mgr.nodes.items() if d.get("metrics")]
+            # 排程分派與 TTFT 預測「嚴格只考慮 Active 的節點」
+            active_node_urls = [u for u, d in node_mgr.nodes.items() if d["status"] == "active"]
+            v_nodes = [VirtualNodeState(u, node_mgr.nodes[u]["metrics"]) for u in active_node_urls if node_mgr.nodes[u].get("metrics")]
+            
             if not v_nodes: await asyncio.sleep(0.1); continue
 
             total_pending = sum(len(q) for q in request_queues.values())
@@ -319,37 +361,32 @@ async def scheduler_loop():
                     if len(request_queues[aid]) > 0:
                         asyncio.create_task(safe_mode_switch(v.url, "/merge", {"adapter_id": aid, "force": False}))
                         v.mode = "switching"; unmerged_count -= 1
-                elif v.mode == "merge" and v.running_batch < 5:
-                    if len(request_queues[v.merged_adapter]) == 0 and (total_pending > 0):
+                elif v.mode == "merge" and v.running_batch < 9:
+                    if len(request_queues[v.merged_adapter]) == 0:
                         asyncio.create_task(safe_mode_switch(v.url, "/unmerge", {"force": False}))
                         v.mode = "switching"; unmerged_count += 1
 
             dispatched_any = True
             while dispatched_any and global_request_list:
                 dispatched_any = False
-                
                 for req_meta in list(global_request_list):
                     target_aid = req_meta["original_aid"]
-                    
                     meta = LORA_METADATA_TABLE.get(target_aid, {})
                     valid_aids = [target_aid] + [s for s in meta.get("substitutes", []) if s in LOCAL_AVAILABLE_LORAS]
                     valid_aids = [aid for aid in valid_aids if aid in LOCAL_AVAILABLE_LORAS]
                     if not valid_aids: valid_aids = [target_aid]
 
                     best_plan = None
-                    
                     for aid in valid_aids:
                         candidate_reqs = []
                         for q_aid, q_reqs in request_queues.items():
                             if aid == q_aid or aid in LORA_METADATA_TABLE.get(q_aid, {}).get("substitutes", []):
                                 candidate_reqs.extend(q_reqs)
-                        
                         if not candidate_reqs: continue
                         candidate_reqs.sort(key=lambda x: x["arrival_time"])
                         
                         for v in v_nodes:
                             if v.url in switching_nodes or v.mode == "switching": continue
-                            
                             free_slots = v.get_free_slots(aid)
                             if free_slots <= 0: continue
                             
@@ -361,36 +398,72 @@ async def scheduler_loop():
                             is_in_cpu = (v.mode == "unmerge" and aid in v.loaded_adapters)
                             is_empty = (v.mode == "unmerge" and len(v.active_loras) == 0)
                             
-                            # 🚀 5-Tier 終極派發評分
                             score = (1 if is_merge else 0, 1 if is_in_vram else 0, 1 if is_in_cpu else 0, 1 if is_empty else 0, can_take)
                             
                             if best_plan is None or score > best_plan["score"]:
-                                best_plan = {
-                                    "node": v,
-                                    "lora": aid,
-                                    "requests": candidate_reqs[:can_take],
-                                    "score": score
-                                }
+                                best_plan = {"node": v, "lora": aid, "requests": candidate_reqs[:can_take], "score": score}
                     
                     if best_plan:
-                        node = best_plan["node"]
-                        aid = best_plan["lora"]
-                        reqs_to_dispatch = best_plan["requests"]
-                        
+                        node, aid, reqs_to_dispatch = best_plan["node"], best_plan["lora"], best_plan["requests"]
                         for req in reqs_to_dispatch:
                             q_aid = req["original_aid"]
                             request_queues[q_aid] = deque([r for r in request_queues[q_aid] if r["request_id"] != req["request_id"]])
                             global_request_list = [r for r in global_request_list if r["request_id"] != req["request_id"]]
-                            
                             req["adapter_id"] = aid
                             node.commit_request(aid)
                             asyncio.create_task(dispatch_task(node.url, req, node, target_lora=aid))
-                        
                         dispatched_any = True
                         break 
-
         except Exception as e: logger.error(f"🔥 Scheduler Error: {e}")
         await asyncio.sleep(0.5)
+
+# ============================================================
+# 📈 Auto-Scaling Monitor (Scale Up + Draining)
+# ============================================================
+async def auto_scaling_monitor():
+    logger.info("⚖️ Auto-Scaling Monitor started.")
+    last_scale_action_time = time.time()
+    surplus_duration = 0.0
+    
+    while True:
+        await asyncio.sleep(1.0)
+        now = time.time()
+        
+        # --- 1. Scale Up ---
+        recent_valid_drops = get_recent_capacity_drops_count(6.0)
+        if Z_debt > (PSI_DROP * 0.8) and recent_valid_drops > SCALE_UP_DROP_THRESHOLD:
+            if now - last_scale_action_time > 6.0:
+                logger.info(f"🚨 [Scale Up] Z={Z_debt:.2f}, Drops={recent_valid_drops}")
+                await node_mgr.scale_up_one_node()
+                last_scale_action_time = now
+                surplus_duration = 0.0
+                continue
+                
+        # --- 2. Scale Down (Draining) ---
+        active_urls = [u for u, d in node_mgr.nodes.items() if d["status"] == "active"]
+        if len(active_urls) > 1:
+            v_nodes = [VirtualNodeState(u, node_mgr.nodes[u]["metrics"]) for u in active_urls if node_mgr.nodes[u].get("metrics")]
+            
+            total_pending = len(global_request_list)
+            total_free_slots = sum(
+                max(0, n.capacity_merged - n.running_batch) if n.mode == "merge" 
+                else max(0, n.capacity_unmerged_base - n.running_batch - len(n.active_loras))
+                for n in v_nodes
+            )
+            
+            # 條件: 總空位 - 正在排隊的請求 >= 閥值 (15)
+            is_surplus = (total_free_slots - total_pending) >= SCALE_DOWN_SURPLUS_THRESHOLD
+            
+            if is_surplus:
+                surplus_duration += 1.0
+            else:
+                surplus_duration = 0.0
+                
+            # 持續 6 秒滿足過剩條件，且過了 6 秒冷卻期
+            if surplus_duration >= 6.0 and (now - last_scale_action_time > 6.0):
+                if await node_mgr.trigger_drain_best_node(v_nodes):
+                    last_scale_action_time = now
+                    surplus_duration = 0.0
 
 # ============================================================
 # API Routes
@@ -399,6 +472,7 @@ async def scheduler_loop():
 async def lifespan(app: FastAPI):
     os.makedirs(LORA_PATH, exist_ok=True)
     asyncio.create_task(scheduler_loop())
+    asyncio.create_task(auto_scaling_monitor()) 
     async def cleanup_streams():
         while True:
             now = time.time()
@@ -409,7 +483,7 @@ async def lifespan(app: FastAPI):
     yield
     await client.aclose()
 
-app = FastAPI(title="Control Node SP2 (Stable+Deterministic)", lifespan=lifespan)
+app = FastAPI(title="Control Node SP2", lifespan=lifespan)
 
 class AddRequest(BaseModel):
     prompt: str
@@ -422,52 +496,38 @@ async def send_request(req: AddRequest):
     rid = str(uuid.uuid4())
     stream_queues[rid] = {"q": asyncio.Queue(), "ts": time.time()}
     meta = LORA_METADATA_TABLE.get(req.adapter_id)
-    
     is_local = (meta and meta.get("type") == "local")
 
-    # 1. Rule 1: Data Sovereignty (資料主權審查：嚴禁處理別區的 Local LoRA)
     if not meta or (is_local and meta.get("cluster") != CLUSTER_ID):
-        # 🚀 觸發強制 Drop，不列入算力債 Z_debt
         await handle_offload_or_drop(rid, is_local, 999.0, Z_debt, stream_queues[rid]["q"], force_drop_reason="Sovereignty Violation")
         return {"request_id": rid}
 
-    # 2. 檢查本地是否有檔案 (或替代檔案)
     valid_subs = [req.adapter_id] + [s for s in meta.get("substitutes", []) if s in LOCAL_AVAILABLE_LORAS]
     actual_valid = [s for s in valid_subs if s in LOCAL_AVAILABLE_LORAS]
-    
     if not actual_valid:
-        # 🚀 觸發強制卸載 (Force Offload)，因為缺乏檔案而非算力不足，不列入算力債 Z_debt
         await handle_offload_or_drop(rid, is_local, 999.0, Z_debt, stream_queues[rid]["q"], force_offload=True)
         return {"request_id": rid}
 
-    # 3. 進入真實物理算力評估 (Virtual Dry-Run)
-    nodes = [VirtualNodeState(u, d["metrics"]) for u, d in node_mgr.nodes.items() if d.get("metrics")]
+    active_node_urls = [u for u, d in node_mgr.nodes.items() if d["status"] == "active"]
+    nodes = [VirtualNodeState(u, node_mgr.nodes[u]["metrics"]) for u in active_node_urls if node_mgr.nodes[u].get("metrics")]
+    
     best_ttft = 999.0
     global_pending = len(global_request_list)
-    
     if nodes:
         for aid in actual_valid:
             ttft = predict_cluster_ttft(nodes, aid, global_pending)
-            if ttft < best_ttft: 
-                best_ttft = ttft
+            if ttft < best_ttft: best_ttft = ttft
     
     s_eff = 1.0 if best_ttft <= T_MAX else -1.0
 
     async with z_lock:
         if s_eff < 0:
-            # 算力不足，交給流控樞紐決策 (會檢查 Z_debt 是否 > PSI_DROP)
             handled = await handle_offload_or_drop(rid, is_local, best_ttft, Z_debt, stream_queues[rid]["q"])
-            if handled:
-                # 已被丟棄或轉發，結束生命週期
-                return {"request_id": rid}
-                
-            # 選擇留在本地硬吞，增加延遲債務 Z(t)
+            if handled: return {"request_id": rid}
             Z_debt = max(0.0, Z_debt + 1.0 - EPSILON)
         else:
-            # 預期不超時，順利收下，降低延遲債務 Z(t)
             Z_debt = max(0.0, Z_debt - EPSILON)
 
-    # 成功通過所有的審查與保護機制，正式排入全域隊列
     req_obj = {
         "request_id": rid, "prompt": req.prompt, "adapter_id": req.adapter_id,
         "original_aid": req.adapter_id, "max_new_tokens": req.max_new_tokens, "arrival_time": time.time()
@@ -493,14 +553,19 @@ async def stream(request_id: str):
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.post("/register_node")
-async def register(data: dict): node_mgr.register_node(data["url"]); return {"ok": True}
+async def register(data: dict): 
+    node_mgr.register_node(data["url"])
+    return {"ok": True}
 
 @app.get("/status")
 async def status(): 
     return {
-        "active_nodes": len([n for n, d in node_mgr.nodes.items() if d.get("metrics")]), 
+        "active_nodes": len([n for n, d in node_mgr.nodes.items() if d["status"] == "active"]),
+        "draining_nodes": len([n for n, d in node_mgr.nodes.items() if d["status"] == "draining"]),
+        "standby_nodes": len([n for n, d in node_mgr.nodes.items() if d["status"] == "standby"]),
         "z_debt": round(Z_debt, 2),
-        "global_pending": len(global_request_list)
+        "global_pending": len(global_request_list),
+        "recent_drops": get_recent_capacity_drops_count()
     }
 
 @app.get("/fetch_adapter/{adapter_id}")
