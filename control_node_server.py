@@ -21,6 +21,11 @@ logger = logging.getLogger("ControlNode")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 LORA_PATH = os.environ.get("LORA_PATH", "./testLoRA")
+CLUSTER_NAME = os.environ.get("CLUSTER_NAME", "cluster_1")
+CLUSTER_ID = CLUSTER_NAME  # 保留向下相容
+EFO_URL = os.environ.get("EFO_URL", "http://127.0.0.1:9100")
+MY_URL = os.environ.get("CONTROL_NODE_URL", "http://127.0.0.1:9000") # 提供給 EFO 自己的位址
+
 limits = httpx.Limits(max_keepalive_connections=100, max_connections=200)
 client = httpx.AsyncClient(limits=limits, timeout=60.0)
 
@@ -39,7 +44,6 @@ Z_debt = 0.0
 z_lock = asyncio.Lock()
 
 switching_nodes: Set[str] = set()
-
 recent_capacity_drops: Deque[float] = deque()
 
 def record_capacity_drop():
@@ -52,22 +56,11 @@ def get_recent_capacity_drops_count(window: float = 6.0) -> int:
     return len(recent_capacity_drops)
 
 # ============================================================
-# 模擬 EFO 資訊表
+# 模擬 EFO 資訊表 (現在由 EFO 伺服器動態提供)
 # ============================================================
-CLUSTER_ID = "cluster_1" 
-LORA_METADATA_TABLE = {
-    "LoRA_1": {"type": "global", "substitutes": ["LoRA_2", "LoRA_3"]},
-    "LoRA_2": {"type": "global", "substitutes": ["LoRA_1", "LoRA_3"]},
-    "LoRA_3": {"type": "global", "substitutes": ["LoRA_1", "LoRA_2"]},
-    "LoRA_4": {"type": "local", "cluster": "cluster_1", "substitutes": ["LoRA_5"]},
-    "LoRA_5": {"type": "local", "cluster": "cluster_1", "substitutes": ["LoRA_4"]},
-    "LoRA_6": {"type": "local", "cluster": "cluster_2", "substitutes": []},
-    "LoRA_7": {"type": "global", "substitutes": ["LoRA_8"]},
-    "LoRA_8": {"type": "global", "substitutes": ["LoRA_7"]},
-    "LoRA_9": {"type": "global", "substitutes": []},
-    "LoRA_10": {"type": "global", "substitutes": []},
-}
-LOCAL_AVAILABLE_LORAS = {"LoRA_1", "LoRA_2", "LoRA_3", "LoRA_4", "LoRA_5", "LoRA_7", "LoRA_9"}
+LORA_METADATA_TABLE: Dict[str, Any] = {}
+# 本地目前擁有的 LoRA (後續由 SP1 Provisioning 動態決定，初始為空)
+LOCAL_AVAILABLE_LORAS: Set[str] = set()
 
 # ============================================================
 # Global State (含待機與 Draining 機制)
@@ -471,8 +464,33 @@ async def auto_scaling_monitor():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     os.makedirs(LORA_PATH, exist_ok=True)
+    
+    # 1. 向 EFO 註冊並抓取 Global Metadata
+    logger.info(f"🔄 Registering with EFO at {EFO_URL}...")
+    for _ in range(5):
+        try:
+            resp = await client.post(
+                f"{EFO_URL}/register_cluster", 
+                json={"cluster_name": CLUSTER_NAME, "control_node_url": MY_URL},
+                timeout=5.0
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                LORA_METADATA_TABLE.update(data.get("metadata", {}))
+                logger.info(f"✅ Successfully registered to EFO. Loaded {len(LORA_METADATA_TABLE)} LoRA metadata entries.")
+                break
+            else:
+                logger.warning(f"⚠️ EFO rejected registration: HTTP {resp.status_code}")
+        except Exception as e:
+            logger.warning(f"⚠️ EFO unreachable ({e}), retrying in 2s...")
+        await asyncio.sleep(2.0)
+    else:
+        logger.error("❌ Failed to register with EFO after maximum retries. Running without metadata!")
+
+    # 2. 啟動背景任務
     asyncio.create_task(scheduler_loop())
     asyncio.create_task(auto_scaling_monitor()) 
+    
     async def cleanup_streams():
         while True:
             now = time.time()
@@ -480,15 +498,27 @@ async def lifespan(app: FastAPI):
             for rid in expired: stream_queues.pop(rid, None)
             await asyncio.sleep(60)
     asyncio.create_task(cleanup_streams())
+    
     yield
     await client.aclose()
 
-app = FastAPI(title="Control Node SP2", lifespan=lifespan)
+app = FastAPI(title=f"Control Node SP2 ({CLUSTER_NAME})", lifespan=lifespan)
 
 class AddRequest(BaseModel):
     prompt: str
     adapter_id: str
     max_new_tokens: int = 256
+
+class UpdateLorasRequest(BaseModel):
+    loras: List[str]
+
+@app.post("/update_local_loras")
+async def update_local_loras(req: UpdateLorasRequest):
+    """接收來自 EFO SP1 的動態配置結果，更新本地磁碟可用的 LoRA 列表"""
+    global LOCAL_AVAILABLE_LORAS
+    LOCAL_AVAILABLE_LORAS = set(req.loras)
+    logger.info(f"🔄 Updated LOCAL_AVAILABLE_LORAS from EFO: {LOCAL_AVAILABLE_LORAS}")
+    return {"status": "ok"}
 
 @app.post("/send_request")
 async def send_request(req: AddRequest):
@@ -575,4 +605,5 @@ async def fetch(adapter_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=9000)
+    port = int(os.environ.get("PORT", 9000))
+    uvicorn.run(app, host="0.0.0.0", port=port)

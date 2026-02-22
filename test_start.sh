@@ -31,6 +31,7 @@ stop() {
   
   sleep 1
 
+  pkill -f "uvicorn EFO_server"
   pkill -f "uvicorn control_node_server"
   pkill -f "uvicorn compute_node_server"
   
@@ -46,6 +47,7 @@ start() {
 
   echo "🧹 Cleaning target ports..."
 
+  kill_port 9100
   kill_port 9000
   kill_port 8001
   kill_port 8002
@@ -54,7 +56,19 @@ start() {
   echo "=== Phase 1: Infrastructure Test (Dynamic Registration Mode) ==="
   echo "📂 Using existing LoRA files from ./testLoRA"
 
+  echo "🚀 Starting EFO (Port 9100)..."
+  PORT=9100 \
+  LORA_PATH="./testLoRA" \
+  LORA_METADATA="./lora_metadata.json" \
+  CLUSTERS='{"cluster_1":"http://127.0.0.1:9000","cluster_2":"http://127.0.0.1:9001","cluster_3":"http://127.0.0.1:9002"}' \
+  uvicorn EFO_server:app --host 0.0.0.0 --port 9100 &
+  PIDS+=($!)
+
+  sleep 1
+
   echo "🚀 Starting Control Node (Port 9000)..."
+  CLUSTER_NAME="cluster_1" \
+  EFO_URL="http://127.0.0.1:9100" \
   LORA_PATH="./testLoRA" \
   uvicorn control_node_server:app --host 0.0.0.0 --port 9000 &
   PIDS+=($!)
