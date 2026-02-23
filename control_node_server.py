@@ -46,6 +46,10 @@ z_lock = asyncio.Lock()
 switching_nodes: Set[str] = set()
 recent_capacity_drops: Deque[float] = deque()
 
+# 紀錄收到的 LoRA 請求次數
+lora_request_stats: Dict[str, int] = defaultdict(int)
+stats_lock = asyncio.Lock()
+
 def record_capacity_drop():
     recent_capacity_drops.append(time.time())
 
@@ -59,8 +63,13 @@ def get_recent_capacity_drops_count(window: float = 6.0) -> int:
 # 模擬 EFO 資訊表 (現在由 EFO 伺服器動態提供)
 # ============================================================
 LORA_METADATA_TABLE: Dict[str, Any] = {}
-# 本地目前擁有的 LoRA (後續由 SP1 Provisioning 動態決定，初始為空)
 LOCAL_AVAILABLE_LORAS: Set[str] = set()
+
+# 儲存由 EFO 廣播過來的全域路由表 (供後續 Offloading 決策使用)
+global_routing_table: Dict[str, Any] = {}
+
+# 本地接收 offloading 狀態控制，避免反覆廣播 Halt
+can_accept_offload: bool = True
 
 # ============================================================
 # Global State (含待機與 Draining 機制)
@@ -287,6 +296,22 @@ async def handle_offload_or_drop(rid: str, is_local: bool, best_ttft: float, z_c
         return True
     return False
 
+async def broadcast_halt():
+    """廣播緊急 Halt 訊號給其他的 Control Node"""
+    logger.warning("🚨 [Backpressure] Capacity exhausted! Broadcasting HALT to other clusters.")
+    async with httpx.AsyncClient(timeout=2.0) as client:
+        tasks = []
+        for cluster, data in global_routing_table.items():
+            if cluster != CLUSTER_NAME:
+                url = f"{data['ip']}/emergency_halt"
+                tasks.append(client.post(url, json={"cluster_name": CLUSTER_NAME}))
+        
+        if tasks:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for i, res in enumerate(results):
+                if isinstance(res, Exception):
+                    logger.debug(f"Halt broadcast to one cluster failed: {res}")
+
 async def safe_mode_switch(node_url: str, endpoint: str, payload: Dict):
     if node_url in switching_nodes: return
     switching_nodes.add(node_url)
@@ -329,7 +354,6 @@ async def scheduler_loop():
     logger.info("⏳ SP2 Full-Function Scheduler loop started.")
     while True:
         try:
-            # 輪詢「所有」節點，包含 standby，用以更新最真實的狀態 (包含 draining 自動轉回 standby)
             all_node_urls = list(node_mgr.nodes.keys())
             if all_node_urls:
                 tasks = [client.get(f"{u}/metrics", timeout=1.0) for u in all_node_urls]
@@ -338,7 +362,6 @@ async def scheduler_loop():
                     if isinstance(r, httpx.Response) and r.status_code == 200:
                         node_mgr.update_metrics(all_node_urls[i], r.json())
 
-            # 排程分派與 TTFT 預測「嚴格只考慮 Active 的節點」
             active_node_urls = [u for u, d in node_mgr.nodes.items() if d["status"] == "active"]
             v_nodes = [VirtualNodeState(u, node_mgr.nodes[u]["metrics"]) for u in active_node_urls if node_mgr.nodes[u].get("metrics")]
             
@@ -444,7 +467,6 @@ async def auto_scaling_monitor():
                 for n in v_nodes
             )
             
-            # 條件: 總空位 - 正在排隊的請求 >= 閥值 (15)
             is_surplus = (total_free_slots - total_pending) >= SCALE_DOWN_SURPLUS_THRESHOLD
             
             if is_surplus:
@@ -452,7 +474,6 @@ async def auto_scaling_monitor():
             else:
                 surplus_duration = 0.0
                 
-            # 持續 6 秒滿足過剩條件，且過了 6 秒冷卻期
             if surplus_duration >= 6.0 and (now - last_scale_action_time > 6.0):
                 if await node_mgr.trigger_drain_best_node(v_nodes):
                     last_scale_action_time = now
@@ -465,7 +486,6 @@ async def auto_scaling_monitor():
 async def lifespan(app: FastAPI):
     os.makedirs(LORA_PATH, exist_ok=True)
     
-    # 1. 向 EFO 註冊並抓取 Global Metadata
     logger.info(f"🔄 Registering with EFO at {EFO_URL}...")
     for _ in range(5):
         try:
@@ -487,7 +507,6 @@ async def lifespan(app: FastAPI):
     else:
         logger.error("❌ Failed to register with EFO after maximum retries. Running without metadata!")
 
-    # 2. 啟動背景任務
     asyncio.create_task(scheduler_loop())
     asyncio.create_task(auto_scaling_monitor()) 
     
@@ -512,9 +531,14 @@ class AddRequest(BaseModel):
 class UpdateLorasRequest(BaseModel):
     loras: List[str]
 
+class UpdateRoutingRequest(BaseModel):
+    routing_table: Dict[str, Any]
+
+class HaltRequest(BaseModel):
+    cluster_name: str
+
 @app.post("/update_local_loras")
 async def update_local_loras(req: UpdateLorasRequest):
-    """接收來自 EFO SP1 的動態配置結果，更新本地磁碟可用的 LoRA 列表"""
     global LOCAL_AVAILABLE_LORAS
     LOCAL_AVAILABLE_LORAS = set(req.loras)
     logger.info(f"🔄 Updated LOCAL_AVAILABLE_LORAS from EFO: {LOCAL_AVAILABLE_LORAS}")
@@ -522,7 +546,7 @@ async def update_local_loras(req: UpdateLorasRequest):
 
 @app.post("/send_request")
 async def send_request(req: AddRequest):
-    global Z_debt
+    global Z_debt, can_accept_offload
     rid = str(uuid.uuid4())
     stream_queues[rid] = {"q": asyncio.Queue(), "ts": time.time()}
     meta = LORA_METADATA_TABLE.get(req.adapter_id)
@@ -532,8 +556,13 @@ async def send_request(req: AddRequest):
         await handle_offload_or_drop(rid, is_local, 999.0, Z_debt, stream_queues[rid]["q"], force_drop_reason="Sovereignty Violation")
         return {"request_id": rid}
 
+    async with stats_lock:
+        lora_request_stats[req.adapter_id] += 1
+
     valid_subs = [req.adapter_id] + [s for s in meta.get("substitutes", []) if s in LOCAL_AVAILABLE_LORAS]
     actual_valid = [s for s in valid_subs if s in LOCAL_AVAILABLE_LORAS]
+    
+    # 無法處理的 LoRA (本地完全沒有支援檔案) - 不觸發 Halt 廣播，直接 force_offload=True
     if not actual_valid:
         await handle_offload_or_drop(rid, is_local, 999.0, Z_debt, stream_queues[rid]["q"], force_offload=True)
         return {"request_id": rid}
@@ -549,6 +578,11 @@ async def send_request(req: AddRequest):
             if ttft < best_ttft: best_ttft = ttft
     
     s_eff = 1.0 if best_ttft <= T_MAX else -1.0
+
+    # 當發現自己容量真的不足時，如果是可處理的 LoRA，代表系統正在擁塞，觸發廣播
+    if s_eff < 0 and can_accept_offload:
+        can_accept_offload = False
+        asyncio.create_task(broadcast_halt())
 
     async with z_lock:
         if s_eff < 0:
@@ -595,13 +629,85 @@ async def status():
         "standby_nodes": len([n for n, d in node_mgr.nodes.items() if d["status"] == "standby"]),
         "z_debt": round(Z_debt, 2),
         "global_pending": len(global_request_list),
-        "recent_drops": get_recent_capacity_drops_count()
+        "recent_drops": get_recent_capacity_drops_count(),
+        "can_accept_offload": can_accept_offload
     }
 
 @app.get("/fetch_adapter/{adapter_id}")
 async def fetch(adapter_id: str): 
     path = os.path.join(LORA_PATH, "LoRA_1", "adapter_model.safetensors")
     return FileResponse(path)
+
+@app.get("/pop_lora_stats")
+async def pop_lora_stats():
+    global lora_request_stats
+    async with stats_lock:
+        current_stats = dict(lora_request_stats)
+        lora_request_stats.clear()
+    return {"cluster": CLUSTER_NAME, "stats": current_stats}
+
+# ============================================================
+# SP2: Offloading APIs
+# ============================================================
+@app.get("/offload_status")
+async def get_offload_status():
+    """供 EFO 每 10 秒抓取一次的狀態，包含可用槽位容量與各 LoRA 的部署狀態"""
+    active_node_urls = [u for u, d in node_mgr.nodes.items() if d["status"] == "active"]
+    v_nodes = [VirtualNodeState(u, node_mgr.nodes[u]["metrics"]) for u in active_node_urls if node_mgr.nodes[u].get("metrics")]
+
+    total_pending = len(global_request_list)
+    total_free_slots = sum(
+        max(0, n.capacity_merged - n.running_batch) if n.mode == "merge" 
+        else max(0, n.capacity_unmerged_base - n.running_batch - len(n.active_loras))
+        for n in v_nodes
+    )
+
+    # 如果 Z_debt 已經來到危險水位，或者本地已經觸發過 capacity halt，主動回報 budget 為 0
+    if Z_debt >= PSI_DROP * 0.9 or not can_accept_offload:
+        budget = 0
+    else:
+        budget = total_free_slots - total_pending
+
+    merged_loras = set()
+    loaded_loras = set()
+
+    for n in v_nodes:
+        if n.mode == "merge" and n.merged_adapter:
+            merged_loras.add(n.merged_adapter)
+        elif n.mode == "unmerge":
+            loaded_loras.update(n.loaded_adapters)
+
+    unloaded_loras = LOCAL_AVAILABLE_LORAS - merged_loras - loaded_loras
+
+    return {
+        "budget": budget,
+        "lora_status": {
+            "merged": list(merged_loras),
+            "loaded": list(loaded_loras),
+            "unloaded": list(unloaded_loras)
+        }
+    }
+
+@app.post("/update_global_routing")
+async def update_global_routing(req: UpdateRoutingRequest):
+    """接收由 EFO 統整過後廣播的全域路由表，並重置本地的 Halt 狀態"""
+    global global_routing_table, can_accept_offload
+    global_routing_table = req.routing_table
+    my_status = global_routing_table.get(CLUSTER_NAME, {})
+    if my_status.get("budget", 0) > 0:
+        can_accept_offload = True
+    else:
+        can_accept_offload = False
+    logger.info(f"🗺️ Received new global routing table for {len(global_routing_table)} clusters.")
+    return {"status": "ok"}
+
+@app.post("/emergency_halt")
+async def emergency_halt(req: HaltRequest):
+    """接收來自其他 Control Node 的緊急 Halt 廣播，立刻阻斷對該 Cluster 的卸載"""
+    if req.cluster_name in global_routing_table:
+        global_routing_table[req.cluster_name]["budget"] = 0
+        logger.warning(f"🛑 [Routing] Received emergency HALT from {req.cluster_name}. Budget set to 0.")
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     import uvicorn
