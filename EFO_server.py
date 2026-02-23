@@ -47,10 +47,7 @@ async def run_sp1_provisioning():
     
     async with httpx.AsyncClient(timeout=10.0) as client:
         for cluster_name, url in active_clusters.items():
-            # 1. 記錄哪些 LoRA 被分配到了這個 Cluster 的 Disk 上
             global_lora_disk_inventory[cluster_name] = all_loras.copy()
-            
-            # 2. 透過 API 傳遞給 Control Node
             try:
                 await client.post(
                     f"{url}/update_local_loras",
