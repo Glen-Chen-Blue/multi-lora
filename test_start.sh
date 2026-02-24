@@ -47,11 +47,16 @@ start() {
 
   echo "🧹 Cleaning target ports..."
 
+  # 清理 EFO
   kill_port 9100
-  kill_port 9000
-  kill_port 8001
-  kill_port 8002
-  kill_port 8003
+  
+  # 清理 Control Nodes (9000~9002)
+  for p in {9000..9002}; do kill_port $p; done
+  
+  # 清理 Compute Nodes (8001~8003, 8011~8013, 8021~8023)
+  for p in {8001..8003}; do kill_port $p; done
+  for p in {8011..8013}; do kill_port $p; done
+  for p in {8021..8023}; do kill_port $p; done
 
   echo "=== Phase 1: Infrastructure Test (Dynamic Registration Mode) ==="
   echo "📂 Using existing LoRA files from ./testLoRA"
@@ -64,46 +69,54 @@ start() {
   uvicorn EFO_server:app --host 0.0.0.0 --port 9100 &
   PIDS+=($!)
 
-  sleep 1
+  sleep 5
 
-  echo "🚀 Starting Control Node (Port 9000)..."
-  CLUSTER_NAME="cluster_1" \
-  EFO_URL="http://127.0.0.1:9100" \
-  LORA_PATH="./testLoRA" \
-  uvicorn control_node_server:app --host 0.0.0.0 --port 9000 &
-  PIDS+=($!)
+  echo "🚀 Starting Control Nodes..."
+  for c in 1 2 3; do
+    CTRL_PORT=$((8999 + c)) # 9000, 9001, 9002
+    echo "   -> Control Node cluster_$c (Port $CTRL_PORT)"
+    
+    CLUSTER_NAME="cluster_$c" \
+    EFO_URL="http://127.0.0.1:9100" \
+    LORA_PATH="./testLoRA" \
+    PORT=$CTRL_PORT \
+    LOCAL_URL="http://127.0.0.1:$CTRL_PORT" \
+    uvicorn control_node_server:app --host 0.0.0.0 --port $CTRL_PORT &
+    PIDS+=($!)
+  done
   
   sleep 2
 
   echo "🚀 Starting Compute Nodes..."
-
-  NODE_ID=cn-1 \
-  CONTROL_NODE_URL="http://127.0.0.1:9000" \
-  PORT=8001 \
-  uvicorn compute_node_server:app --host 0.0.0.0 --port 8001 &
-  PIDS+=($!)
-
-  NODE_ID=cn-2 \
-  CONTROL_NODE_URL="http://127.0.0.1:9000" \
-  PORT=8002 \
-  uvicorn compute_node_server:app --host 0.0.0.0 --port 8002 &
-  PIDS+=($!)
-
-  NODE_ID=cn-3 \
-  CONTROL_NODE_URL="http://127.0.0.1:9000" \
-  PORT=8003 \
-  uvicorn compute_node_server:app --host 0.0.0.0 --port 8003 &
-  PIDS+=($!)
+  for c in 1 2 3; do
+    CTRL_PORT=$((8999 + c)) # 取得對應的 Control Node Port
+    echo "   --- Cluster $c (Connecting to Control Node $CTRL_PORT) ---"
+    
+    for n in 1 2 3; do
+      # 產生 Compute Port: c=1 -> 800x, c=2 -> 801x, c=3 -> 802x
+      COMP_PORT=$(( 8000 + (c-1)*10 + n )) 
+      NODE_ID="c${c}-n${n}"
+      
+      echo "      -> Compute Node $NODE_ID (Port $COMP_PORT)"
+      
+      NODE_ID=$NODE_ID \
+      CONTROL_NODE_URL="http://127.0.0.1:$CTRL_PORT" \
+      PORT=$COMP_PORT \
+      uvicorn compute_node_server:app --host 0.0.0.0 --port $COMP_PORT > /dev/null 2>&1 &
+      PIDS+=($!)
+    done
+  done
 
   # ==========================================
   # ⏳ 等待節點註冊並觸發 /start
   # ==========================================
-  echo "⏳ Waiting 5 seconds for all nodes to register with EFO..."
+  echo ""
+  echo "⏳ Waiting 5 seconds for all 3 clusters (12 nodes) to register with EFO..."
   sleep 5
   
   echo "🚦 Sending /start signal to EFO Server..."
   curl -X POST http://127.0.0.1:9100/start
-  echo "" # 換行讓輸出好看一點
+  echo "" 
 
   echo "✅ All services started and EFO background tasks triggered. Press Ctrl+C to stop."
   wait
