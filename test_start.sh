@@ -95,7 +95,17 @@ start() {
   uvicorn compute_node_server:app --host 0.0.0.0 --port 8003 &
   PIDS+=($!)
 
-  echo "✅ All services started. Press Ctrl+C to stop."
+  # ==========================================
+  # ⏳ 等待節點註冊並觸發 /start
+  # ==========================================
+  echo "⏳ Waiting 5 seconds for all nodes to register with EFO..."
+  sleep 5
+  
+  echo "🚦 Sending /start signal to EFO Server..."
+  curl -X POST http://127.0.0.1:9100/start
+  echo "" # 換行讓輸出好看一點
+
+  echo "✅ All services started and EFO background tasks triggered. Press Ctrl+C to stop."
   wait
 }
 
