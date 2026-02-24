@@ -11,15 +11,15 @@ from datetime import datetime
 # ==========================================
 CONTROL_URL = "http://localhost:9000"
 
-# [Modified] 改用我們在 Control Node 裡面設定好的 10 個 LoRA
-ADAPTERS = [f"LoRA_{i}" for i in range(1, 11)]
+# 改用我們在 Control Node 裡面設定好的 100 個 LoRA
+ADAPTERS = [f"LoRA_{i}" for i in range(1, 101)]
 
 # 流量分佈模式
 TRAFFIC_PATTERN = "1"  
-TARGET_ADAPTER = "LoRA_1"    
+TARGET_ADAPTER = "LoRA_70"    
 
-TOTAL_REQUESTS = 1000
-AVG_RPS = 4
+TOTAL_REQUESTS = 100
+AVG_RPS = 8
 
 PROMPTS = ["test"]
 
@@ -30,7 +30,7 @@ RED = "\033[91m"
 RESET = "\033[0m"
 GREY = "\033[90m"
 
-# 🚀 [新增] dropped 統計
+# 🚀 dropped 統計
 stats = {"sent": 0, "finished": 0, "dropped": 0, "errors": 0}
 ttft_records = [] 
 
@@ -42,7 +42,7 @@ resource_stats = {
 is_test_running = True
 
 # =========================
-# NEW: fixed token lengths
+# fixed token lengths
 # =========================
 FIXED_PROMPT_TOKENS = 512
 FIXED_OUTPUT_TOKENS = 256
@@ -63,6 +63,8 @@ def fit_prompt_to_tokens(text: str, target_tokens: int) -> str:
 
 async def monitor_cluster_usage(client: httpx.AsyncClient):
     print(f"{YELLOW}[Monitor] Started tracking cluster resource usage...{RESET}")
+    last_check_time = time.time()
+    
     while is_test_running:
         try:
             start_check = time.time()
@@ -70,7 +72,13 @@ async def monitor_cluster_usage(client: httpx.AsyncClient):
             if resp.status_code == 200:
                 data = resp.json()
                 active_nodes = data.get("active_nodes", 0)
-                resource_stats["node_seconds"] += active_nodes * 1.0 
+                
+                # 🚀 [修正] 改用實際時間差 dt 來積分，避免 HTTP 延遲導致 node-seconds 少算
+                now = time.time()
+                dt = now - last_check_time
+                resource_stats["node_seconds"] += active_nodes * dt
+                last_check_time = now
+                
                 if active_nodes > resource_stats["max_nodes"]:
                     resource_stats["max_nodes"] = active_nodes
                 resource_stats["samples"] += 1
@@ -80,7 +88,8 @@ async def monitor_cluster_usage(client: httpx.AsyncClient):
             await asyncio.sleep(sleep_time)
             
         except Exception:
-            await asyncio.sleep(1)
+            # 若取得失敗不更新 last_check_time，讓下次成功時一併積分回來
+            await asyncio.sleep(1.0)
 
 async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
     if TRAFFIC_PATTERN == "1":
@@ -107,18 +116,18 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
     ttft = 0.0 
     full_response_text = []
     
-    # 🚀 [新增] 紀錄 Drop 狀態
     is_dropped = False
     drop_reason = ""
+    
+    # 🚀 [修正] 將 sent 統計移到送出請求前，確保 Timeout 的請求也有被計入 sent
+    stats["sent"] += 1
+    print(f"{CYAN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq}/{TOTAL_REQUESTS} SENDING -> {adapter}...{RESET}")
     
     try:
         resp = await client.post(f"{CONTROL_URL}/send_request", json=payload, timeout=30.0)
         resp.raise_for_status()
         data = resp.json()
         request_id = data["request_id"]
-        
-        stats["sent"] += 1
-        print(f"{CYAN}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq}/{TOTAL_REQUESTS} SENT -> {adapter} (ID: {request_id[:8]}...){RESET}")
 
         async with client.stream("GET", f"{CONTROL_URL}/stream/{request_id}", timeout=120.0) as response:
             async for line in response.aiter_lines():
@@ -138,7 +147,7 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
                     except json.JSONDecodeError:
                         content = raw_content
 
-                    # 🚀 [關鍵修復] 攔截 Control Node 發送的 JSON 格式 Error
+                    # 攔截 Control Node 發送的 JSON 格式 Error
                     if isinstance(content, dict) and content.get("type") == "error":
                         is_dropped = True
                         drop_reason = content.get("message", "Unknown Drop Reason")
@@ -155,7 +164,7 @@ async def simulate_user(client: httpx.AsyncClient, req_id_seq: int):
 
         elapsed = time.time() - start_ts
         
-        # 🚀 [新增] 根據結果分流顯示
+        # 根據結果分流顯示
         if is_dropped:
             stats["dropped"] += 1
             print(f"{RED}[{datetime.now().strftime('%H:%M:%S')}] #{req_id_seq} DROPPED <- {adapter} (Reason: {drop_reason}){RESET}")
@@ -178,6 +187,9 @@ async def main():
     background_tasks = set()
     limits = httpx.Limits(max_keepalive_connections=200, max_connections=200)
     
+    # 🚀 [修正] 提早初始化 start_time 避免 UnboundLocalError
+    start_time = time.time()
+    
     async with httpx.AsyncClient(limits=limits) as client:
         try:
             await client.get(f"{CONTROL_URL}/status")
@@ -188,7 +200,7 @@ async def main():
         monitor_task = asyncio.create_task(monitor_cluster_usage(client))
 
         try:
-            start_time = time.time()
+            start_time = time.time() # 真正開始派發請求的時間
             for i in range(1, TOTAL_REQUESTS + 1):
                 task = asyncio.create_task(simulate_user(client, i))
                 background_tasks.add(task)
@@ -206,12 +218,16 @@ async def main():
             print("\nStopping...")
             for t in background_tasks: 
                 t.cancel()
+            # 🚀 [修正] 優雅退出，清空所有被 Cancel 的 task 避免紅字警告
+            if background_tasks:
+                await asyncio.gather(*background_tasks, return_exceptions=True)
+                
         finally:
             is_test_running = False
             await monitor_task
             total_duration = time.time() - start_time
 
-    # 🚀 [修改] Summary 加入 Drop 統計
+    # Summary 加入 Drop 統計
     print(f"\n=== Summary: Sent {stats['sent']} / Fin {stats['finished']} / Drop {stats['dropped']} / Err {stats['errors']} ===")
     
     if ttft_records:

@@ -271,31 +271,6 @@ def predict_cluster_ttft(nodes: List[VirtualNodeState], target_lora: str, global
         total_wait_time = current_wait + (full_cycles * 256 * DECODE_P95_SPEED)
         return SCHEDULER_OVERHEAD + total_wait_time + 0.050
 
-async def handle_offload_or_drop(rid: str, is_local: bool, best_ttft: float, z_current: float, q: asyncio.Queue, force_offload: bool = False, force_drop_reason: str = None) -> bool:
-    if force_drop_reason:
-        logger.warning(f"🚫 [Drop] {rid[:8]} | Reason: {force_drop_reason}")
-        await q.put({"type": "error", "message": force_drop_reason})
-        await q.put(None)
-        return True
-
-    if force_offload:
-        logger.warning(f"🌐 [Offload] Global LoRA {rid[:8]} | Reason: Artifact Missing")
-        await q.put({"type": "error", "message": "Artifact Missing (Offload Not Implemented)"})
-        await q.put(None)
-        return True
-
-    if z_current > PSI_DROP:
-        record_capacity_drop()
-        if is_local:
-            logger.warning(f"🚫 [Drop] Local LoRA {rid[:8]} | Pred TTFT: {best_ttft:.1f}s | Z: {z_current:.2f}")
-            await q.put({"type": "error", "message": "System Congested (Local Drop)"})
-        else:
-            logger.warning(f"🌐 [Offload] Global LoRA {rid[:8]} | Pred TTFT: {best_ttft:.1f}s | Z: {z_current:.2f}")
-            await q.put({"type": "error", "message": "System Congested (Offload Not Implemented)"})
-        await q.put(None)
-        return True
-    return False
-
 async def broadcast_halt():
     """廣播緊急 Halt 訊號給其他的 Control Node"""
     logger.warning("🚨 [Backpressure] Capacity exhausted! Broadcasting HALT to other clusters.")
@@ -480,7 +455,7 @@ async def auto_scaling_monitor():
                     surplus_duration = 0.0
 
 # ============================================================
-# API Routes
+# API Routes & Lifespan
 # ============================================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -527,6 +502,8 @@ class AddRequest(BaseModel):
     prompt: str
     adapter_id: str
     max_new_tokens: int = 256
+    is_delegated: bool = False
+    network_delay: float = 0.0
 
 class UpdateLorasRequest(BaseModel):
     loras: List[str]
@@ -536,6 +513,102 @@ class UpdateRoutingRequest(BaseModel):
 
 class HaltRequest(BaseModel):
     cluster_name: str
+
+# ============================================================
+# Offloading Selection & Proxy Logic
+# ============================================================
+def select_best_offload_target(adapter_id: str) -> Optional[dict]:
+    """根據 EFO 的全域路由表，挑選成本與延遲綜合最低的代工 Cluster"""
+    best_target = None
+    best_score = float('inf')
+
+    for cluster_name, info in global_routing_table.items():
+        if cluster_name == CLUSTER_NAME: continue
+        budget = info.get("budget", 0)
+        if budget <= 0: continue
+
+        lora_status = info.get("lora_status", {})
+        merged = set(lora_status.get("merged", []))
+        loaded = set(lora_status.get("loaded", []))
+        unloaded = set(lora_status.get("unloaded", []))
+
+        # 狀態成本權重 (若目標已準備好，優先派發)
+        if adapter_id in merged:
+            status_penalty = 0.0
+        elif adapter_id in loaded:
+            status_penalty = 0.5
+        elif adapter_id in unloaded:
+            status_penalty = 1.0
+        else:
+            continue  # 對方完全沒有這個模型，無法代工
+
+        # EFO 傳來的 p95 delay 是毫秒
+        delay_ms = info.get("delay", {}).get(CLUSTER_NAME, 0.0)
+        delay_sec = delay_ms / 1000.0
+
+        score = status_penalty + delay_sec
+        if score < best_score:
+            best_score = score
+            best_target = {
+                "cluster_name": cluster_name,
+                "url": info.get("ip"),
+                "delay_sec": delay_sec
+            }
+            
+    return best_target
+
+async def trigger_delegated_offload(target: dict, original_req: AddRequest, local_rid: str):
+    """做為 Proxy 將請求與串流轉發到目標 Cluster"""
+    user_q = stream_queues.get(local_rid, {}).get("q")
+    if not user_q: return
+
+    payload = {
+        "prompt": original_req.prompt,
+        "adapter_id": original_req.adapter_id,
+        "max_new_tokens": original_req.max_new_tokens,
+        "is_delegated": True,
+        "network_delay": target["delay_sec"]
+    }
+
+    try:
+        # 1. 向目標端送出代工請求
+        resp = await client.post(f"{target['url']}/send_request", json=payload, timeout=5.0)
+        if resp.status_code != 200:
+            await user_q.put({"type": "error", "message": f"Offload Target Rejected: HTTP {resp.status_code}"})
+            return
+
+        data = resp.json()
+        target_rid = data.get("request_id")
+        if not target_rid:
+            await user_q.put({"type": "error", "message": "Offload failed: No request_id returned"})
+            return
+
+        # 2. 開啟串流代理接回結果
+        async with client.stream("GET", f"{target['url']}/stream/{target_rid}", timeout=120.0) as stream_resp:
+            if stream_resp.status_code != 200:
+                await user_q.put({"type": "error", "message": f"Offload Stream Error {stream_resp.status_code}"})
+                return
+
+            async for line in stream_resp.aiter_lines():
+                if line.startswith("data:"):
+                    content = line[len("data:"):].strip()
+                    if content == "[DONE]":
+                        break
+                    elif content:
+                        try:
+                            content_obj = json.loads(content)
+                            if isinstance(content_obj, dict) and content_obj.get("type") == "error":
+                                await user_q.put(content_obj)
+                                break
+                        except json.JSONDecodeError:
+                            pass
+                        await user_q.put(content)
+
+    except Exception as e:
+        logger.error(f"❌ Offload proxy error for {local_rid}: {e}")
+        await user_q.put({"type": "error", "message": f"Offload Proxy Exception: {str(e)}"})
+    finally:
+        await user_q.put(None)
 
 @app.post("/update_local_loras")
 async def update_local_loras(req: UpdateLorasRequest):
@@ -549,55 +622,113 @@ async def send_request(req: AddRequest):
     global Z_debt, can_accept_offload
     rid = str(uuid.uuid4())
     stream_queues[rid] = {"q": asyncio.Queue(), "ts": time.time()}
+
     meta = LORA_METADATA_TABLE.get(req.adapter_id)
     is_local = (meta and meta.get("type") == "local")
 
+    # ==========================================
+    # 1. 數據主權檢查 (Sovereignty)
+    # ==========================================
     if not meta or (is_local and meta.get("cluster") != CLUSTER_ID):
-        await handle_offload_or_drop(rid, is_local, 999.0, Z_debt, stream_queues[rid]["q"], force_drop_reason="Sovereignty Violation")
+        logger.warning(f"🚫 [Drop] {rid[:8]} | Sovereignty Violation")
+        await stream_queues[rid]["q"].put({"type": "error", "message": "Sovereignty Violation"})
+        await stream_queues[rid]["q"].put(None)
         return {"request_id": rid}
 
-    async with stats_lock:
-        lora_request_stats[req.adapter_id] += 1
+    # ==========================================
+    # 2. 統計隔離 (Delegated 請求不計入本地歷史)
+    # ==========================================
+    if not req.is_delegated:
+        async with stats_lock:
+            lora_request_stats[req.adapter_id] += 1
 
+    # ==========================================
+    # 3. 本地模型可用性與語意替代檢查
+    # ==========================================
     valid_subs = [req.adapter_id] + [s for s in meta.get("substitutes", []) if s in LOCAL_AVAILABLE_LORAS]
     actual_valid = [s for s in valid_subs if s in LOCAL_AVAILABLE_LORAS]
-    
-    # 無法處理的 LoRA (本地完全沒有支援檔案) - 不觸發 Halt 廣播，直接 force_offload=True
-    if not actual_valid:
-        await handle_offload_or_drop(rid, is_local, 999.0, Z_debt, stream_queues[rid]["q"], force_offload=True)
-        return {"request_id": rid}
 
+    # ==========================================
+    # 4. 動態 TTFT 期限計算 (需扣除代工網路傳輸時間)
+    # ==========================================
+    target_ttft = T_MAX - (req.network_delay * 2)
+
+    # ==========================================
+    # 5. 評估本地預估延遲
+    # ==========================================
     active_node_urls = [u for u, d in node_mgr.nodes.items() if d["status"] == "active"]
     nodes = [VirtualNodeState(u, node_mgr.nodes[u]["metrics"]) for u in active_node_urls if node_mgr.nodes[u].get("metrics")]
     
     best_ttft = 999.0
     global_pending = len(global_request_list)
-    if nodes:
+    if nodes and actual_valid:
         for aid in actual_valid:
             ttft = predict_cluster_ttft(nodes, aid, global_pending)
             if ttft < best_ttft: best_ttft = ttft
-    
-    s_eff = 1.0 if best_ttft <= T_MAX else -1.0
 
-    # 當發現自己容量真的不足時，如果是可處理的 LoRA，代表系統正在擁塞，觸發廣播
-    if s_eff < 0 and can_accept_offload:
+    # ==========================================
+    # 6. 決定本地有效槽位 (s_eff)
+    # ==========================================
+    s_eff = 1.0 if (best_ttft <= target_ttft and actual_valid) else -1.0
+
+    # ==========================================
+    # 7. 壅塞廣播 (反壓機制，僅限自己直接收到的)
+    # ==========================================
+    if s_eff < 0 and can_accept_offload and not req.is_delegated:
         can_accept_offload = False
         asyncio.create_task(broadcast_halt())
 
+    # ==========================================
+    # 8. 路由決策與 Z_debt Lyapunov 更新
+    # ==========================================
     async with z_lock:
-        if s_eff < 0:
-            handled = await handle_offload_or_drop(rid, is_local, best_ttft, Z_debt, stream_queues[rid]["q"])
-            if handled: return {"request_id": rid}
-            Z_debt = max(0.0, Z_debt + 1.0 - EPSILON)
+        if s_eff < 0: # 本地超載 或 本地根本沒有這個模型
+            if req.is_delegated:
+                # [特例 A] 禁止二次卸載：代工端接不住只能 Drop，並受罰
+                logger.warning(f"🚫 [Drop] Delegated {rid[:8]} | Target Overloaded. No cascading offload.")
+                Z_debt = max(0.0, Z_debt + 1.0 - EPSILON) 
+                await stream_queues[rid]["q"].put({"type": "error", "message": "Delegated target overloaded."})
+                await stream_queues[rid]["q"].put(None)
+                return {"request_id": rid}
+
+            if is_local:
+                # [特例 B] 本地專屬模型：嚴禁卸載
+                logger.warning(f"🚫 [Drop] Local LoRA {rid[:8]} | Congested.")
+                record_capacity_drop()
+                Z_debt = max(0.0, Z_debt + 1.0 - EPSILON)
+                await stream_queues[rid]["q"].put({"type": "error", "message": "System Congested (Local Drop)"})
+                await stream_queues[rid]["q"].put(None)
+                return {"request_id": rid}
+
+            # --- 進入全域卸載流程 (Delegated Offloading) ---
+            target = select_best_offload_target(req.adapter_id)
+            if not target:
+                logger.warning(f"🚫 [Drop] Global LoRA {rid[:8]} | No available offload targets.")
+                record_capacity_drop()
+                Z_debt = max(0.0, Z_debt + 1.0 - EPSILON)
+                await stream_queues[rid]["q"].put({"type": "error", "message": "System Congested (No Targets)"})
+                await stream_queues[rid]["q"].put(None)
+                return {"request_id": rid}
+
+            # 觸發代工 (發起端的 Z_debt 不扣也不加，因為外包了)
+            logger.info(f"🌐 [Offload] Forwarding {rid[:8]} to {target['cluster_name']} (Net Delay: {target['delay_sec']:.3f}s)")
+            asyncio.create_task(trigger_delegated_offload(target, req, rid))
+            return {"request_id": rid}
+
         else:
+            # 本地有餘裕可消化
             Z_debt = max(0.0, Z_debt - EPSILON)
 
+    # ==========================================
+    # 9. 加入本地調度佇列
+    # ==========================================
     req_obj = {
         "request_id": rid, "prompt": req.prompt, "adapter_id": req.adapter_id,
         "original_aid": req.adapter_id, "max_new_tokens": req.max_new_tokens, "arrival_time": time.time()
     }
     request_queues[req.adapter_id].append(req_obj)
     global_request_list.append({"request_id": rid, "original_aid": req.adapter_id, "arrival_time": req_obj["arrival_time"]})
+    
     return {"request_id": rid}
 
 @app.get("/stream/{request_id}")
@@ -662,7 +793,6 @@ async def get_offload_status():
         for n in v_nodes
     )
 
-    # 如果 Z_debt 已經來到危險水位，或者本地已經觸發過 capacity halt，主動回報 budget 為 0
     if Z_debt >= PSI_DROP * 0.9 or not can_accept_offload:
         budget = 0
     else:
