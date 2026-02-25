@@ -1,8 +1,5 @@
 testLoRA/
-lora_repo/
 unsloth_compiled_cache/
 __pycache__/
 data/
-plots/
-results/
-tt/
+information/simulation_data.csv
