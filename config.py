@@ -8,7 +8,10 @@ import os
 # 1. 系統環境與路徑設定 (Paths & Environment)
 # ------------------------------------------------------------
 LORA_PATH = os.environ.get("LORA_PATH", "./testLoRA")
-LORA_METADATA_PATH = os.environ.get("LORA_METADATA", "./lora_metadata.json")
+LORA_METADATA_PATH = os.environ.get("LORA_METADATA", "./information/lora_metadata.json")
+LORA_MAPPING_PATH = os.environ.get("LORA_MAPPING", "./information/lora_mapping.json")
+LORA_HOURLY_COUNTS_PATH = os.environ.get("LORA_HOURLY_COUNTS", "./information/lora_hourly_counts.json")
+
 MODEL_ID = os.environ.get("MODEL_ID", "unsloth/Meta-Llama-3.1-8B")
 
 # ------------------------------------------------------------

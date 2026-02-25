@@ -18,6 +18,7 @@ from pydantic import BaseModel
 # 匯入集中管理的設定
 from config import (
     LORA_PATH, LORA_METADATA_PATH,
+    LORA_MAPPING_PATH, LORA_HOURLY_COUNTS_PATH,
     COST_STORE_PER_GB, COST_DOWNLOAD_PER_GB, COST_INST_LOCAL,
     COST_NET_TRAFFIC, COST_DROP_PENALTY, LORA_SIZE_GB,
     DISK_CAPACITY_GB, T_MAX_SLO, SWAP_EPSILON,
@@ -365,9 +366,9 @@ async def lifespan(app: FastAPI):
         with open(LORA_METADATA_PATH, "r", encoding="utf-8") as f:
             global_lora_metadata = json.load(f)
             
-    if os.path.exists("lora_mapping.json") and os.path.exists("lora_hourly_counts.json"):
-        with open("lora_mapping.json", "r") as f: azure_mapping = json.load(f)
-        with open("lora_hourly_counts.json", "r") as f: hourly_counts = json.load(f)
+    if os.path.exists(LORA_MAPPING_PATH) and os.path.exists(LORA_HOURLY_COUNTS_PATH):
+        with open(LORA_MAPPING_PATH, "r") as f: azure_mapping = json.load(f)
+        with open(LORA_HOURLY_COUNTS_PATH, "r") as f: hourly_counts = json.load(f)
         for cluster_name, cluster_mapping in azure_mapping.items():
             for lora_id, azure_id in cluster_mapping.items():
                 historical_demand[cluster_name][lora_id] = hourly_counts[azure_id][:SEQ_LENGTH]
