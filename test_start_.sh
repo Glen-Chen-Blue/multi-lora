@@ -50,6 +50,9 @@ trap stop INT TERM
 # ===============================
 start() {
 
+  echo "🧹 Clearing old logs..."
+  rm -f logs/*.log
+
   echo "🧹 Cleaning target ports..."
 
   kill_port 9100
