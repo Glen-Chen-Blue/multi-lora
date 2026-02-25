@@ -15,37 +15,22 @@ import torch.nn as nn
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+# 匯入集中管理的設定
+from config import (
+    LORA_PATH, LORA_METADATA_PATH,
+    COST_STORE_PER_GB, COST_DOWNLOAD_PER_GB, COST_INST_LOCAL,
+    COST_NET_TRAFFIC, COST_DROP_PENALTY, LORA_SIZE_GB,
+    DISK_CAPACITY_GB, T_MAX_SLO, SWAP_EPSILON,
+    T_TOTAL_HOURS, SEQ_LENGTH, NETWORK_SIM_PARAMS
+)
+
 # ============================================================
 # Config & Logging
 # ============================================================
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] EFO: %(message)s")
 logger = logging.getLogger("EFOServer")
 
-LORA_PATH = os.environ.get("LORA_PATH", "./testLoRA")
-LORA_METADATA_PATH = os.environ.get("LORA_METADATA", "./lora_metadata.json")
 CLUSTERS_ENV = os.environ.get("CLUSTERS", "{}")
-
-# ============================================================
-# SP1 Configuration Constants (預測性部署與快取參數)
-# ============================================================
-SP1_CONFIG = {
-    # 1. Cost Parameters (成本定價常數 - 抽象單位 Credit)
-    "cost_store_per_gb": 0.01,      # kappa_store: 1GB 模型在本地存放 1 個時隙(如1小時)的成本
-    "cost_download_per_gb": 0.1,    # kappa_inter: 跨區下載 1GB 模型權重的頻寬成本 (較昂貴)
-    "cost_inst_local": 0.005,       # kappa_inst: 本地處理 1 個 Request 的算力成本
-    "cost_net_traffic": 0.002,      # kappa_net: 把 1 個 Request 丟給其他 Cluster 處理的流量成本
-    "cost_drop_penalty": 0.1,       # Psi_drop: 找不到模型處理而被迫 Drop 掉 1 個請求的巨大懲罰
-
-    # 2. Physical Limits (物理與容量常數)
-    "lora_size_gb": 0.1,            # S_lora: 單一 LoRA Adapter 的檔案大小 (例如 0.1 GB)
-    "disk_capacity_gb": 5.0,        # Disk_Capacity: 每個 Cluster 硬碟的 LoRA 儲存容量上限
-
-    # 3. Latency & Urgency (延遲與急迫性常數)
-    "t_max_slo": 6.0,               # T_max: 系統 SLO 承諾的最大端到端首字延遲 (單位: 秒)
-    
-    # 4. Algorithm Hyperparameters (演算法微調常數)
-    "swap_epsilon": 0.1             # epsilon: 新模型多帶來的淨效用必須大於此門檻，才允許替換舊模型 (防震盪)
-}
 
 # ============================================================
 # Global State & System Variables
@@ -60,8 +45,6 @@ predicted_demand: Dict[str, Dict[str, float]] = defaultdict(dict)
 azure_mapping: Dict[str, Dict[str, str]] = {}
 
 current_time_step = 48
-T_TOTAL_HOURS = 336 
-SEQ_LENGTH = 48
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 lstm_model = None
@@ -73,11 +56,7 @@ TRAINING_FUNC_NAMES = sorted([str(i) for i in range(1, 241)])
 # ============================================================
 class NetworkSimulator:
     def __init__(self):
-        self.params = {
-            ("cluster_1", "cluster_2"): (20, 2.5, 0.5), # Cloud to Near Edge
-            ("cluster_2", "cluster_3"): (40, 3.5, 0.8), # Edge to Edge
-            ("cluster_1", "cluster_3"): (60, 4.2, 1.2), # Cloud to Remote Edge
-        }
+        self.params = NETWORK_SIM_PARAMS
         self.matrix = {}
         for (c1, c2), (d_prop, mu, sigma) in self.params.items():
             self.matrix[(c1, c2)] = (d_prop, mu, sigma)
@@ -215,15 +194,15 @@ async def run_sp1_provisioning():
     p95_delays = network_simulator.get_p95_info()
     
     # 提取常數
-    C_STORE = SP1_CONFIG["cost_store_per_gb"]
-    C_DL = SP1_CONFIG["cost_download_per_gb"]
-    C_INST = SP1_CONFIG["cost_inst_local"]
-    C_NET = SP1_CONFIG["cost_net_traffic"]
-    C_DROP = SP1_CONFIG["cost_drop_penalty"]
-    S_LORA = SP1_CONFIG["lora_size_gb"]
-    CAPACITY = int(SP1_CONFIG["disk_capacity_gb"] / S_LORA)
-    T_MAX = SP1_CONFIG["t_max_slo"]
-    EPSILON = SP1_CONFIG["swap_epsilon"]
+    C_STORE = COST_STORE_PER_GB
+    C_DL = COST_DOWNLOAD_PER_GB
+    C_INST = COST_INST_LOCAL
+    C_NET = COST_NET_TRAFFIC
+    C_DROP = COST_DROP_PENALTY
+    S_LORA = LORA_SIZE_GB
+    CAPACITY = int(DISK_CAPACITY_GB / S_LORA)
+    T_MAX = T_MAX_SLO
+    EPSILON = SWAP_EPSILON
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         for cluster_name, url in active_clusters.items():

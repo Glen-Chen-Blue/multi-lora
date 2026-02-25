@@ -13,6 +13,17 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 
+# 匯入集中管理的設定 (包含修復 NameError 的缺失常數)
+from config import (
+    LORA_PATH,
+    MERGED_CAPACITY, UNMERGED_CAPACITY,
+    T_MAX, EPSILON, PSI_DROP,
+    SCALE_UP_DROP_THRESHOLD, SCALE_DOWN_SURPLUS_THRESHOLD,
+    SCHEDULER_OVERHEAD, SIM_LOAD_DELAY,
+    SIM_PREFILL_BASE_TIME, MERGE_SPEED_MULTIPLIER,
+    SIM_DECODE_BASE_TIME, SIM_DECODE_SLOPE  # <== 確保這兩個有在這裡
+)
+
 # ============================================================
 # Config & Logging
 # ============================================================
@@ -20,33 +31,23 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] CONT
 logger = logging.getLogger("ControlNode")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
-LORA_PATH = os.environ.get("LORA_PATH", "./testLoRA")
 CLUSTER_NAME = os.environ.get("CLUSTER_NAME", "cluster_1")
 CLUSTER_ID = CLUSTER_NAME  # 保留向下相容
 EFO_URL = os.environ.get("EFO_URL", "http://127.0.0.1:9100")
-MY_URL = os.environ.get("CONTROL_NODE_URL", "http://127.0.0.1:9000") # 提供給 EFO 自己的位址
+MY_URL = os.environ.get("CONTROL_NODE_URL", "http://127.0.0.1:9000")
 
 limits = httpx.Limits(max_keepalive_connections=100, max_connections=200)
 client = httpx.AsyncClient(limits=limits, timeout=60.0)
 
 # ============================================================
-# Lyapunov, TTFT & Auto-Scaling Hyperparameters
+# Lyapunov & Auto-Scaling Global States
 # ============================================================
-T_MAX = 5.5                 
-EPSILON = 0.05               
-PSI_DROP = 10.0              
-
-# Scale Up/Down 參數設定
-SCALE_UP_DROP_THRESHOLD = 5
-SCALE_DOWN_SURPLUS_THRESHOLD = 15  # 一台機器的基準容量(12) + 緩衝(3)
-
 Z_debt = 0.0
 z_lock = asyncio.Lock()
 
 switching_nodes: Set[str] = set()
 recent_capacity_drops: Deque[float] = deque()
 
-# 紀錄收到的 LoRA 請求次數
 lora_request_stats: Dict[str, int] = defaultdict(int)
 stats_lock = asyncio.Lock()
 
@@ -59,16 +60,9 @@ def get_recent_capacity_drops_count(window: float = 6.0) -> int:
         recent_capacity_drops.popleft()
     return len(recent_capacity_drops)
 
-# ============================================================
-# 模擬 EFO 資訊表 (現在由 EFO 伺服器動態提供)
-# ============================================================
 LORA_METADATA_TABLE: Dict[str, Any] = {}
 LOCAL_AVAILABLE_LORAS: Set[str] = set()
-
-# 儲存由 EFO 廣播過來的全域路由表 (供後續 Offloading 決策使用)
 global_routing_table: Dict[str, Any] = {}
-
-# 本地接收 offloading 狀態控制，避免反覆廣播 Halt
 can_accept_offload: bool = True
 
 # ============================================================
@@ -84,8 +78,6 @@ class NodeManager:
             status = "standby" if has_active else "active"
             self.nodes[url] = {"metrics": None, "last_seen": time.time(), "status": status}
             logger.info(f"✅ Registered Node: {url} | Assigned Status: {status}")
-            
-            # 主動通知 Compute Node 切換到指定狀態
             asyncio.create_task(client.post(f"{url}/set_status", json={"status": status}))
         else: 
             self.nodes[url]["last_seen"] = time.time()
@@ -95,11 +87,11 @@ class NodeManager:
             self.nodes[url]["metrics"] = metrics
             self.nodes[url]["last_seen"] = time.time()
             
-            # 以 Compute Node 回報的真實狀態為主
+            # [修復 1] 只有在節點完成排空任務時，才允許 Compute Node 的狀態覆寫 Control Node
             reported_status = metrics.get("status", "standby")
             if self.nodes[url]["status"] == "draining" and reported_status == "standby":
                 logger.info(f"❄️ [Scale Down] 節點已完全排空，自動轉為 Standby: {url}")
-            self.nodes[url]["status"] = reported_status
+                self.nodes[url]["status"] = "standby"
             
     async def scale_up_one_node(self) -> bool:
         for url, data in self.nodes.items():
@@ -117,35 +109,28 @@ class NodeManager:
 
     async def trigger_drain_best_node(self, v_nodes: List['VirtualNodeState']) -> bool:
         active_nodes = [n for n in v_nodes if self.nodes[n.url]["status"] == "active"]
-        if len(active_nodes) <= 1:
-            return False # 保留至少一台
+        if len(active_nodes) <= 1: return False
             
         global_lora_counts = defaultdict(int)
         for n in active_nodes:
-            for lora in n.active_loras:
-                global_lora_counts[lora] += 1
+            for lora in n.active_loras: global_lora_counts[lora] += 1
                 
         current_unmerge_count = sum(1 for n in active_nodes if n.mode == "unmerge")
                 
         def drain_score(n: VirtualNodeState):
             orphan_count = sum(1 for lora in n.active_loras if global_lora_counts[lora] == 1)
             is_last_unmerge = (n.mode == "unmerge" and current_unmerge_count <= 1)
-            last_unmerge_penalty = 10000 if is_last_unmerge else 0
-            mode_penalty = 100 if n.mode == "merge" else 0
-            
-            return (orphan_count * 1000) + last_unmerge_penalty + mode_penalty + n.running_batch
+            return (orphan_count * 1000) + (10000 if is_last_unmerge else 0) + (100 if n.mode == "merge" else 0) + n.running_batch
             
         best_node = sorted(active_nodes, key=drain_score)[0]
-        
         try:
             resp = await client.post(f"{best_node.url}/drain", timeout=2.0)
             if resp.status_code == 200:
                 self.nodes[best_node.url]["status"] = "draining"
-                logger.info(f"🚰 [Scale Down] 節點進入 Draining: {best_node.url} (孤兒:{sum(1 for lora in best_node.active_loras if global_lora_counts[lora] == 1)}, 負載:{best_node.running_batch}, 模式:{best_node.mode})")
+                logger.info(f"🚰 [Scale Down] 節點進入 Draining: {best_node.url}")
                 return True
         except Exception as e:
             logger.error(f"Drain 節點 {best_node.url} 失敗: {e}")
-            
         return False
 
 node_mgr = NodeManager()
@@ -167,11 +152,10 @@ class VirtualNodeState:
         self.request_set = metrics.get("request_set", [])
         
         self.lora_request_counts = defaultdict(int)
-        for req in self.request_set:
-            self.lora_request_counts[req["adapter_id"]] += 1
+        for req in self.request_set: self.lora_request_counts[req["adapter_id"]] += 1
 
-        self.capacity_merged = 15
-        self.capacity_unmerged_base = 12
+        self.capacity_merged = MERGED_CAPACITY
+        self.capacity_unmerged_base = UNMERGED_CAPACITY
 
     def get_free_slots(self, target_lora: str) -> int:
         if self.mode == "merge":
@@ -196,18 +180,17 @@ class VirtualNodeState:
                 self.active_loras.discard(target_lora)
 
 def predict_cluster_ttft(nodes: List[VirtualNodeState], target_lora: str, global_pending_ahead: int) -> float:
-    SCHEDULER_OVERHEAD = 0.300 
-    DECODE_P95_SPEED = 0.040   
-    DISK_LOAD_DELAY = 0.200    
-
     node_scores = []
     total_free = 0
     cluster_concurrent_capacity = 0
+    has_merged_node = False
     
     for node in nodes:
         if node.url in switching_nodes or node.mode == "switching": continue
         is_merge = (node.mode == "merge" and node.merged_adapter == target_lora)
         if node.mode == "merge" and not is_merge: continue 
+        
+        if is_merge: has_merged_node = True
         
         is_in_vram = (node.mode == "unmerge" and target_lora in node.active_loras)
         is_in_cpu = (node.mode == "unmerge" and target_lora in node.loaded_adapters)
@@ -215,10 +198,8 @@ def predict_cluster_ttft(nodes: List[VirtualNodeState], target_lora: str, global
         
         free_slots = node.get_free_slots(target_lora)
         
-        if is_merge:
-            cluster_concurrent_capacity += node.capacity_merged
-        elif node.mode == "unmerge":
-            cluster_concurrent_capacity += max(0, node.capacity_unmerged_base - 1)
+        if is_merge: cluster_concurrent_capacity += node.capacity_merged
+        elif node.mode == "unmerge": cluster_concurrent_capacity += max(0, node.capacity_unmerged_base - 1)
 
         if free_slots > 0:
             score = (1 if is_merge else 0, 1 if is_in_vram else 0, 1 if is_in_cpu else 0, 1 if is_empty else 0, free_slots)
@@ -241,17 +222,30 @@ def predict_cluster_ttft(nodes: List[VirtualNodeState], target_lora: str, global
                 take_at_landing = take
                 break
                 
-        is_merge = landing_score[0] == 1
-        is_in_cpu = landing_score[2] == 1
-        multiplier = 0.8 if is_merge else 1.0
+        is_merge_landing = landing_score[0] == 1
+        is_in_cpu_landing = landing_score[2] == 1
+        multiplier = MERGE_SPEED_MULTIPLIER if is_merge_landing else 1.0
         
-        load_delay = 0.0 if (is_in_cpu or is_merge) else DISK_LOAD_DELAY
-        prefill_time = 0.050 * take_at_landing * multiplier
+        load_delay = 0.0 if (is_in_cpu_landing or is_merge_landing) else SIM_LOAD_DELAY
+        prefill_time = SIM_PREFILL_BASE_TIME * take_at_landing * multiplier
         
         return SCHEDULER_OVERHEAD + load_delay + prefill_time
     else:
         needed_to_finish = my_position - total_free
-        if cluster_concurrent_capacity == 0: cluster_concurrent_capacity = 12
+        
+        # [動態解碼速度計算]
+        if has_merged_node:
+            assumed_batch = 12 
+            multiplier = MERGE_SPEED_MULTIPLIER
+        else:
+            assumed_batch = 10 
+            multiplier = 1.0
+            
+        dynamic_decode_speed = (SIM_DECODE_BASE_TIME + SIM_DECODE_SLOPE * assumed_batch) * multiplier
+        
+        if cluster_concurrent_capacity == 0: 
+            cluster_concurrent_capacity = MERGED_CAPACITY if has_merged_node else UNMERGED_CAPACITY
+            
         full_cycles = needed_to_finish // cluster_concurrent_capacity
         remainder = needed_to_finish % cluster_concurrent_capacity
         
@@ -266,13 +260,12 @@ def predict_cluster_ttft(nodes: List[VirtualNodeState], target_lora: str, global
         else:
             all_remains.sort()
             idx = min(len(all_remains) - 1, max(0, remainder - 1))
-            current_wait = all_remains[idx] * DECODE_P95_SPEED
+            current_wait = all_remains[idx] * dynamic_decode_speed
             
-        total_wait_time = current_wait + (full_cycles * 256 * DECODE_P95_SPEED)
-        return SCHEDULER_OVERHEAD + total_wait_time + 0.050
+        total_wait_time = current_wait + (full_cycles * 256 * dynamic_decode_speed)
+        return SCHEDULER_OVERHEAD + total_wait_time + (SIM_PREFILL_BASE_TIME * multiplier)
 
 async def broadcast_halt():
-    """廣播緊急 Halt 訊號給其他的 Control Node"""
     logger.warning("🚨 [Backpressure] Capacity exhausted! Broadcasting HALT to other clusters.")
     async with httpx.AsyncClient(timeout=2.0) as client:
         tasks = []
@@ -280,12 +273,8 @@ async def broadcast_halt():
             if cluster != CLUSTER_NAME:
                 url = f"{data['ip']}/emergency_halt"
                 tasks.append(client.post(url, json={"cluster_name": CLUSTER_NAME}))
-        
         if tasks:
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            for i, res in enumerate(results):
-                if isinstance(res, Exception):
-                    logger.debug(f"Halt broadcast to one cluster failed: {res}")
 
 async def safe_mode_switch(node_url: str, endpoint: str, payload: Dict):
     if node_url in switching_nodes: return
@@ -420,7 +409,6 @@ async def auto_scaling_monitor():
         await asyncio.sleep(1.0)
         now = time.time()
         
-        # --- 1. Scale Up ---
         recent_valid_drops = get_recent_capacity_drops_count(6.0)
         if Z_debt > (PSI_DROP * 0.8) and recent_valid_drops > SCALE_UP_DROP_THRESHOLD:
             if now - last_scale_action_time > 6.0:
@@ -430,24 +418,19 @@ async def auto_scaling_monitor():
                 surplus_duration = 0.0
                 continue
                 
-        # --- 2. Scale Down (Draining) ---
         active_urls = [u for u, d in node_mgr.nodes.items() if d["status"] == "active"]
         if len(active_urls) > 1:
             v_nodes = [VirtualNodeState(u, node_mgr.nodes[u]["metrics"]) for u in active_urls if node_mgr.nodes[u].get("metrics")]
-            
             total_pending = len(global_request_list)
             total_free_slots = sum(
                 max(0, n.capacity_merged - n.running_batch) if n.mode == "merge" 
                 else max(0, n.capacity_unmerged_base - n.running_batch - len(n.active_loras))
                 for n in v_nodes
             )
-            
             is_surplus = (total_free_slots - total_pending) >= SCALE_DOWN_SURPLUS_THRESHOLD
             
-            if is_surplus:
-                surplus_duration += 1.0
-            else:
-                surplus_duration = 0.0
+            if is_surplus: surplus_duration += 1.0
+            else: surplus_duration = 0.0
                 
             if surplus_duration >= 6.0 and (now - last_scale_action_time > 6.0):
                 if await node_mgr.trigger_drain_best_node(v_nodes):
@@ -460,7 +443,6 @@ async def auto_scaling_monitor():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     os.makedirs(LORA_PATH, exist_ok=True)
-    
     logger.info(f"🔄 Registering with EFO at {EFO_URL}...")
     for _ in range(5):
         try:
@@ -474,13 +456,8 @@ async def lifespan(app: FastAPI):
                 LORA_METADATA_TABLE.update(data.get("metadata", {}))
                 logger.info(f"✅ Successfully registered to EFO. Loaded {len(LORA_METADATA_TABLE)} LoRA metadata entries.")
                 break
-            else:
-                logger.warning(f"⚠️ EFO rejected registration: HTTP {resp.status_code}")
-        except Exception as e:
-            logger.warning(f"⚠️ EFO unreachable ({e}), retrying in 2s...")
+        except Exception: pass
         await asyncio.sleep(2.0)
-    else:
-        logger.error("❌ Failed to register with EFO after maximum retries. Running without metadata!")
 
     asyncio.create_task(scheduler_loop())
     asyncio.create_task(auto_scaling_monitor()) 
@@ -492,7 +469,6 @@ async def lifespan(app: FastAPI):
             for rid in expired: stream_queues.pop(rid, None)
             await asyncio.sleep(60)
     asyncio.create_task(cleanup_streams())
-    
     yield
     await client.aclose()
 
@@ -514,11 +490,7 @@ class UpdateRoutingRequest(BaseModel):
 class HaltRequest(BaseModel):
     cluster_name: str
 
-# ============================================================
-# Offloading Selection & Proxy Logic
-# ============================================================
 def select_best_offload_target(adapter_id: str) -> Optional[dict]:
-    """根據 EFO 的全域路由表，挑選成本與延遲綜合最低的代工 Cluster"""
     best_target = None
     best_score = float('inf')
 
@@ -532,33 +504,22 @@ def select_best_offload_target(adapter_id: str) -> Optional[dict]:
         loaded = set(lora_status.get("loaded", []))
         unloaded = set(lora_status.get("unloaded", []))
 
-        # 狀態成本權重 (若目標已準備好，優先派發)
-        if adapter_id in merged:
-            status_penalty = 0.0
-        elif adapter_id in loaded:
-            status_penalty = 0.5
-        elif adapter_id in unloaded:
-            status_penalty = 1.0
-        else:
-            continue  # 對方完全沒有這個模型，無法代工
+        if adapter_id in merged: status_penalty = 0.0
+        elif adapter_id in loaded: status_penalty = 0.5
+        elif adapter_id in unloaded: status_penalty = 1.0
+        else: continue
 
-        # EFO 傳來的 p95 delay 是毫秒
         delay_ms = info.get("delay", {}).get(CLUSTER_NAME, 0.0)
         delay_sec = delay_ms / 1000.0
 
         score = status_penalty + delay_sec
         if score < best_score:
             best_score = score
-            best_target = {
-                "cluster_name": cluster_name,
-                "url": info.get("ip"),
-                "delay_sec": delay_sec
-            }
+            best_target = {"cluster_name": cluster_name, "url": info.get("ip"), "delay_sec": delay_sec}
             
     return best_target
 
 async def trigger_delegated_offload(target: dict, original_req: AddRequest, local_rid: str):
-    """做為 Proxy 將請求與串流轉發到目標 Cluster"""
     user_q = stream_queues.get(local_rid, {}).get("q")
     if not user_q: return
 
@@ -571,7 +532,6 @@ async def trigger_delegated_offload(target: dict, original_req: AddRequest, loca
     }
 
     try:
-        # 1. 向目標端送出代工請求
         resp = await client.post(f"{target['url']}/send_request", json=payload, timeout=5.0)
         if resp.status_code != 200:
             await user_q.put({"type": "error", "message": f"Offload Target Rejected: HTTP {resp.status_code}"})
@@ -579,33 +539,22 @@ async def trigger_delegated_offload(target: dict, original_req: AddRequest, loca
 
         data = resp.json()
         target_rid = data.get("request_id")
-        if not target_rid:
-            await user_q.put({"type": "error", "message": "Offload failed: No request_id returned"})
-            return
-
-        # 2. 開啟串流代理接回結果
+        
         async with client.stream("GET", f"{target['url']}/stream/{target_rid}", timeout=120.0) as stream_resp:
-            if stream_resp.status_code != 200:
-                await user_q.put({"type": "error", "message": f"Offload Stream Error {stream_resp.status_code}"})
-                return
-
             async for line in stream_resp.aiter_lines():
                 if line.startswith("data:"):
                     content = line[len("data:"):].strip()
-                    if content == "[DONE]":
-                        break
+                    if content == "[DONE]": break
                     elif content:
                         try:
                             content_obj = json.loads(content)
                             if isinstance(content_obj, dict) and content_obj.get("type") == "error":
                                 await user_q.put(content_obj)
                                 break
-                        except json.JSONDecodeError:
-                            pass
+                        except: pass
                         await user_q.put(content)
 
     except Exception as e:
-        logger.error(f"❌ Offload proxy error for {local_rid}: {e}")
         await user_q.put({"type": "error", "message": f"Offload Proxy Exception: {str(e)}"})
     finally:
         await user_q.put(None)
@@ -614,7 +563,6 @@ async def trigger_delegated_offload(target: dict, original_req: AddRequest, loca
 async def update_local_loras(req: UpdateLorasRequest):
     global LOCAL_AVAILABLE_LORAS
     LOCAL_AVAILABLE_LORAS = set(req.loras)
-    logger.info(f"🔄 Updated LOCAL_AVAILABLE_LORAS from EFO: {LOCAL_AVAILABLE_LORAS}")
     return {"status": "ok"}
 
 @app.post("/send_request")
@@ -626,36 +574,20 @@ async def send_request(req: AddRequest):
     meta = LORA_METADATA_TABLE.get(req.adapter_id)
     is_local = (meta and meta.get("type") == "local")
 
-    # ==========================================
-    # 1. 數據主權檢查 (Sovereignty)
-    # ==========================================
     if not meta or (is_local and meta.get("cluster") != CLUSTER_ID):
         logger.warning(f"🚫 [Drop] {rid[:8]} | Sovereignty Violation")
         await stream_queues[rid]["q"].put({"type": "error", "message": "Sovereignty Violation"})
         await stream_queues[rid]["q"].put(None)
         return {"request_id": rid}
 
-    # ==========================================
-    # 2. 統計隔離 (Delegated 請求不計入本地歷史)
-    # ==========================================
     if not req.is_delegated:
-        async with stats_lock:
-            lora_request_stats[req.adapter_id] += 1
+        async with stats_lock: lora_request_stats[req.adapter_id] += 1
 
-    # ==========================================
-    # 3. 本地模型可用性與語意替代檢查
-    # ==========================================
     valid_subs = [req.adapter_id] + [s for s in meta.get("substitutes", []) if s in LOCAL_AVAILABLE_LORAS]
     actual_valid = [s for s in valid_subs if s in LOCAL_AVAILABLE_LORAS]
 
-    # ==========================================
-    # 4. 動態 TTFT 期限計算 (需扣除代工網路傳輸時間)
-    # ==========================================
     target_ttft = T_MAX - (req.network_delay * 2)
 
-    # ==========================================
-    # 5. 評估本地預估延遲
-    # ==========================================
     active_node_urls = [u for u, d in node_mgr.nodes.items() if d["status"] == "active"]
     nodes = [VirtualNodeState(u, node_mgr.nodes[u]["metrics"]) for u in active_node_urls if node_mgr.nodes[u].get("metrics")]
     
@@ -666,69 +598,47 @@ async def send_request(req: AddRequest):
             ttft = predict_cluster_ttft(nodes, aid, global_pending)
             if ttft < best_ttft: best_ttft = ttft
 
-    # ==========================================
-    # 6. 決定本地有效槽位 (s_eff)
-    # ==========================================
     s_eff = 1.0 if (best_ttft <= target_ttft and actual_valid) else -1.0
 
-    # ==========================================
-    # 7. 壅塞廣播 (反壓機制，僅限自己直接收到的)
-    # ==========================================
     if s_eff < 0 and can_accept_offload and not req.is_delegated:
         can_accept_offload = False
         asyncio.create_task(broadcast_halt())
 
-    # ==========================================
-    # 8. 路由決策與 Z_debt Lyapunov 更新
-    # ==========================================
     async with z_lock:
-        if s_eff < 0: # 本地超載 或 本地根本沒有這個模型
+        if s_eff < 0:
             if req.is_delegated:
-                # [特例 A] 禁止二次卸載：代工端接不住只能 Drop，並受罰
-                logger.warning(f"🚫 [Drop] Delegated {rid[:8]} | Target Overloaded. No cascading offload.")
                 Z_debt = max(0.0, Z_debt + 1.0 - EPSILON) 
                 await stream_queues[rid]["q"].put({"type": "error", "message": "Delegated target overloaded."})
                 await stream_queues[rid]["q"].put(None)
                 return {"request_id": rid}
 
             if is_local:
-                # [特例 B] 本地專屬模型：嚴禁卸載
-                logger.warning(f"🚫 [Drop] Local LoRA {rid[:8]} | Congested.")
                 record_capacity_drop()
                 Z_debt = max(0.0, Z_debt + 1.0 - EPSILON)
                 await stream_queues[rid]["q"].put({"type": "error", "message": "System Congested (Local Drop)"})
                 await stream_queues[rid]["q"].put(None)
                 return {"request_id": rid}
 
-            # --- 進入全域卸載流程 (Delegated Offloading) ---
             target = select_best_offload_target(req.adapter_id)
             if not target:
-                logger.warning(f"🚫 [Drop] Global LoRA {rid[:8]} | No available offload targets.")
                 record_capacity_drop()
                 Z_debt = max(0.0, Z_debt + 1.0 - EPSILON)
                 await stream_queues[rid]["q"].put({"type": "error", "message": "System Congested (No Targets)"})
                 await stream_queues[rid]["q"].put(None)
                 return {"request_id": rid}
 
-            # 觸發代工 (發起端的 Z_debt 不扣也不加，因為外包了)
-            logger.info(f"🌐 [Offload] Forwarding {rid[:8]} to {target['cluster_name']} (Net Delay: {target['delay_sec']:.3f}s)")
+            logger.info(f"🌐 [Offload] Forwarding {rid[:8]} to {target['cluster_name']}")
             asyncio.create_task(trigger_delegated_offload(target, req, rid))
             return {"request_id": rid}
-
         else:
-            # 本地有餘裕可消化
             Z_debt = max(0.0, Z_debt - EPSILON)
 
-    # ==========================================
-    # 9. 加入本地調度佇列
-    # ==========================================
     req_obj = {
         "request_id": rid, "prompt": req.prompt, "adapter_id": req.adapter_id,
         "original_aid": req.adapter_id, "max_new_tokens": req.max_new_tokens, "arrival_time": time.time()
     }
     request_queues[req.adapter_id].append(req_obj)
     global_request_list.append({"request_id": rid, "original_aid": req.adapter_id, "arrival_time": req_obj["arrival_time"]})
-    
     return {"request_id": rid}
 
 @app.get("/stream/{request_id}")
@@ -777,12 +687,8 @@ async def pop_lora_stats():
         lora_request_stats.clear()
     return {"cluster": CLUSTER_NAME, "stats": current_stats}
 
-# ============================================================
-# SP2: Offloading APIs
-# ============================================================
 @app.get("/offload_status")
 async def get_offload_status():
-    """供 EFO 每 10 秒抓取一次的狀態，包含可用槽位容量與各 LoRA 的部署狀態"""
     active_node_urls = [u for u, d in node_mgr.nodes.items() if d["status"] == "active"]
     v_nodes = [VirtualNodeState(u, node_mgr.nodes[u]["metrics"]) for u in active_node_urls if node_mgr.nodes[u].get("metrics")]
 
@@ -793,22 +699,20 @@ async def get_offload_status():
         for n in v_nodes
     )
 
-    if Z_debt >= PSI_DROP * 0.9 or not can_accept_offload:
+    # [修復 2] 確保 Budget 計算不會被舊的 can_accept_offload 狀態鎖死
+    if Z_debt >= PSI_DROP * 0.9:
         budget = 0
     else:
-        budget = total_free_slots - total_pending
+        budget = max(0, total_free_slots - total_pending)
 
     merged_loras = set()
     loaded_loras = set()
 
     for n in v_nodes:
-        if n.mode == "merge" and n.merged_adapter:
-            merged_loras.add(n.merged_adapter)
-        elif n.mode == "unmerge":
-            loaded_loras.update(n.loaded_adapters)
+        if n.mode == "merge" and n.merged_adapter: merged_loras.add(n.merged_adapter)
+        elif n.mode == "unmerge": loaded_loras.update(n.loaded_adapters)
 
     unloaded_loras = LOCAL_AVAILABLE_LORAS - merged_loras - loaded_loras
-
     return {
         "budget": budget,
         "lora_status": {
@@ -820,23 +724,19 @@ async def get_offload_status():
 
 @app.post("/update_global_routing")
 async def update_global_routing(req: UpdateRoutingRequest):
-    """接收由 EFO 統整過後廣播的全域路由表，並重置本地的 Halt 狀態"""
     global global_routing_table, can_accept_offload
     global_routing_table = req.routing_table
-    my_status = global_routing_table.get(CLUSTER_NAME, {})
-    if my_status.get("budget", 0) > 0:
+    
+    # [修復 3] 解除死鎖：根據本地最真實的壓力狀態，動態恢復接收跨區代工
+    if Z_debt < PSI_DROP * 0.8:
         can_accept_offload = True
-    else:
-        can_accept_offload = False
-    logger.info(f"🗺️ Received new global routing table for {len(global_routing_table)} clusters.")
+        
     return {"status": "ok"}
 
 @app.post("/emergency_halt")
 async def emergency_halt(req: HaltRequest):
-    """接收來自其他 Control Node 的緊急 Halt 廣播，立刻阻斷對該 Cluster 的卸載"""
     if req.cluster_name in global_routing_table:
         global_routing_table[req.cluster_name]["budget"] = 0
-        logger.warning(f"🛑 [Routing] Received emergency HALT from {req.cluster_name}. Budget set to 0.")
     return {"status": "ok"}
 
 if __name__ == "__main__":

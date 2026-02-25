@@ -4,6 +4,15 @@ import threading
 from typing import Dict, Optional, Any, List, Set, Callable
 from collections import OrderedDict
 
+# 匯入集中管理的設定
+from config import (
+    FIXED_INPUT_LEN, FIXED_OUTPUT_LEN,
+    MERGED_CAPACITY, UNMERGED_CAPACITY, MAX_CPU_LORAS,
+    SIM_LOAD_DELAY, SIM_PREFILL_BASE_TIME,
+    SIM_DECODE_BASE_TIME, SIM_DECODE_SLOPE,
+    MERGE_SPEED_MULTIPLIER
+)
+
 # ============================================================
 # Simulated Tokenizer
 # ============================================================
@@ -26,14 +35,14 @@ class DummyTokenizer:
 class MultiLoRAEngine:
     def __init__(self, model_id: str, r: int = 16, alpha: int = 64, device: Optional[str] = None, torch_dtype: Any = None, enable_monitor: bool = True, adapter_fetcher: Optional[Callable[[str], bytes]] = None):
         self.device = "simulated_cpu"
-        self.merged_capacity = 15
-        self.unmerged_capacity = 12
+        self.merged_capacity = MERGED_CAPACITY
+        self.unmerged_capacity = UNMERGED_CAPACITY
         self.adapter_slots = self.unmerged_capacity 
-        self.max_cpu_loras = 30
+        self.max_cpu_loras = MAX_CPU_LORAS
         self.adapter_fetcher = adapter_fetcher 
 
-        self.FIXED_INPUT_LEN = 512
-        self.FIXED_OUTPUT_LEN = 256
+        self.FIXED_INPUT_LEN = FIXED_INPUT_LEN
+        self.FIXED_OUTPUT_LEN = FIXED_OUTPUT_LEN
 
         print(f"🟢 [Engine] Running in PURE SIMULATION MODE (No GPU/PyTorch required).")
         
@@ -72,7 +81,7 @@ class MultiLoRAEngine:
             
         if needs_load:
             # ⏳ [修改] 在鎖「外面」模擬延遲，這樣 /metrics 就不會被卡住！
-            time.sleep(0.200) 
+            time.sleep(SIM_LOAD_DELAY) 
             
             with self.lock:
                 # Double-check 避免被其他 Thread 搶先載入
@@ -189,7 +198,7 @@ class MultiLoRAEngine:
                         target_group.append(req)
 
                 if not target_group: return False
-                multiplier = 0.8
+                multiplier = MERGE_SPEED_MULTIPLIER
             else:
                 current_reqs = len(self.running_queue)
                 active_loras = {r["adapter_id"] for r in self.running_queue}
@@ -242,14 +251,14 @@ class MultiLoRAEngine:
             step_sleep_time = 0.0
             
             if prefill_reqs:
-                step_sleep_time += (0.050 * len(prefill_reqs)) * multiplier
+                step_sleep_time += (SIM_PREFILL_BASE_TIME * len(prefill_reqs)) * multiplier
                 for r in prefill_reqs:
                     r["past_key_values"] = True
                     decode_reqs.append(r)
             
             if decode_reqs:
                 batch_size = len(decode_reqs)
-                step_sleep_time += (0.025 + 0.0012 * batch_size) * multiplier
+                step_sleep_time += (SIM_DECODE_BASE_TIME + SIM_DECODE_SLOPE * batch_size) * multiplier
 
         # ==========================================
         # Phase 4: 模擬 GPU 運算 (在鎖的外面執行，不卡 API)

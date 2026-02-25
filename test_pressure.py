@@ -13,6 +13,7 @@ CONTROL_URL = "http://localhost:9000"
 
 # 改用我們在 Control Node 裡面設定好的 100 個 LoRA
 ADAPTERS = [f"LoRA_{i}" for i in range(1, 101)]
+# ADAPTERS = ["LoRA_70"]
 
 # 流量分佈模式
 TRAFFIC_PATTERN = "1"  

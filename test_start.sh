@@ -59,12 +59,10 @@ start() {
   for p in {8021..8023}; do kill_port $p; done
 
   echo "=== Phase 1: Infrastructure Test (Dynamic Registration Mode) ==="
-  echo "📂 Using existing LoRA files from ./testLoRA"
+  echo "📂 Using centralized configurations from config.py"
 
   echo "🚀 Starting EFO (Port 9100)..."
   PORT=9100 \
-  LORA_PATH="./testLoRA" \
-  LORA_METADATA="./lora_metadata.json" \
   CLUSTERS='{"cluster_1":"http://127.0.0.1:9000","cluster_2":"http://127.0.0.1:9001","cluster_3":"http://127.0.0.1:9002"}' \
   uvicorn EFO_server:app --host 0.0.0.0 --port 9100 &
   PIDS+=($!)
@@ -78,7 +76,6 @@ start() {
     
     CLUSTER_NAME="cluster_$c" \
     EFO_URL="http://127.0.0.1:9100" \
-    LORA_PATH="./testLoRA" \
     PORT=$CTRL_PORT \
     LOCAL_URL="http://127.0.0.1:$CTRL_PORT" \
     uvicorn control_node_server:app --host 0.0.0.0 --port $CTRL_PORT &

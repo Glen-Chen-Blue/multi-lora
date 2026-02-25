@@ -15,6 +15,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from _multilora_system import MultiLoRAEngine
+# 匯入集中管理的設定
+from config import MODEL_ID, FIXED_OUTPUT_LEN
 
 # ============================================================
 # Logging
@@ -31,8 +33,6 @@ logger = logging.getLogger("ComputeNode")
 # Global State & Engine
 # ============================================================
 NODE_ID = os.environ.get("NODE_ID", "cn-1")
-MODEL_ID = os.environ.get("MODEL_ID", "unsloth/Meta-Llama-3.1-8B")
-FIXED_OUTPUT_LEN = 256 
 
 CONTROL_NODE_URL = os.environ.get("CONTROL_NODE_URL", "http://localhost:9000")
 
