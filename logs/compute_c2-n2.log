@@ -1,55 +1,17 @@
-INFO:     Started server process [2352599]
+INFO:     Started server process [2359147]
 INFO:     Waiting for application startup.
-2026-02-26 11:26:48,411 [INFO] ComputeNode: Initializing Compute Node c2-n2 (Research Note Config: Merged=15, Unmerged=12)...
-2026-02-26 11:26:48,411 [INFO] ComputeNode: 🚀 Engine loop started.
-2026-02-26 11:26:48,411 [INFO] ComputeNode: 🔄 Attempting to register to Control Node at http://127.0.0.1:9001 with my URL: http://127.0.0.1:8012
+2026-02-26 12:05:08,358 [INFO] ComputeNode: Initializing Compute Node c2-n2 (Research Note Config: Merged=15, Unmerged=12)...
+2026-02-26 12:05:08,359 [INFO] ComputeNode: 🚀 Engine loop started.
+2026-02-26 12:05:08,359 [INFO] ComputeNode: 🔄 Attempting to register to Control Node at http://127.0.0.1:9001 with my URL: http://127.0.0.1:8012
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8012 (Press CTRL+C to quit)
-2026-02-26 11:26:48,441 [INFO] httpx: HTTP Request: POST http://127.0.0.1:9001/register_node "HTTP/1.1 200 OK"
-2026-02-26 11:26:48,442 [INFO] ComputeNode: ✅ Successfully registered to Control Node!
-2026-02-26 11:26:48,456 [INFO] ComputeNode: 🔄 狀態變更為: active
+2026-02-26 12:05:08,375 [INFO] httpx: HTTP Request: POST http://127.0.0.1:9001/register_node "HTTP/1.1 200 OK"
+2026-02-26 12:05:08,375 [INFO] ComputeNode: ✅ Successfully registered to Control Node!
+2026-02-26 12:05:08,380 [INFO] ComputeNode: 🔄 狀態變更為: standby
 🟢 [Engine] Running in PURE SIMULATION MODE (No GPU/PyTorch required).
-INFO:     127.0.0.1:47152 - "POST /set_status HTTP/1.1" 200 OK
-2026-02-26 11:27:27,449 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
-INFO:     127.0.0.1:47152 - "POST /drain HTTP/1.1" 200 OK
-2026-02-26 11:27:28,421 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
-2026-02-26 11:27:39,466 [INFO] ComputeNode: 🔄 狀態變更為: active
-INFO:     127.0.0.1:47152 - "POST /set_status HTTP/1.1" 200 OK
-2026-02-26 11:28:09,487 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
-INFO:     127.0.0.1:47152 - "POST /drain HTTP/1.1" 200 OK
-2026-02-26 11:28:10,431 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
-2026-02-26 11:28:15,497 [INFO] ComputeNode: 🔄 狀態變更為: active
-INFO:     127.0.0.1:47152 - "POST /set_status HTTP/1.1" 200 OK
-2026-02-26 11:28:21,505 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
-INFO:     127.0.0.1:47152 - "POST /drain HTTP/1.1" 200 OK
-2026-02-26 11:28:22,434 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
-2026-02-26 11:28:33,523 [INFO] ComputeNode: 🔄 狀態變更為: active
-INFO:     127.0.0.1:47152 - "POST /set_status HTTP/1.1" 200 OK
-2026-02-26 11:29:03,543 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
-INFO:     127.0.0.1:47152 - "POST /drain HTTP/1.1" 200 OK
-2026-02-26 11:29:04,444 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
-2026-02-26 11:29:15,557 [INFO] ComputeNode: 🔄 狀態變更為: active
-INFO:     127.0.0.1:47152 - "POST /set_status HTTP/1.1" 200 OK
-2026-02-26 11:29:21,566 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
-INFO:     127.0.0.1:47152 - "POST /drain HTTP/1.1" 200 OK
-2026-02-26 11:29:22,449 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
-2026-02-26 11:29:46,577 [INFO] ComputeNode: 🔄 狀態變更為: active
-INFO:     127.0.0.1:47152 - "POST /set_status HTTP/1.1" 200 OK
-2026-02-26 11:29:52,585 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
-INFO:     127.0.0.1:47152 - "POST /drain HTTP/1.1" 200 OK
-2026-02-26 11:29:53,456 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
-2026-02-26 11:30:54,610 [INFO] ComputeNode: 🔄 狀態變更為: active
-INFO:     127.0.0.1:47152 - "POST /set_status HTTP/1.1" 200 OK
-2026-02-26 11:31:06,628 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
-INFO:     127.0.0.1:47152 - "POST /drain HTTP/1.1" 200 OK
-2026-02-26 11:31:07,474 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
-2026-02-26 11:31:32,647 [INFO] ComputeNode: 🔄 狀態變更為: active
-INFO:     127.0.0.1:47152 - "POST /set_status HTTP/1.1" 200 OK
-2026-02-26 11:31:38,654 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
-INFO:     127.0.0.1:47152 - "POST /drain HTTP/1.1" 200 OK
-2026-02-26 11:31:39,482 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
+INFO:     127.0.0.1:45640 - "POST /set_status HTTP/1.1" 200 OK
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
-2026-02-26 11:32:11,558 [INFO] ComputeNode: Shutting down...
+2026-02-26 12:06:59,464 [INFO] ComputeNode: Shutting down...
 INFO:     Application shutdown complete.
-INFO:     Finished server process [2352599]
+INFO:     Finished server process [2359147]

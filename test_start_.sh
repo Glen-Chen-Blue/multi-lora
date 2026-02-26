@@ -80,7 +80,7 @@ start() {
     CLUSTER_NAME="cluster_$c" \
     EFO_URL="http://127.0.0.1:9100" \
     PORT=$CTRL_PORT \
-    LOCAL_URL="http://127.0.0.1:$CTRL_PORT" \
+    CONTROL_NODE_URL="http://127.0.0.1:$CTRL_PORT" \
     uvicorn control_node_server:app --host 0.0.0.0 --port $CTRL_PORT \
     >> logs/control_${c}.log 2>&1 &
     PIDS+=($!)
