@@ -53,11 +53,11 @@ SCALE_DOWN_SURPLUS_THRESHOLD = 12  # 觸發縮容的閒置 Slot 數量閾值 (�
 # 5. EFO Server - SP1 全域最佳化與預測模型常數
 # ------------------------------------------------------------
 # 成本權重設定 (抽象單位 Credit)
-COST_STORE_PER_GB = 0.0     # kappa_store: 1GB 模型本地存放 1 個時隙的成本
-COST_DOWNLOAD_PER_GB = 0.0   # kappa_inter: 跨區下載 1GB 模型的頻寬成本
+COST_STORE_PER_GB = 0.01     # kappa_store: 1GB 模型本地存放 1 個時隙的成本
+COST_DOWNLOAD_PER_GB = 0.1   # kappa_inter: 跨區下載 1GB 模型的頻寬成本
 COST_INST_LOCAL = 0.005      # kappa_inst: 本地處理 1 個 Request 的算力成本
 COST_NET_TRAFFIC = 0.002     # kappa_net: 跨 Cluster 處理 1 個 Request 的流量成本
-COST_DROP_PENALTY = 1      # SP1 視角的 Drop 懲罰 (對應 Psi_drop)
+COST_DROP_PENALTY = 0.1      # SP1 視角的 Drop 懲罰 (對應 Psi_drop)
 
 # 物理容量與限制
 LORA_SIZE_GB = 0.1           # S_lora: 單一 LoRA Adapter 的檔案大小估算 (GB)

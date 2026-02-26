@@ -30,7 +30,7 @@ from config import (
 # ============================================================
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] EFO: %(message)s")
 logger = logging.getLogger("EFOServer")
-
+logging.getLogger("httpx").setLevel(logging.WARNING)
 CLUSTERS_ENV = os.environ.get("CLUSTERS", "{}")
 
 # ============================================================
@@ -332,7 +332,7 @@ async def sp2_routing_loop():
     await system_start_event.wait()
     await sync_global_routing()
     while True:
-        await asyncio.sleep(10)
+        await asyncio.sleep(3)
         await sync_global_routing()
 
 async def sp1_provisioning_loop():

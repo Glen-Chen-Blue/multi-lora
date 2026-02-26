@@ -7,7 +7,7 @@ from datetime import datetime
 
 TRACE_CSV = "./information/simulation_data.csv"
 START_OFFSET = 86400 * 2
-RUN_DURATION = 60
+RUN_DURATION = 300
 TIMEOUT = 120
 
 CLUSTER_PORT_MAP = {

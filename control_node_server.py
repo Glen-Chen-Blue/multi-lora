@@ -28,9 +28,15 @@ from config import (
 # ============================================================
 # Config & Logging
 # ============================================================
+class RoutingAccessFilter(logging.Filter):
+    def filter(self, record):
+        msg = record.getMessage()
+        return "/update_global_routing" not in msg and "/offload_status" not in msg
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] CONTROL: %(message)s")
 logger = logging.getLogger("ControlNode")
 logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("uvicorn.access").addFilter(RoutingAccessFilter())
 
 CLUSTER_NAME = os.environ.get("CLUSTER_NAME", "cluster_1")
 CLUSTER_ID = CLUSTER_NAME  # 保留向下相容
@@ -501,6 +507,10 @@ def select_best_offload_target(adapter_id: str) -> Optional[dict]:
     best_target = None
     best_score = float('inf')
 
+    # 1. 取得目標 LoRA 及其所有合法的替代模型 (Substitutes)
+    meta = LORA_METADATA_TABLE.get(adapter_id, {})
+    valid_aids = [adapter_id] + meta.get("substitutes", [])
+
     for cluster_name, info in global_routing_table.items():
         if cluster_name == CLUSTER_NAME: continue
         budget = info.get("budget", 0)
@@ -511,10 +521,20 @@ def select_best_offload_target(adapter_id: str) -> Optional[dict]:
         loaded = set(lora_status.get("loaded", []))
         unloaded = set(lora_status.get("unloaded", []))
 
-        if adapter_id in merged: status_penalty = 0.0
-        elif adapter_id in loaded: status_penalty = 0.5
-        elif adapter_id in unloaded: status_penalty = 1.0
-        else: continue
+        # 2. 檢查目標叢集是否擁有精確模型或替代模型，並給予對應的狀態懲罰
+        # 優先權：Merged > Loaded > Unloaded
+        status_penalty = float('inf')
+        
+        if any(aid in merged for aid in valid_aids):
+            status_penalty = 0.0
+        elif any(aid in loaded for aid in valid_aids):
+            status_penalty = 0.5
+        elif any(aid in unloaded for aid in valid_aids):
+            status_penalty = 1.0
+            
+        # 如果目標叢集完全沒有目標模型也沒有任何合法的替代模型，則跳過
+        if status_penalty == float('inf'):
+            continue
 
         delay_ms = info.get("delay", {}).get(CLUSTER_NAME, 0.0)
         delay_sec = delay_ms / 1000.0

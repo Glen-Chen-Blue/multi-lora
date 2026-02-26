@@ -1,17 +1,12 @@
-INFO:     Started server process [2359148]
+INFO:     Started server process [2371049]
 INFO:     Waiting for application startup.
-2026-02-26 12:05:08,329 [INFO] ComputeNode: Initializing Compute Node c2-n3 (Research Note Config: Merged=15, Unmerged=12)...
-2026-02-26 12:05:08,330 [INFO] ComputeNode: 🚀 Engine loop started.
-2026-02-26 12:05:08,330 [INFO] ComputeNode: 🔄 Attempting to register to Control Node at http://127.0.0.1:9001 with my URL: http://127.0.0.1:8013
+2026-02-26 13:02:33,588 [INFO] ComputeNode: Initializing Compute Node c2-n3 (Research Note Config: Merged=15, Unmerged=12)...
+2026-02-26 13:02:33,589 [INFO] ComputeNode: 🚀 Engine loop started.
+2026-02-26 13:02:33,589 [INFO] ComputeNode: 🔄 Attempting to register to Control Node at http://127.0.0.1:9001 with my URL: http://127.0.0.1:8013
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8013 (Press CTRL+C to quit)
-2026-02-26 12:05:08,345 [INFO] httpx: HTTP Request: POST http://127.0.0.1:9001/register_node "HTTP/1.1 200 OK"
-2026-02-26 12:05:08,346 [INFO] ComputeNode: ✅ Successfully registered to Control Node!
-2026-02-26 12:05:08,351 [INFO] ComputeNode: 🔄 狀態變更為: standby
+2026-02-26 13:02:33,605 [INFO] httpx: HTTP Request: POST http://127.0.0.1:9001/register_node "HTTP/1.1 200 OK"
+2026-02-26 13:02:33,606 [INFO] ComputeNode: ✅ Successfully registered to Control Node!
+2026-02-26 13:02:33,611 [INFO] ComputeNode: 🔄 狀態變更為: standby
 🟢 [Engine] Running in PURE SIMULATION MODE (No GPU/PyTorch required).
-INFO:     127.0.0.1:44556 - "POST /set_status HTTP/1.1" 200 OK
-INFO:     Shutting down
-INFO:     Waiting for application shutdown.
-2026-02-26 12:06:59,416 [INFO] ComputeNode: Shutting down...
-INFO:     Application shutdown complete.
-INFO:     Finished server process [2359148]
+INFO:     127.0.0.1:49844 - "POST /set_status HTTP/1.1" 200 OK
