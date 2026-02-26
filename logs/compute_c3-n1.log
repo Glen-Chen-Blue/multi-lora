@@ -1,114 +1,21 @@
-INFO:     Started server process [2371050]
+INFO:     Started server process [2387805]
 INFO:     Waiting for application startup.
-2026-02-26 13:02:33,575 [INFO] ComputeNode: Initializing Compute Node c3-n1 (Research Note Config: Merged=15, Unmerged=12)...
-2026-02-26 13:02:33,575 [INFO] ComputeNode: 🚀 Engine loop started.
-2026-02-26 13:02:33,575 [INFO] ComputeNode: 🔄 Attempting to register to Control Node at http://127.0.0.1:9002 with my URL: http://127.0.0.1:8021
+2026-02-26 14:17:46,977 [INFO] ComputeNode: Initializing Compute Node c3-n1 (Research Note Config: Merged=15, Unmerged=12)...
+2026-02-26 14:17:46,977 [INFO] ComputeNode: 🚀 Engine loop started.
+2026-02-26 14:17:46,977 [INFO] ComputeNode: 🔄 Attempting to register to Control Node at http://127.0.0.1:9002 with my URL: http://127.0.0.1:8021
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8021 (Press CTRL+C to quit)
-2026-02-26 13:02:33,595 [INFO] httpx: HTTP Request: POST http://127.0.0.1:9002/register_node "HTTP/1.1 200 OK"
-2026-02-26 13:02:33,596 [INFO] ComputeNode: ✅ Successfully registered to Control Node!
-2026-02-26 13:02:33,602 [INFO] ComputeNode: 🔄 狀態變更為: active
+2026-02-26 14:17:47,001 [INFO] httpx: HTTP Request: POST http://127.0.0.1:9002/register_node "HTTP/1.1 200 OK"
+2026-02-26 14:17:47,001 [INFO] ComputeNode: ✅ Successfully registered to Control Node!
+2026-02-26 14:17:47,009 [INFO] ComputeNode: 🔄 狀態變更為: standby
 🟢 [Engine] Running in PURE SIMULATION MODE (No GPU/PyTorch required).
-INFO:     127.0.0.1:38134 - "POST /set_status HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38134 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58102 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58118 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58128 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58134 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58136 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58150 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58164 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42140 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42146 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38134 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58102 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58118 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58128 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42156 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58134 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58136 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58150 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58164 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42140 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42146 - "POST /add_request HTTP/1.1" 200 OK
-🔀 [Simulated Seamless] Merging LoRA_91 into base model on-the-fly...
-INFO:     127.0.0.1:42160 - "POST /merge HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42160 - "POST /add_request HTTP/1.1" 200 OK
-🔀 [Simulated Seamless] Unmerging LoRA_91...
-INFO:     127.0.0.1:38134 - "POST /unmerge HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38134 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58102 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58118 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58134 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58136 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58150 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42140 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42146 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42160 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:34946 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38134 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:34948 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58102 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58118 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58134 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58136 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58150 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42140 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42146 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42160 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:34946 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38134 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:34948 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58102 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58118 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58134 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58136 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58150 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42140 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42146 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42160 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38134 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:34946 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:34948 - "POST /add_request HTTP/1.1" 200 OK
-🔀 [Simulated Seamless] Merging LoRA_91 into base model on-the-fly...
-INFO:     127.0.0.1:57820 - "POST /merge HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58102 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57820 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58118 - "POST /add_request HTTP/1.1" 200 OK
-🔀 [Simulated Seamless] Unmerging LoRA_91...
-INFO:     127.0.0.1:58134 - "POST /unmerge HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38134 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58134 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58136 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58150 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58102 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58118 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57820 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:41394 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:41410 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:41420 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38134 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58134 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58136 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58102 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58150 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58118 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57820 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:41394 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:41410 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:41420 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:41434 - "POST /add_request HTTP/1.1" 200 OK
-🔀 [Simulated Seamless] Merging LoRA_91 into base model on-the-fly...
-INFO:     127.0.0.1:38134 - "POST /merge HTTP/1.1" 200 OK
-INFO:     127.0.0.1:38134 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58134 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58136 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54168 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58102 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58118 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58150 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57820 - "POST /add_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54174 - "POST /add_request HTTP/1.1" 200 OK
-2026-02-26 13:04:18,654 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
-INFO:     127.0.0.1:34068 - "POST /drain HTTP/1.1" 200 OK
-2026-02-26 13:04:25,512 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
+INFO:     127.0.0.1:45744 - "POST /set_status HTTP/1.1" 200 OK
+2026-02-26 14:18:18,980 [INFO] ComputeNode: 🔄 狀態變更為: active
+INFO:     127.0.0.1:45744 - "POST /set_status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45744 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37932 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37942 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37954 - "POST /add_request HTTP/1.1" 200 OK
+2026-02-26 14:18:32,995 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
+INFO:     127.0.0.1:45744 - "POST /drain HTTP/1.1" 200 OK
+2026-02-26 14:18:33,286 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby

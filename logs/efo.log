@@ -1,23 +1,23 @@
-INFO:     Started server process [2370873]
+INFO:     Started server process [2387633]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:9100 (Press CTRL+C to quit)
-2026-02-26 13:02:31,564 [INFO] EFO: 🔗 Cluster Registered: cluster_3
-INFO:     127.0.0.1:40194 - "POST /register_cluster HTTP/1.1" 200 OK
-2026-02-26 13:02:31,573 [INFO] EFO: 🔗 Cluster Registered: cluster_2
-INFO:     127.0.0.1:40204 - "POST /register_cluster HTTP/1.1" 200 OK
-2026-02-26 13:02:31,580 [INFO] EFO: 🔗 Cluster Registered: cluster_1
-INFO:     127.0.0.1:40218 - "POST /register_cluster HTTP/1.1" 200 OK
-INFO:     127.0.0.1:37392 - "POST /start HTTP/1.1" 200 OK
-2026-02-26 13:02:38,251 [INFO] EFO: 🚀 System Started! Running initial SP1 Pipeline...
-2026-02-26 13:02:38,251 [INFO] EFO: 🧠 LSTM Forecasting Start... (Simulated Hour: 48)
-2026-02-26 13:02:38,664 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning...
-2026-02-26 13:02:38,672 [INFO] EFO: 📊 [SP1 Result] cluster_3: Total 12/50 LoRAs
-2026-02-26 13:02:38,673 [INFO] EFO:    ┣ Mandatory (Local) : 10 models
-2026-02-26 13:02:38,673 [INFO] EFO:    ┗ Dynamic (Global)  : 2 models (Top: LoRA_70(U:0.21), LoRA_16(U:0.03))
-2026-02-26 13:02:38,681 [INFO] EFO: 📊 [SP1 Result] cluster_2: Total 16/50 LoRAs
-2026-02-26 13:02:38,681 [INFO] EFO:    ┣ Mandatory (Local) : 10 models
-2026-02-26 13:02:38,681 [INFO] EFO:    ┗ Dynamic (Global)  : 6 models (Top: LoRA_24(U:0.69), LoRA_33(U:0.42), LoRA_1(U:0.11), LoRA_26(U:0.02), LoRA_5(U:0.01))
-2026-02-26 13:02:38,686 [INFO] EFO: 📊 [SP1 Result] cluster_1: Total 21/50 LoRAs
-2026-02-26 13:02:38,686 [INFO] EFO:    ┣ Mandatory (Local) : 10 models
-2026-02-26 13:02:38,686 [INFO] EFO:    ┗ Dynamic (Global)  : 11 models (Top: LoRA_34(U:3.84), LoRA_47(U:0.36), LoRA_35(U:0.21), LoRA_55(U:0.11), LoRA_38(U:0.11))
+2026-02-26 14:17:44,950 [INFO] EFO: 🔗 Cluster Registered: cluster_1
+INFO:     127.0.0.1:49630 - "POST /register_cluster HTTP/1.1" 200 OK
+2026-02-26 14:17:44,959 [INFO] EFO: 🔗 Cluster Registered: cluster_3
+INFO:     127.0.0.1:49642 - "POST /register_cluster HTTP/1.1" 200 OK
+2026-02-26 14:17:44,983 [INFO] EFO: 🔗 Cluster Registered: cluster_2
+INFO:     127.0.0.1:49652 - "POST /register_cluster HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53442 - "POST /start HTTP/1.1" 200 OK
+2026-02-26 14:17:51,656 [INFO] EFO: 🚀 System Started! Running initial SP1 Pipeline...
+2026-02-26 14:17:51,656 [INFO] EFO: 🧠 LSTM Forecasting Start... (Simulated Hour: 48)
+2026-02-26 14:17:52,062 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning...
+2026-02-26 14:17:52,074 [INFO] EFO: 📊 [SP1 Result] cluster_1: Total 21/50 LoRAs
+2026-02-26 14:17:52,074 [INFO] EFO:    ┣ Mandatory (Local) : 10 models
+2026-02-26 14:17:52,074 [INFO] EFO:    ┗ Dynamic (Global)  : 11 models (Top: LoRA_34(U:3.84), LoRA_47(U:0.36), LoRA_35(U:0.21), LoRA_55(U:0.11), LoRA_38(U:0.11))
+2026-02-26 14:17:52,085 [INFO] EFO: 📊 [SP1 Result] cluster_3: Total 12/50 LoRAs
+2026-02-26 14:17:52,085 [INFO] EFO:    ┣ Mandatory (Local) : 10 models
+2026-02-26 14:17:52,085 [INFO] EFO:    ┗ Dynamic (Global)  : 2 models (Top: LoRA_70(U:0.21), LoRA_16(U:0.03))
+2026-02-26 14:17:52,094 [INFO] EFO: 📊 [SP1 Result] cluster_2: Total 16/50 LoRAs
+2026-02-26 14:17:52,094 [INFO] EFO:    ┣ Mandatory (Local) : 10 models
+2026-02-26 14:17:52,094 [INFO] EFO:    ┗ Dynamic (Global)  : 6 models (Top: LoRA_24(U:0.69), LoRA_33(U:0.42), LoRA_1(U:0.11), LoRA_26(U:0.02), LoRA_5(U:0.01))
