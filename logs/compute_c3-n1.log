@@ -1,75 +1,35 @@
-INFO:     Started server process [2269949]
+INFO:     Started server process [2352601]
 INFO:     Waiting for application startup.
-2026-02-25 16:06:29,393 [INFO] ComputeNode: Initializing Compute Node c3-n1 (Research Note Config: Merged=15, Unmerged=12)...
-2026-02-25 16:06:29,393 [INFO] ComputeNode: 🚀 Engine loop started.
-2026-02-25 16:06:29,394 [INFO] ComputeNode: 🔄 Attempting to register to Control Node at http://127.0.0.1:9002 with my URL: http://127.0.0.1:8021
+2026-02-26 11:26:48,410 [INFO] ComputeNode: Initializing Compute Node c3-n1 (Research Note Config: Merged=15, Unmerged=12)...
+2026-02-26 11:26:48,411 [INFO] ComputeNode: 🚀 Engine loop started.
+2026-02-26 11:26:48,411 [INFO] ComputeNode: 🔄 Attempting to register to Control Node at http://127.0.0.1:9002 with my URL: http://127.0.0.1:8021
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8021 (Press CTRL+C to quit)
-2026-02-25 16:06:29,415 [INFO] httpx: HTTP Request: POST http://127.0.0.1:9002/register_node "HTTP/1.1 200 OK"
-2026-02-25 16:06:29,415 [INFO] ComputeNode: ✅ Successfully registered to Control Node!
-2026-02-25 16:06:29,422 [INFO] ComputeNode: 🔄 狀態變更為: active
+2026-02-26 11:26:48,433 [INFO] httpx: HTTP Request: POST http://127.0.0.1:9002/register_node "HTTP/1.1 200 OK"
+2026-02-26 11:26:48,434 [INFO] ComputeNode: ✅ Successfully registered to Control Node!
+2026-02-26 11:26:48,440 [INFO] ComputeNode: 🔄 狀態變更為: active
 🟢 [Engine] Running in PURE SIMULATION MODE (No GPU/PyTorch required).
-INFO:     127.0.0.1:56006 - "POST /set_status HTTP/1.1" 200 OK
-2026-02-25 16:07:04,479 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
-INFO:     127.0.0.1:56006 - "POST /drain HTTP/1.1" 200 OK
-2026-02-25 16:07:05,402 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
-2026-02-25 16:07:10,488 [INFO] ComputeNode: 🔄 狀態變更為: active
-INFO:     127.0.0.1:56006 - "POST /set_status HTTP/1.1" 200 OK
-2026-02-25 16:07:46,505 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
-INFO:     127.0.0.1:56006 - "POST /drain HTTP/1.1" 200 OK
-2026-02-25 16:07:47,412 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
-2026-02-25 16:07:52,515 [INFO] ComputeNode: 🔄 狀態變更為: active
-INFO:     127.0.0.1:56006 - "POST /set_status HTTP/1.1" 200 OK
-2026-02-25 16:08:22,538 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
-INFO:     127.0.0.1:56006 - "POST /drain HTTP/1.1" 200 OK
-2026-02-25 16:08:23,421 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
-2026-02-25 16:08:40,559 [INFO] ComputeNode: 🔄 狀態變更為: active
-INFO:     127.0.0.1:56006 - "POST /set_status HTTP/1.1" 200 OK
-2026-02-25 16:08:46,565 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
-INFO:     127.0.0.1:56006 - "POST /drain HTTP/1.1" 200 OK
-2026-02-25 16:08:47,426 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
-2026-02-25 16:08:55,574 [INFO] ComputeNode: 🔄 狀態變更為: active
-INFO:     127.0.0.1:56006 - "POST /set_status HTTP/1.1" 200 OK
-2026-02-25 16:09:07,590 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
-INFO:     127.0.0.1:56006 - "POST /drain HTTP/1.1" 200 OK
-2026-02-25 16:09:08,431 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
-2026-02-25 16:09:27,609 [INFO] ComputeNode: 🔄 狀態變更為: active
-INFO:     127.0.0.1:56006 - "POST /set_status HTTP/1.1" 200 OK
-2026-02-25 16:09:33,618 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
-INFO:     127.0.0.1:56006 - "POST /drain HTTP/1.1" 200 OK
-2026-02-25 16:09:34,437 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
-2026-02-25 16:09:41,627 [INFO] ComputeNode: 🔄 狀態變更為: active
-INFO:     127.0.0.1:56006 - "POST /set_status HTTP/1.1" 200 OK
-2026-02-25 16:09:47,637 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
-INFO:     127.0.0.1:56006 - "POST /drain HTTP/1.1" 200 OK
-2026-02-25 16:09:48,441 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
-2026-02-25 16:10:26,652 [INFO] ComputeNode: 🔄 狀態變更為: active
-INFO:     127.0.0.1:56006 - "POST /set_status HTTP/1.1" 200 OK
-2026-02-25 16:10:38,669 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
-INFO:     127.0.0.1:56006 - "POST /drain HTTP/1.1" 200 OK
-2026-02-25 16:10:39,452 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
-2026-02-25 16:10:51,682 [INFO] ComputeNode: 🔄 狀態變更為: active
-INFO:     127.0.0.1:56006 - "POST /set_status HTTP/1.1" 200 OK
-2026-02-25 16:10:57,694 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
-INFO:     127.0.0.1:56006 - "POST /drain HTTP/1.1" 200 OK
-2026-02-25 16:10:58,457 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
-2026-02-25 16:11:09,740 [INFO] ComputeNode: 🔄 狀態變更為: active
-INFO:     127.0.0.1:56006 - "POST /set_status HTTP/1.1" 200 OK
-2026-02-25 16:11:15,749 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
-INFO:     127.0.0.1:56006 - "POST /drain HTTP/1.1" 200 OK
-2026-02-25 16:11:16,461 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
-2026-02-25 16:11:21,756 [INFO] ComputeNode: 🔄 狀態變更為: active
-INFO:     127.0.0.1:56006 - "POST /set_status HTTP/1.1" 200 OK
-2026-02-25 16:11:27,763 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
-INFO:     127.0.0.1:56006 - "POST /drain HTTP/1.1" 200 OK
-2026-02-25 16:11:28,464 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
-2026-02-25 16:11:33,773 [INFO] ComputeNode: 🔄 狀態變更為: active
-INFO:     127.0.0.1:56006 - "POST /set_status HTTP/1.1" 200 OK
-2026-02-25 16:11:45,793 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
-INFO:     127.0.0.1:56006 - "POST /drain HTTP/1.1" 200 OK
-2026-02-25 16:11:46,469 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
+INFO:     127.0.0.1:32804 - "POST /set_status HTTP/1.1" 200 OK
+2026-02-26 11:29:28,491 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
+INFO:     127.0.0.1:32804 - "POST /drain HTTP/1.1" 200 OK
+2026-02-26 11:29:29,447 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
+2026-02-26 11:29:34,498 [INFO] ComputeNode: 🔄 狀態變更為: active
+INFO:     127.0.0.1:32804 - "POST /set_status HTTP/1.1" 200 OK
+2026-02-26 11:31:04,539 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
+INFO:     127.0.0.1:32804 - "POST /drain HTTP/1.1" 200 OK
+2026-02-26 11:31:05,469 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
+2026-02-26 11:31:10,555 [INFO] ComputeNode: 🔄 狀態變更為: active
+INFO:     127.0.0.1:33458 - "POST /set_status HTTP/1.1" 200 OK
+2026-02-26 11:31:34,572 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
+INFO:     127.0.0.1:32804 - "POST /drain HTTP/1.1" 200 OK
+2026-02-26 11:31:35,477 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
+2026-02-26 11:31:40,579 [INFO] ComputeNode: 🔄 狀態變更為: active
+INFO:     127.0.0.1:32804 - "POST /set_status HTTP/1.1" 200 OK
+2026-02-26 11:32:10,595 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
+INFO:     127.0.0.1:32804 - "POST /drain HTTP/1.1" 200 OK
 INFO:     Shutting down
+2026-02-26 11:32:11,485 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
 INFO:     Waiting for application shutdown.
-2026-02-25 16:20:05,812 [INFO] ComputeNode: Shutting down...
+2026-02-26 11:32:11,583 [INFO] ComputeNode: Shutting down...
 INFO:     Application shutdown complete.
-INFO:     Finished server process [2269949]
+INFO:     Finished server process [2352601]

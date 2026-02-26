@@ -13,15 +13,16 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 
-# 匯入集中管理的設定 (包含修復 NameError 的缺失常數)
+# 匯入集中管理的設定
 from config import (
     LORA_PATH,
     MERGED_CAPACITY, UNMERGED_CAPACITY,
     T_MAX, EPSILON, PSI_DROP,
     SCALE_UP_DROP_THRESHOLD, SCALE_DOWN_SURPLUS_THRESHOLD,
+    HTTP_MAX_CONNECTIONS,
     SCHEDULER_OVERHEAD, SIM_LOAD_DELAY,
     SIM_PREFILL_BASE_TIME, MERGE_SPEED_MULTIPLIER,
-    SIM_DECODE_BASE_TIME, SIM_DECODE_SLOPE  # <== 確保這兩個有在這裡
+    SIM_DECODE_BASE_TIME, SIM_DECODE_SLOPE
 )
 
 # ============================================================
@@ -36,7 +37,8 @@ CLUSTER_ID = CLUSTER_NAME  # 保留向下相容
 EFO_URL = os.environ.get("EFO_URL", "http://127.0.0.1:9100")
 MY_URL = os.environ.get("CONTROL_NODE_URL", "http://127.0.0.1:9000")
 
-limits = httpx.Limits(max_keepalive_connections=100, max_connections=200)
+# 擴大連線池上限，避免突發流量導致 Socket 枯竭
+limits = httpx.Limits(max_keepalive_connections=200, max_connections=HTTP_MAX_CONNECTIONS)
 client = httpx.AsyncClient(limits=limits, timeout=60.0)
 
 # ============================================================
@@ -87,7 +89,7 @@ class NodeManager:
             self.nodes[url]["metrics"] = metrics
             self.nodes[url]["last_seen"] = time.time()
             
-            # [修復 1] 只有在節點完成排空任務時，才允許 Compute Node 的狀態覆寫 Control Node
+            # 只有在節點完成排空任務時，才允許 Compute Node 的狀態覆寫 Control Node
             reported_status = metrics.get("status", "standby")
             if self.nodes[url]["status"] == "draining" and reported_status == "standby":
                 logger.info(f"❄️ [Scale Down] 節點已完全排空，自動轉為 Standby: {url}")
@@ -233,18 +235,20 @@ def predict_cluster_ttft(nodes: List[VirtualNodeState], target_lora: str, global
     else:
         needed_to_finish = my_position - total_free
         
-        # [動態解碼速度計算]
+        # [動態解碼速度計算] 拔除 Hardcode，使用節點實際設定容量
         if has_merged_node:
-            assumed_batch = 12 
+            # 取第一個 Merge Node 的容量作為估算基準
+            merge_node = next((n for n in nodes if n.mode == "merge"), nodes[0])
+            assumed_batch = merge_node.capacity_merged 
             multiplier = MERGE_SPEED_MULTIPLIER
         else:
-            assumed_batch = 10 
+            assumed_batch = max(1, nodes[0].capacity_unmerged_base - 2)
             multiplier = 1.0
             
         dynamic_decode_speed = (SIM_DECODE_BASE_TIME + SIM_DECODE_SLOPE * assumed_batch) * multiplier
         
         if cluster_concurrent_capacity == 0: 
-            cluster_concurrent_capacity = MERGED_CAPACITY if has_merged_node else UNMERGED_CAPACITY
+            cluster_concurrent_capacity = nodes[0].capacity_merged if has_merged_node else nodes[0].capacity_unmerged_base
             
         full_cycles = needed_to_finish // cluster_concurrent_capacity
         remainder = needed_to_finish % cluster_concurrent_capacity
@@ -336,6 +340,7 @@ async def scheduler_loop():
 
             for v in v_nodes:
                 if v.url in switching_nodes: continue 
+                # 依您需求保留飽和度切換規則 (>=10)
                 if v.mode == "unmerge" and unmerged_count > 1 and v.running_batch >= 10 and len(v.active_loras) == 1:
                     aid = next(iter(v.active_loras))
                     if len(request_queues[aid]) > 0:
@@ -410,7 +415,9 @@ async def auto_scaling_monitor():
         now = time.time()
         
         recent_valid_drops = get_recent_capacity_drops_count(6.0)
-        if Z_debt > (PSI_DROP * 0.8) and recent_valid_drops > SCALE_UP_DROP_THRESHOLD:
+        
+        # 修正：只要近期丟棄數量達到閥值(>=)即可立刻擴容
+        if Z_debt > (PSI_DROP * 0.8) and recent_valid_drops >= SCALE_UP_DROP_THRESHOLD:
             if now - last_scale_action_time > 6.0:
                 logger.info(f"🚨 [Scale Up] Z={Z_debt:.2f}, Drops={recent_valid_drops}")
                 await node_mgr.scale_up_one_node()
@@ -699,7 +706,6 @@ async def get_offload_status():
         for n in v_nodes
     )
 
-    # [修復 2] 確保 Budget 計算不會被舊的 can_accept_offload 狀態鎖死
     if Z_debt >= PSI_DROP * 0.9:
         budget = 0
     else:
@@ -727,7 +733,6 @@ async def update_global_routing(req: UpdateRoutingRequest):
     global global_routing_table, can_accept_offload
     global_routing_table = req.routing_table
     
-    # [修復 3] 解除死鎖：根據本地最真實的壓力狀態，動態恢復接收跨區代工
     if Z_debt < PSI_DROP * 0.8:
         can_accept_offload = True
         

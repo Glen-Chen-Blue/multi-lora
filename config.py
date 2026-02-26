@@ -45,7 +45,8 @@ T_MAX = 6.0                  # Control Node 視角的 SLO 最大首字延遲限�
 EPSILON = 0.05               # Lyapunov 虛擬佇列扣除常數 (漂移參數)
 PSI_DROP = 10.0              # 容量耗盡被迫丟棄請求的巨大懲罰權重 (Z_debt)
 
-SCALE_UP_DROP_THRESHOLD = 5        # 觸發擴容的近期 Drop 數量閾值
+HTTP_MAX_CONNECTIONS = 500         # 控制節點與運算節點之間的 HTTP 連線池上限 (應對高併發)
+SCALE_UP_DROP_THRESHOLD = 2        # 觸發擴容的近期 Drop 數量閾值 (調低以加速反應)
 SCALE_DOWN_SURPLUS_THRESHOLD = 12  # 觸發縮容的閒置 Slot 數量閾值 (一台基準容量12 + 緩衝3)
 
 # ------------------------------------------------------------
