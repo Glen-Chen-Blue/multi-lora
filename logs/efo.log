@@ -1,30 +1,33 @@
-/home/glenchen/miniconda3/envs/myenv/lib/python3.10/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
-  import pynvml  # type: ignore[import]
-INFO:     Started server process [18724]
+INFO:     Started server process [68311]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:9900 (Press CTRL+C to quit)
-2026-03-02 12:07:36,091 [INFO] EFO: 🔗 Cluster Registered: cluster_1
-INFO:     127.0.0.1:46840 - "POST /register_cluster HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40260 - "POST /start HTTP/1.1" 200 OK
-2026-03-02 12:07:42,880 [INFO] EFO: 🚀 System Started! Running initial SP1 Pipeline...
-2026-03-02 12:07:42,880 [INFO] EFO: 🧠 LSTM Forecasting Start... (Simulated Hour: 48)
-2026-03-02 12:07:43,051 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning...
-2026-03-02 12:07:43,062 [INFO] EFO: 📊 [SP1 Result] cluster_1: Total 27/50 LoRAs (New DLs: 27)
-2026-03-02 12:07:43,062 [INFO] EFO:    ┣ Mandatory (Local) : 10 models
-2026-03-02 12:07:43,062 [INFO] EFO:    ┗ Dynamic (Global)  : 17 models (Top: LoRA_34(U:179.45), LoRA_47(U:17.47), LoRA_35(U:10.15), LoRA_55(U:5.69), LoRA_38(U:5.59))
-2026-03-02 12:07:43,062 [INFO] EFO: 📊 Global Metrics Polling started (60s interval).
-2026-03-02 13:07:43,085 [INFO] EFO: 🧠 LSTM Forecasting Start... (Simulated Hour: 49)
-2026-03-02 13:07:43,182 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning...
-2026-03-02 13:07:43,192 [INFO] EFO: 📊 [SP1 Result] cluster_1: Total 25/50 LoRAs (New DLs: 1)
-2026-03-02 13:07:43,192 [INFO] EFO:    ┣ Mandatory (Local) : 10 models
-2026-03-02 13:07:43,192 [INFO] EFO:    ┗ Dynamic (Global)  : 15 models (Top: LoRA_34(U:228.98), LoRA_47(U:36.08), LoRA_35(U:32.76), LoRA_55(U:5.70), LoRA_17(U:2.85))
-2026-03-02 14:07:43,210 [INFO] EFO: 🧠 LSTM Forecasting Start... (Simulated Hour: 50)
-2026-03-02 14:07:43,308 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning...
-2026-03-02 14:07:43,318 [INFO] EFO: 📊 [SP1 Result] cluster_1: Total 21/50 LoRAs (New DLs: 2)
-2026-03-02 14:07:43,318 [INFO] EFO:    ┣ Mandatory (Local) : 10 models
-2026-03-02 14:07:43,318 [INFO] EFO:    ┗ Dynamic (Global)  : 11 models (Top: LoRA_55(U:5.03), LoRA_17(U:2.85), LoRA_35(U:2.40), LoRA_70(U:1.14), LoRA_42(U:1.14))
+2026-03-02 17:46:53,871 [INFO] EFO: 🔗 Cluster Registered: cluster_2
+INFO:     127.0.0.1:38924 - "POST /register_cluster HTTP/1.1" 200 OK
+2026-03-02 17:46:53,872 [INFO] EFO: 🔗 Cluster Registered: cluster_3
+INFO:     127.0.0.1:38936 - "POST /register_cluster HTTP/1.1" 200 OK
+2026-03-02 17:46:53,873 [INFO] EFO: 🔗 Cluster Registered: cluster_1
+INFO:     127.0.0.1:38946 - "POST /register_cluster HTTP/1.1" 200 OK
+2026-03-02 17:47:04,862 [INFO] EFO: 🚀 System initialized via first /time_edge trigger!
+2026-03-02 17:47:04,862 [INFO] EFO: 
+==================================================
+⏱️ [TIME EDGE] Advancing to Time Step 0
+==================================================
+2026-03-02 17:47:06,202 [INFO] EFO: 📈 [CSV Forecast] cluster_2 step 0 (0s-3600s): 0.0 reqs, 0 active LoRAs
+2026-03-02 17:47:06,202 [INFO] EFO: 📈 [CSV Forecast] cluster_3 step 0 (0s-3600s): 0.0 reqs, 0 active LoRAs
+2026-03-02 17:47:06,202 [INFO] EFO: 📈 [CSV Forecast] cluster_1 step 0 (0s-3600s): 0.0 reqs, 0 active LoRAs
+2026-03-02 17:47:06,202 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning (CSV based)...
+2026-03-02 17:47:06,202 [INFO] EFO: 📊 [SP1] cluster_2: Target 10 LoRAs (New DLs: 10)
+2026-03-02 17:47:06,203 [INFO] EFO: 📊 [SP1] cluster_3: Target 10 LoRAs (New DLs: 10)
+2026-03-02 17:47:06,203 [INFO] EFO: 📊 [SP1] cluster_1: Target 10 LoRAs (New DLs: 10)
+2026-03-02 17:47:06,203 [INFO] EFO: ⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...
+2026-03-02 17:47:06,232 [INFO] EFO: 📊 Global Metrics Polling started (60s interval).
+2026-03-02 17:47:06,241 [INFO] EFO: ✅ cluster_2 synced successfully.
+2026-03-02 17:47:06,241 [INFO] EFO: ✅ cluster_3 synced successfully.
+2026-03-02 17:47:06,241 [INFO] EFO: ✅ cluster_1 synced successfully.
+2026-03-02 17:47:06,241 [INFO] EFO: ✨ All clusters have applied SP1 and are ready for the next time step.
+INFO:     127.0.0.1:35756 - "POST /time_edge HTTP/1.1" 200 OK
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [18724]
+INFO:     Finished server process [68311]

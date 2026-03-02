@@ -105,6 +105,7 @@ LORA_METADATA_TABLE: Dict[str, Any] = {}
 LOCAL_AVAILABLE_LORAS: Set[str] = set()
 global_routing_table: Dict[str, Any] = {}
 can_accept_offload: bool = True
+system_paused: bool = False  # [新增] 系統更新與排空期間的鎖定標記
 
 # ============================================================
 # Global State (含待機與 Draining 機制)
@@ -136,7 +137,6 @@ class NodeManager:
             reported_status = metrics.get("status", "standby")
             if self.nodes[url]["status"] == "draining" and reported_status == "standby":
                 logger.info(f"❄️ [Scale Down] 節點已完全排空，自動轉為 Standby: {url}")
-                engine.unmerge_all()
                 self.nodes[url]["status"] = "standby"
             
     async def scale_up_one_node(self) -> bool:
@@ -428,9 +428,13 @@ async def trigger_delegated_offload(target: dict, original_req: 'AddRequest', lo
         await user_q.put(None)
 
 async def scheduler_loop():
-    global global_request_list
+    global global_request_list, system_paused
     logger.info("⏳ SP2 Full-Function Scheduler loop started.")
     while True:
+        if system_paused:
+            await asyncio.sleep(0.5)
+            continue
+            
         try:
             all_node_urls = list(node_mgr.nodes.keys())
             if all_node_urls:
@@ -515,12 +519,16 @@ async def scheduler_loop():
 # 📈 Auto-Scaling Monitor (Scale Up + Draining)
 # ============================================================
 async def auto_scaling_monitor():
+    global system_paused
     logger.info("⚖️ Auto-Scaling Monitor started.")
     last_scale_action_time = time.time()
     surplus_duration = 0.0
     
     while True:
         await asyncio.sleep(1.0)
+        if system_paused:
+            continue
+            
         now = time.time()
         
         recent_valid_drops = get_recent_capacity_drops_count(6.0)
@@ -683,16 +691,81 @@ def select_best_offload_target(adapter_id: str) -> Optional[dict]:
             
     return best_target
 
+# [新增] 包含排空與重置機制的 SP1 套用 API
+@app.post("/apply_sp1_and_reset")
+async def apply_sp1_and_reset(req: UpdateLorasRequest):
+    global system_paused, LOCAL_AVAILABLE_LORAS
+    
+    logger.info("🛑 [SP1 Sync] Initiating system drain & reset...")
+    system_paused = True  # 暫停所有調度與新進請求
+    
+    try:
+        # 1. 等待排空 (Drain)
+        while True:
+            # 確保 Control Node 沒有待分配的排隊任務
+            if len(global_request_list) > 0:
+                await asyncio.sleep(0.5)
+                continue
+            
+            # 確保所有 Compute Node 皆已完成運算
+            all_idle = True
+            for url, node_data in node_mgr.nodes.items():
+                # 要求最新的 metrics，確保沒有在運作的 Batch
+                try:
+                    resp = await client.get(f"{url}/metrics", timeout=2.0)
+                    if resp.status_code == 200:
+                        metrics = resp.json()
+                        load_data = metrics.get("load", {})
+                        if load_data.get("running_batch", 0) > 0:
+                            all_idle = False
+                            break
+                except Exception:
+                    # 如果連線失敗，視為未閒置，避免誤判
+                    all_idle = False
+                    break
+            
+            if all_idle:
+                break
+            await asyncio.sleep(0.5)
+
+        logger.info("🚰 [SP1 Sync] System completely drained. Resetting compute nodes...")
+        
+        # 2. 對所有 Compute Node 下達重置 (Reset) 指令
+        reset_tasks = []
+        for url in node_mgr.nodes.keys():
+            reset_tasks.append(client.post(f"{url}/reset", timeout=5.0))
+        
+        if reset_tasks:
+            results = await asyncio.gather(*reset_tasks, return_exceptions=True)
+            for url, res in zip(node_mgr.nodes.keys(), results):
+                if isinstance(res, Exception) or res.status_code != 200:
+                    logger.error(f"❌ [SP1 Sync] Failed to reset node {url}: {res}")
+            
+        # 3. 更新本地支援的 LoRA 列表
+        LOCAL_AVAILABLE_LORAS = set(req.loras)
+        logger.info(f"✅ [SP1 Sync] New configuration applied. Target LoRAs: {list(LOCAL_AVAILABLE_LORAS)}")
+        
+        return {"status": "success"}
+    finally:
+        # 4. 解除鎖定
+        system_paused = False
+        logger.info("▶️ [SP1 Sync] System resumed. Ready for next interval.")
+
 @app.post("/update_local_loras")
 async def update_local_loras(req: UpdateLorasRequest):
+    # 保留此 API 供不需排空時的強制測試使用
     global LOCAL_AVAILABLE_LORAS
     LOCAL_AVAILABLE_LORAS = set(req.loras)
     return {"status": "ok"}
 
 @app.post("/send_request")
 async def send_request(req: AddRequest):
-    global Z_debt, can_accept_offload
+    global Z_debt, can_accept_offload, system_paused
     
+    # [新增] 如果系統正在進行 SP1 交接排空，直接拒絕請求 (503)
+    if system_paused:
+        raise HTTPException(status_code=503, detail="System is paused for SP1 synchronization")
+        
     if req.arrival_time is None:
         req.arrival_time = time.time()
         

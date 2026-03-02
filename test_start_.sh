@@ -117,9 +117,6 @@ start() {
   echo "⏳ Waiting 5 seconds for all clusters to register with EFO..."
   sleep 5
   
-  echo "🚦 Sending /start signal to EFO Server..."
-  curl -X POST http://127.0.0.1:9900/start > /dev/null 2>&1
-  echo ""
 
   echo "✅ All services started. Logs are in ./logs/"
   echo "Press Ctrl+C to stop."

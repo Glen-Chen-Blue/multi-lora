@@ -1,0 +1,116 @@
+INFO:     Started server process [68449]
+INFO:     Waiting for application startup.
+2026-03-02 17:46:55,878 [INFO] ComputeNode: Initializing Compute Node c3-n2 (Research Note Config: Merged=15, Unmerged=12)...
+2026-03-02 17:46:55,878 [INFO] ComputeNode: 🚀 Engine loop started.
+2026-03-02 17:46:55,879 [INFO] ComputeNode: 🔄 Attempting to register to Control Node at http://127.0.0.1:9002 with my URL: http://127.0.0.1:8022
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8022 (Press CTRL+C to quit)
+2026-03-02 17:46:55,895 [INFO] httpx: HTTP Request: POST http://127.0.0.1:9002/register_node "HTTP/1.1 200 OK"
+2026-03-02 17:46:55,896 [INFO] ComputeNode: ✅ Successfully registered to Control Node!
+2026-03-02 17:46:55,898 [INFO] ComputeNode: 🔄 狀態變更為: active
+🟢 [Engine] Running in PURE SIMULATION MODE (No GPU/PyTorch required).
+INFO:     127.0.0.1:45332 - "POST /set_status HTTP/1.1" 200 OK
+2026-03-02 17:47:06,238 [WARNING] ComputeNode: 🚨 [SP1 Sync] NODE RESET TRIGGERED! Clearing VRAM and Memory Cache...
+INFO:     127.0.0.1:45332 - "POST /reset HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45332 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54506 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54516 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54528 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54540 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54544 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54546 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54558 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54562 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54564 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45332 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54506 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54516 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54528 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54568 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54540 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54544 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54546 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54558 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54562 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54564 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45332 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54506 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54516 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54528 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54568 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54540 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54546 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54544 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54558 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54562 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54564 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45332 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54516 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54506 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54568 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54528 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54540 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54544 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54546 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54558 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54562 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54564 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45332 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54516 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54506 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54528 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54568 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54540 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54544 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54546 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54558 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54562 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54564 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45332 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54506 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54516 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54528 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54568 - "POST /add_request HTTP/1.1" 200 OK
+🔀 [Simulated Seamless] Merging LoRA_91 into base model on-the-fly...
+INFO:     127.0.0.1:57496 - "POST /merge HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54540 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54544 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54546 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54558 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54562 - "POST /add_request HTTP/1.1" 200 OK
+🔀 [Simulated Seamless] Unmerging LoRA_91...
+INFO:     127.0.0.1:45332 - "POST /unmerge HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45332 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54506 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54516 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54528 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54540 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54544 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54546 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54558 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54562 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52572 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52578 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45332 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54506 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54516 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54528 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54540 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54544 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54546 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54558 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54562 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52572 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52578 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54506 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45332 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54516 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54528 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54540 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54544 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for connections to close. (CTRL+C to force quit)
+INFO:     Waiting for application shutdown.
+2026-03-02 17:48:33,799 [INFO] ComputeNode: Shutting down...
+INFO:     Application shutdown complete.
+INFO:     Finished server process [68449]

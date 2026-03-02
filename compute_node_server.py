@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from multilora_system import MultiLoRAEngine
+from _multilora_system import MultiLoRAEngine
 # 匯入集中管理的設定
 from config import MODEL_ID, FIXED_OUTPUT_LEN
 
@@ -49,10 +49,10 @@ config_lock = threading.Lock()
 
 client = httpx.AsyncClient(timeout=120.0)
 
-# [新增] 狀態機狀態：active | standby | draining
+# 狀態機狀態：active | standby | draining
 current_status = "standby"
 
-# [新增] 累加型監控指標 (Cumulative Metrics)
+# 累加型監控指標 (Cumulative Metrics)
 cumulative_metrics = {
     "effective_inference_time": 0.0  # 累計的 Active Batching Time (秒)
 }
@@ -139,7 +139,7 @@ def engine_loop_thread():
         engine_wakeup.wait(timeout=1.0)
         if shutdown_event.is_set(): break
         try:
-            # [修改] 加入精確計時器，計算 Effective Inference Time
+            # 加入精確計時器，計算 Effective Inference Time
             start_time = time.time()
             did_work = engine.step()
             
@@ -234,7 +234,7 @@ def metrics():
     """回報節點的狀態與負載，Control Node 將以這裡的 status 為準"""
     if not engine: return {}
     
-    # [新增] 安全讀取累積數據
+    # 安全讀取累積數據
     with metrics_lock:
         inf_time = cumulative_metrics["effective_inference_time"]
 
@@ -278,7 +278,7 @@ def metrics():
         },
         "idle": engine.is_idle(),
         "config_version": last_config_version,
-        # [新增] 將指標回報給 Control Node
+        # 將指標回報給 Control Node
         "metrics": {
             "effective_inference_time": inf_time
         }
@@ -370,17 +370,33 @@ def unmerge(req: UnmergeRequest):
     engine.unmerge_all()
     return {"status": "unmerged"}
 
-@app.post("/debug/reset")
-def debug_reset():
-    logger.warning("🚨 NODE RESET TRIGGERED! Clearing local queues...")
+# [新增] 供 Control Node 在 SP1 同步期間呼叫的徹底清理 API
+@app.post("/reset")
+def reset_node_state():
+    logger.warning("🚨 [SP1 Sync] NODE RESET TRIGGERED! Clearing VRAM and Memory Cache...")
+    
+    # 1. 清空 VRAM 中運行與排隊的任務
     with engine.lock:
         engine.request_queue.clear()
         engine.running_queue.clear()
+        
+    # 2. 強制恢復為 Unmerged 模式
     engine.unmerge_all()
+    
+    # 3. 清空 Host Memory 內的 LoRA 快取
+    engine.cpu_cache.clear()
+    
+    # 4. 清空 HTTP Stream 追蹤狀態
     with stream_lock:
         stream_queues.clear()
         decoding_state.clear()
+        
     return {"status": "node_reset_complete"}
+
+@app.post("/debug/reset")
+def debug_reset():
+    # 保留原有的 Debug API，或者指向新的 reset 邏輯
+    return reset_node_state()
 
 if __name__ == "__main__":
     import uvicorn
