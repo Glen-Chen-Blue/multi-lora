@@ -23,7 +23,8 @@ from config import (
     COST_STORE_PER_GB, COST_DOWNLOAD_PER_GB, COST_INST_LOCAL,
     COST_NET_TRAFFIC, COST_DROP_PENALTY, LORA_SIZE_GB,
     DISK_CAPACITY_GB, T_MAX_SLO, SWAP_EPSILON,
-    T_TOTAL_HOURS, SEQ_LENGTH, NETWORK_SIM_PARAMS
+    T_TOTAL_HOURS, SEQ_LENGTH, NETWORK_SIM_PARAMS,
+    SP1_INTERVAL_SECONDS, SP2_INTERVAL_SECONDS
 )
 
 # ============================================================
@@ -407,7 +408,7 @@ async def sp2_routing_loop():
     await system_start_event.wait()
     await sync_global_routing()
     while True:
-        await asyncio.sleep(3)
+        await asyncio.sleep(SP2_INTERVAL_SECONDS)
         await sync_global_routing()
 
 async def sp1_provisioning_loop():
@@ -416,7 +417,7 @@ async def sp1_provisioning_loop():
     hybrid_forecasting_engine()
     await run_sp1_provisioning()
     while True:
-        await asyncio.sleep(3600) 
+        await asyncio.sleep(SP1_INTERVAL_SECONDS) 
         await fetch_cluster_stats()
         hybrid_forecasting_engine()
         await run_sp1_provisioning()

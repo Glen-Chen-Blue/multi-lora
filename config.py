@@ -84,3 +84,7 @@ NETWORK_SIM_PARAMS = {
     ("cluster_2", "cluster_3"): (40, 3.5, 0.8), # Edge to Edge
     ("cluster_1", "cluster_3"): (60, 4.2, 1.2), # Cloud to Remote Edge
 }
+
+
+SP1_INTERVAL_SECONDS = 3600          # SP1 全局優化的執行間隔 (秒)
+SP2_INTERVAL_SECONDS = 3           # SP2 局部優化的執行間隔 (秒)
