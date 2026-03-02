@@ -1,123 +1,41 @@
-INFO:     Started server process [68406]
+INFO:     Started server process [73110]
 INFO:     Waiting for application startup.
-2026-03-02 17:46:53,867 [INFO] CONTROL: 🔄 Registering with EFO at http://127.0.0.1:9900...
-2026-03-02 17:46:53,874 [INFO] CONTROL: ✅ Successfully registered to EFO. Loaded 100 LoRA metadata entries.
-2026-03-02 17:46:53,874 [INFO] CONTROL: ⏳ SP2 Full-Function Scheduler loop started.
-2026-03-02 17:46:53,874 [INFO] CONTROL: ⚖️ Auto-Scaling Monitor started.
-2026-03-02 17:46:53,874 [INFO] CONTROL: 📊 Cluster Metrics Polling started (10s interval).
+2026-03-02 18:04:58,137 [INFO] CONTROL: 🔄 Registering with EFO at http://127.0.0.1:9900...
+2026-03-02 18:04:58,143 [INFO] CONTROL: ✅ Successfully registered to EFO. Loaded 100 LoRA metadata entries.
+2026-03-02 18:04:58,143 [INFO] CONTROL: ⏳ SP2 Full-Function Scheduler loop started.
+2026-03-02 18:04:58,143 [INFO] CONTROL: ⚖️ Auto-Scaling Monitor started.
+2026-03-02 18:04:58,143 [INFO] CONTROL: 📊 Cluster Metrics Polling started (10s interval).
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:9001 (Press CTRL+C to quit)
-2026-03-02 17:46:55,895 [INFO] CONTROL: ✅ Registered Node: http://127.0.0.1:8011 | Assigned Status: active
-INFO:     127.0.0.1:56300 - "POST /register_node HTTP/1.1" 200 OK
-2026-03-02 17:46:55,906 [INFO] CONTROL: ✅ Registered Node: http://127.0.0.1:8013 | Assigned Status: standby
-INFO:     127.0.0.1:56316 - "POST /register_node HTTP/1.1" 200 OK
-2026-03-02 17:46:55,951 [INFO] CONTROL: ✅ Registered Node: http://127.0.0.1:8012 | Assigned Status: standby
-INFO:     127.0.0.1:56324 - "POST /register_node HTTP/1.1" 200 OK
-2026-03-02 17:47:06,234 [INFO] CONTROL: 🛑 [SP1 Sync] Initiating system drain & reset...
-2026-03-02 17:47:06,237 [INFO] CONTROL: 🚰 [SP1 Sync] System completely drained. Resetting compute nodes...
-2026-03-02 17:47:06,240 [INFO] CONTROL: ✅ [SP1 Sync] New configuration applied. Target LoRAs: ['LoRA_90', 'LoRA_81', 'LoRA_88', 'LoRA_84', 'LoRA_87', 'LoRA_85', 'LoRA_82', 'LoRA_83', 'LoRA_89', 'LoRA_86']
-2026-03-02 17:47:06,240 [INFO] CONTROL: ▶️ [SP1 Sync] System resumed. Ready for next interval.
-INFO:     127.0.0.1:58664 - "POST /apply_sp1_and_reset HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58670 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58686 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58698 - "POST /send_request HTTP/1.1" 200 OK
-2026-03-02 17:47:06,266 [WARNING] CONTROL: 🚨 [Backpressure] Capacity exhausted! Broadcasting HALT to other clusters.
-INFO:     127.0.0.1:58698 - "GET /stream/9e815d01-d54f-4e9f-a435-680ec45f151e HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58686 - "GET /stream/40c5c47c-baa3-4f14-a180-ab3874dbd4ce HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58670 - "GET /stream/94c5f2d3-2e88-4b55-ab7d-264b460e390f HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58712 - "POST /emergency_halt HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58720 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58728 - "POST /emergency_halt HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58720 - "GET /stream/4d31de59-5dda-408c-9520-7a4d3053b3dc HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58744 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58744 - "GET /stream/9369eb95-39cc-47b8-a610-3136c2bfac05 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58752 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58752 - "GET /stream/ad327b9f-5efb-4bb4-9650-6a19275eecac HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58764 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58764 - "GET /stream/371f2dc9-6954-4696-998a-03cc5e7a8102 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57386 - "POST /send_request HTTP/1.1" 200 OK
-2026-03-02 17:47:16,562 [WARNING] CONTROL: 🚨 [Backpressure] Capacity exhausted! Broadcasting HALT to other clusters.
-INFO:     127.0.0.1:57386 - "GET /stream/feeceee0-aeb1-4f8f-bd41-179c9b61cf70 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57388 - "POST /emergency_halt HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57392 - "POST /emergency_halt HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57400 - "POST /send_request HTTP/1.1" 200 OK
-2026-03-02 17:47:20,176 [WARNING] CONTROL: 🚨 [Backpressure] Capacity exhausted! Broadcasting HALT to other clusters.
-INFO:     127.0.0.1:57400 - "GET /stream/4abf862c-c0dd-48d3-a1b0-533b79cb1582 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57408 - "POST /send_request HTTP/1.1" 200 OK
-2026-03-02 17:47:22,616 [WARNING] CONTROL: 🚨 [Backpressure] Capacity exhausted! Broadcasting HALT to other clusters.
-INFO:     127.0.0.1:57408 - "GET /stream/0f1f7980-1f5b-4d40-b530-0cd8a4ab4706 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36092 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36092 - "GET /stream/49ed158b-9b51-48a2-b937-2b3f4857e150 HTTP/1.1" 200 OK
-2026-03-02 17:47:23,879 [INFO] CONTROL: 🚨 [Scale Up] Z=8.45, Drops=3
-2026-03-02 17:47:23,880 [INFO] CONTROL: 🚀 [Scale Up] 成功喚醒待機節點: http://127.0.0.1:8013
-INFO:     127.0.0.1:36118 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36118 - "GET /stream/c3529455-84e6-412c-b1f3-76762030fa8d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36140 - "POST /emergency_halt HTTP/1.1" 200 OK
-2026-03-02 17:47:29,886 [INFO] CONTROL: 🚰 [Scale Down] 節點進入 Draining: http://127.0.0.1:8011
-2026-03-02 17:47:30,342 [INFO] CONTROL: ❄️ [Scale Down] 節點已完全排空，自動轉為 Standby: http://127.0.0.1:8011
-INFO:     127.0.0.1:39664 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:39664 - "GET /stream/c12b9582-5d4a-43e9-b270-96f691edf3e0 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:39674 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:39674 - "GET /stream/7ef32d6c-f437-46bc-8cc6-b637014f2dd9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:39688 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:39688 - "GET /stream/a15f2986-35a8-460a-8e27-671082af9a2c HTTP/1.1" 200 OK
-2026-03-02 17:47:41,887 [INFO] CONTROL: 🚨 [Scale Up] Z=11.25, Drops=2
-2026-03-02 17:47:41,893 [INFO] CONTROL: 🚀 [Scale Up] 成功喚醒待機節點: http://127.0.0.1:8011
-INFO:     127.0.0.1:58972 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58972 - "GET /stream/519e25f3-1d71-4355-87ed-341d213dfca9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58992 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58992 - "GET /stream/3a8b61c8-487c-4b66-91bf-3eba6c73cd07 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58998 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58998 - "GET /stream/68d98620-1189-4820-a767-3dbd8f9f4642 HTTP/1.1" 200 OK
-2026-03-02 17:47:47,893 [INFO] CONTROL: 🚨 [Scale Up] Z=13.10, Drops=2
-2026-03-02 17:47:47,894 [INFO] CONTROL: 🚀 [Scale Up] 成功喚醒待機節點: http://127.0.0.1:8012
-INFO:     127.0.0.1:59030 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59030 - "GET /stream/92639890-f5da-4119-a48b-8128d6c034f8 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:47168 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:47168 - "GET /stream/9c161771-7e39-4bf3-bd19-ee5d58c6f7c1 HTTP/1.1" 200 OK
-2026-03-02 17:47:53,899 [INFO] CONTROL: 🚰 [Scale Down] 節點進入 Draining: http://127.0.0.1:8011
-2026-03-02 17:47:54,591 [INFO] CONTROL: ❄️ [Scale Down] 節點已完全排空，自動轉為 Standby: http://127.0.0.1:8011
-INFO:     127.0.0.1:47178 - "POST /emergency_halt HTTP/1.1" 200 OK
-INFO:     127.0.0.1:47192 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:47192 - "GET /stream/8d0519a9-8b39-4739-addc-1d89dc072f50 HTTP/1.1" 200 OK
-2026-03-02 17:47:59,907 [INFO] CONTROL: 🚰 [Scale Down] 節點進入 Draining: http://127.0.0.1:8013
-2026-03-02 17:48:00,660 [INFO] CONTROL: ❄️ [Scale Down] 節點已完全排空，自動轉為 Standby: http://127.0.0.1:8013
-INFO:     127.0.0.1:47212 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:47212 - "GET /stream/cbcdd280-7f34-4f56-96c2-3e372f72893a HTTP/1.1" 200 OK
-INFO:     127.0.0.1:47214 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:47214 - "GET /stream/34d5214d-3875-4a4f-b175-d08a88a6253f HTTP/1.1" 200 OK
-2026-03-02 17:48:05,909 [INFO] CONTROL: 🚨 [Scale Up] Z=16.85, Drops=2
-2026-03-02 17:48:05,915 [INFO] CONTROL: 🚀 [Scale Up] 成功喚醒待機節點: http://127.0.0.1:8011
-INFO:     127.0.0.1:51542 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51542 - "GET /stream/a5b9993f-1cf3-4f9c-ac65-a63facd3f9f8 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51556 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51556 - "GET /stream/bf520f2e-bbb1-4517-adb7-2b4484563695 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51566 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51566 - "GET /stream/4b08de93-7a5e-4513-b0a4-15209ec902be HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51574 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51574 - "GET /stream/eb78800b-8464-4f97-97fa-ef99b2b96b8b HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51582 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51582 - "GET /stream/79e0b5dc-e323-4bd3-8a6f-bac564dd093c HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51588 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51588 - "GET /stream/2f645ce6-4e27-4ede-b012-89ace67a2c46 HTTP/1.1" 200 OK
-2026-03-02 17:48:11,917 [INFO] CONTROL: 🚨 [Scale Up] Z=21.55, Drops=5
-2026-03-02 17:48:11,923 [INFO] CONTROL: 🚀 [Scale Up] 成功喚醒待機節點: http://127.0.0.1:8013
-INFO:     127.0.0.1:51604 - "POST /emergency_halt HTTP/1.1" 200 OK
-2026-03-02 17:48:17,925 [INFO] CONTROL: 🚰 [Scale Down] 節點進入 Draining: http://127.0.0.1:8011
-INFO:     127.0.0.1:42588 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42588 - "GET /stream/b5f52f59-7d37-4860-b00d-afce2f57cd40 HTTP/1.1" 200 OK
-2026-03-02 17:48:18,351 [INFO] CONTROL: ❄️ [Scale Down] 節點已完全排空，自動轉為 Standby: http://127.0.0.1:8011
-INFO:     127.0.0.1:42590 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42590 - "GET /stream/56861309-c310-46da-a810-61c98acee319 HTTP/1.1" 200 OK
-2026-03-02 17:48:23,926 [INFO] CONTROL: 🚨 [Scale Up] Z=23.45, Drops=2
-2026-03-02 17:48:23,927 [INFO] CONTROL: 🚀 [Scale Up] 成功喚醒待機節點: http://127.0.0.1:8011
-INFO:     127.0.0.1:55354 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55354 - "GET /stream/5fa5ce90-7a7c-4004-bed4-7ed44df64984 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55372 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55372 - "GET /stream/05a987ef-237d-4886-95de-f07baf59a7b8 HTTP/1.1" 200 OK
-2026-03-02 17:48:29,928 [INFO] CONTROL: 🚨 [Scale Up] Z=25.35, Drops=2
-2026-03-02 17:48:29,928 [WARNING] CONTROL: ⚠️ [Scale Up] 擴容失敗：沒有可用的待機節點！
+2026-03-02 18:05:00,166 [INFO] CONTROL: ✅ Registered Node: http://127.0.0.1:8012 | Assigned Status: active
+INFO:     127.0.0.1:53288 - "POST /register_node HTTP/1.1" 200 OK
+2026-03-02 18:05:00,173 [INFO] CONTROL: ✅ Registered Node: http://127.0.0.1:8013 | Assigned Status: standby
+INFO:     127.0.0.1:53304 - "POST /register_node HTTP/1.1" 200 OK
+2026-03-02 18:05:00,175 [INFO] CONTROL: ✅ Registered Node: http://127.0.0.1:8011 | Assigned Status: standby
+INFO:     127.0.0.1:53312 - "POST /register_node HTTP/1.1" 200 OK
+2026-03-02 18:05:06,706 [INFO] CONTROL: 🛑 [SP1 Sync] Initiating system drain & reset...
+2026-03-02 18:05:06,709 [INFO] CONTROL: 🚰 [SP1 Sync] System completely drained. Resetting compute nodes...
+2026-03-02 18:05:06,711 [INFO] CONTROL: ✅ [SP1 Sync] New configuration applied. Target LoRAs: ['LoRA_90', 'LoRA_85', 'LoRA_83', 'LoRA_86', 'LoRA_84', 'LoRA_82', 'LoRA_81', 'LoRA_87', 'LoRA_88', 'LoRA_89']
+2026-03-02 18:05:06,711 [INFO] CONTROL: ▶️ [SP1 Sync] System resumed. Ready for next interval.
+INFO:     127.0.0.1:49048 - "POST /apply_sp1_and_reset HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49054 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49066 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49080 - "POST /send_request HTTP/1.1" 200 OK
+2026-03-02 18:05:06,736 [WARNING] CONTROL: 🚨 [Backpressure] Capacity exhausted! Broadcasting HALT to other clusters.
+INFO:     127.0.0.1:49054 - "GET /stream/1afc3b58-29d3-496c-b770-899e73da0137 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49066 - "GET /stream/18ab7537-7942-416f-9bf8-112ffa39fe69 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49080 - "GET /stream/27b82444-6db2-41c6-9fd2-76fb5fddba90 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49096 - "POST /emergency_halt HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49106 - "POST /emergency_halt HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49098 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49098 - "GET /stream/f88fcdc8-77b6-4c9e-9e44-3a0836fb6ec1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49118 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49118 - "GET /stream/f40e57c5-ad7b-4e0d-8d75-4597388361b2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49126 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49126 - "GET /stream/6a0ccc91-6b6b-458d-b40b-3a87cb1af5ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49130 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49130 - "GET /stream/f332123c-b5b9-4e40-8e68-aebaa8c7afa4 HTTP/1.1" 200 OK
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [68406]
+INFO:     Finished server process [73110]

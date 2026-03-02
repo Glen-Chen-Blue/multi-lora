@@ -1,205 +1,53 @@
-INFO:     Started server process [68405]
+INFO:     Started server process [73109]
 INFO:     Waiting for application startup.
-2026-03-02 17:46:53,869 [INFO] CONTROL: 🔄 Registering with EFO at http://127.0.0.1:9900...
-2026-03-02 17:46:53,874 [INFO] CONTROL: ✅ Successfully registered to EFO. Loaded 100 LoRA metadata entries.
-2026-03-02 17:46:53,874 [INFO] CONTROL: ⏳ SP2 Full-Function Scheduler loop started.
-2026-03-02 17:46:53,874 [INFO] CONTROL: ⚖️ Auto-Scaling Monitor started.
-2026-03-02 17:46:53,875 [INFO] CONTROL: 📊 Cluster Metrics Polling started (10s interval).
+2026-03-02 18:04:58,138 [INFO] CONTROL: 🔄 Registering with EFO at http://127.0.0.1:9900...
+2026-03-02 18:04:58,145 [INFO] CONTROL: ✅ Successfully registered to EFO. Loaded 100 LoRA metadata entries.
+2026-03-02 18:04:58,145 [INFO] CONTROL: ⏳ SP2 Full-Function Scheduler loop started.
+2026-03-02 18:04:58,145 [INFO] CONTROL: ⚖️ Auto-Scaling Monitor started.
+2026-03-02 18:04:58,145 [INFO] CONTROL: 📊 Cluster Metrics Polling started (10s interval).
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:9000 (Press CTRL+C to quit)
-2026-03-02 17:46:55,904 [INFO] CONTROL: ✅ Registered Node: http://127.0.0.1:8002 | Assigned Status: active
-INFO:     127.0.0.1:56012 - "POST /register_node HTTP/1.1" 200 OK
-2026-03-02 17:46:55,926 [INFO] CONTROL: ✅ Registered Node: http://127.0.0.1:8001 | Assigned Status: standby
-INFO:     127.0.0.1:56022 - "POST /register_node HTTP/1.1" 200 OK
-2026-03-02 17:46:55,945 [INFO] CONTROL: ✅ Registered Node: http://127.0.0.1:8003 | Assigned Status: standby
-INFO:     127.0.0.1:56034 - "POST /register_node HTTP/1.1" 200 OK
-2026-03-02 17:47:06,234 [INFO] CONTROL: 🛑 [SP1 Sync] Initiating system drain & reset...
-2026-03-02 17:47:06,238 [INFO] CONTROL: 🚰 [SP1 Sync] System completely drained. Resetting compute nodes...
-2026-03-02 17:47:06,240 [INFO] CONTROL: ✅ [SP1 Sync] New configuration applied. Target LoRAs: ['LoRA_77', 'LoRA_80', 'LoRA_75', 'LoRA_78', 'LoRA_76', 'LoRA_79', 'LoRA_71', 'LoRA_72', 'LoRA_73', 'LoRA_74']
-2026-03-02 17:47:06,240 [INFO] CONTROL: ▶️ [SP1 Sync] System resumed. Ready for next interval.
-INFO:     127.0.0.1:33194 - "POST /apply_sp1_and_reset HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33208 - "POST /send_request HTTP/1.1" 200 OK
-2026-03-02 17:47:06,256 [WARNING] CONTROL: 🚨 [Backpressure] Capacity exhausted! Broadcasting HALT to other clusters.
-INFO:     127.0.0.1:33208 - "GET /stream/85ae8186-7aab-427c-840e-c39b4945f196 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33224 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33238 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33242 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33250 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33224 - "GET /stream/104c9980-0317-44ff-9567-1bcc98416bea HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33238 - "GET /stream/a95db9c7-9eec-4a62-9653-1e17d395a2ad HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33242 - "GET /stream/0f4d8521-c629-4a65-b754-c0f15c597cd0 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33250 - "GET /stream/1c3c627f-79b6-4ec6-b223-fe154e099a2c HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33266 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33276 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33288 - "POST /emergency_halt HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33266 - "GET /stream/55acb2a0-20d2-4471-baa3-a650ed388011 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33296 - "POST /emergency_halt HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33276 - "GET /stream/2c6068dc-4e96-47d2-823c-d905a033d537 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33312 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33312 - "GET /stream/c1363d00-d474-4766-a2dd-b615e2d7aacb HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33318 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33318 - "GET /stream/329c4d39-7e74-4d70-a372-74435dcb610b HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33328 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33328 - "GET /stream/7e6d41cf-ee67-41af-abb9-acd21fd6f2ed HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33332 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33332 - "GET /stream/685457d8-598c-4110-ae82-c3545ef81045 HTTP/1.1" 200 OK
-2026-03-02 17:47:07,876 [INFO] CONTROL: 🚨 [Scale Up] Z=9.45, Drops=10
-2026-03-02 17:47:07,877 [INFO] CONTROL: 🚀 [Scale Up] 成功喚醒待機節點: http://127.0.0.1:8001
-INFO:     127.0.0.1:33340 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33340 - "GET /stream/fb343ff7-ac4d-4d99-9dc6-146f1aac1bde HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33350 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:33350 - "GET /stream/583c293d-4b01-4d63-9c34-0ea96096d7ea HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43376 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43376 - "GET /stream/4f050f67-3bd7-40cf-ae95-d625b22ccf4d HTTP/1.1" 200 OK
-2026-03-02 17:47:13,879 [INFO] CONTROL: 🚨 [Scale Up] Z=11.30, Drops=2
-2026-03-02 17:47:13,880 [INFO] CONTROL: 🚀 [Scale Up] 成功喚醒待機節點: http://127.0.0.1:8003
-INFO:     127.0.0.1:43384 - "POST /emergency_halt HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43388 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43388 - "GET /stream/5de1e09c-37f0-41a1-b68c-cd0efcbcb739 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43394 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43394 - "GET /stream/90b920a3-e191-4845-a157-ff99762957ad HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43408 - "POST /emergency_halt HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43420 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43420 - "GET /stream/50041b38-0e5b-4331-8916-e6f7608ce21e HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43434 - "POST /emergency_halt HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43436 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43436 - "GET /stream/702ce210-03e7-4505-99b4-6820d35c5fcf HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43442 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43442 - "GET /stream/f28b0d01-3c82-4b84-aaf2-6f8fe77a45da HTTP/1.1" 200 OK
-2026-03-02 17:47:19,880 [INFO] CONTROL: 🚨 [Scale Up] Z=16.05, Drops=5
-2026-03-02 17:47:19,880 [WARNING] CONTROL: ⚠️ [Scale Up] 擴容失敗：沒有可用的待機節點！
-INFO:     127.0.0.1:43456 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43456 - "GET /stream/108ea5c4-cdb0-488b-9af9-82f9ad34fec0 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43458 - "POST /emergency_halt HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43474 - "POST /emergency_halt HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56730 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56730 - "GET /stream/fd906605-5627-487e-8768-5e8958031915 HTTP/1.1" 200 OK
-2026-03-02 17:47:25,887 [INFO] CONTROL: 🚰 [Scale Down] 節點進入 Draining: http://127.0.0.1:8001
-INFO:     127.0.0.1:56740 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56740 - "GET /stream/99ddc665-628e-4f78-bf27-f5afd1ec75d6 HTTP/1.1" 200 OK
-2026-03-02 17:47:26,303 [INFO] CONTROL: ❄️ [Scale Down] 節點已完全排空，自動轉為 Standby: http://127.0.0.1:8001
-INFO:     127.0.0.1:56744 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56744 - "GET /stream/700c4e23-5988-4de7-996a-a26057353969 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56750 - "POST /emergency_halt HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56764 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56764 - "GET /stream/ec6f0612-05ca-4bc6-bd49-6544da6a09a6 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56772 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56772 - "GET /stream/2674789c-45a6-40d8-b53f-5e1d5a65d63c HTTP/1.1" 200 OK
-2026-03-02 17:47:31,888 [INFO] CONTROL: 🚨 [Scale Up] Z=20.75, Drops=4
-2026-03-02 17:47:31,893 [INFO] CONTROL: 🚀 [Scale Up] 成功喚醒待機節點: http://127.0.0.1:8001
-INFO:     127.0.0.1:56042 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56042 - "GET /stream/88e1316b-4d5b-40cb-888b-1edbdab0da5d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56052 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56052 - "GET /stream/51a3f175-e8e1-4354-a7fe-657ebc222e9d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56054 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56054 - "GET /stream/73dbe313-29e3-475d-8a15-3cd1db46138b HTTP/1.1" 200 OK
-2026-03-02 17:47:37,893 [INFO] CONTROL: 🚨 [Scale Up] Z=23.60, Drops=3
-2026-03-02 17:47:37,893 [WARNING] CONTROL: ⚠️ [Scale Up] 擴容失敗：沒有可用的待機節點！
-INFO:     127.0.0.1:56080 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56080 - "GET /stream/e8e0f4e3-b1ca-4117-97ad-e61d6a9e0b83 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56086 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56086 - "GET /stream/dc74c0cd-4a1f-4e77-9d1a-e600ef805a18 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56096 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56096 - "GET /stream/3fb98cfc-aa6a-4e86-86ac-e6e95926d948 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56112 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56112 - "GET /stream/c0d96c99-78f0-4afe-a036-5a9e7d94b0f7 HTTP/1.1" 200 OK
-2026-03-02 17:47:43,894 [INFO] CONTROL: 🚨 [Scale Up] Z=26.40, Drops=3
-2026-03-02 17:47:43,894 [WARNING] CONTROL: ⚠️ [Scale Up] 擴容失敗：沒有可用的待機節點！
-INFO:     127.0.0.1:50170 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50170 - "GET /stream/922b7e29-5a68-4b54-b87e-78a782594d58 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50184 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50184 - "GET /stream/33c54e7b-4071-40c2-a674-d73ef837dcc3 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50198 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50198 - "GET /stream/80a65174-de91-4820-88e3-3f0ccea397ca HTTP/1.1" 200 OK
-2026-03-02 17:47:49,895 [INFO] CONTROL: 🚨 [Scale Up] Z=29.25, Drops=3
-2026-03-02 17:47:49,896 [WARNING] CONTROL: ⚠️ [Scale Up] 擴容失敗：沒有可用的待機節點！
-INFO:     127.0.0.1:50220 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50220 - "GET /stream/2e23c57f-af81-481a-83bb-eed149ed542b HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50232 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50232 - "GET /stream/7578aee0-79b1-403e-957e-75791cdd928c HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50238 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50238 - "GET /stream/3f659dd4-bf6e-4bf7-864d-3ab0a2f53fbe HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40292 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40292 - "GET /stream/c7c4de43-4cde-456f-a785-992582c055a2 HTTP/1.1" 200 OK
-2026-03-02 17:47:55,897 [INFO] CONTROL: 🚨 [Scale Up] Z=33.05, Drops=4
-2026-03-02 17:47:55,898 [WARNING] CONTROL: ⚠️ [Scale Up] 擴容失敗：沒有可用的待機節點！
-INFO:     127.0.0.1:40316 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40316 - "GET /stream/145e61b3-e174-4975-a112-53c3b8687c47 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40342 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40342 - "GET /stream/2c47fae0-7247-4d21-9a25-ecdc2c6f483a HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40350 - "POST /emergency_halt HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40366 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40366 - "GET /stream/88900306-5365-4d35-b6d4-da4714208d24 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40376 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40376 - "GET /stream/de1a9eec-5ed9-4134-bae0-eb523d47e399 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40378 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40378 - "GET /stream/22735319-c4e4-4ccb-8d79-6ccbaca8dc9e HTTP/1.1" 200 OK
-2026-03-02 17:48:01,898 [INFO] CONTROL: 🚨 [Scale Up] Z=35.80, Drops=3
-2026-03-02 17:48:01,898 [WARNING] CONTROL: ⚠️ [Scale Up] 擴容失敗：沒有可用的待機節點！
-INFO:     127.0.0.1:40390 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:40390 - "GET /stream/9d2c9da5-96ce-4e45-b156-c2fb0e3b4f2b HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60688 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60688 - "GET /stream/6cac0ced-6353-4617-b11b-62143fad6687 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60704 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60704 - "GET /stream/f24a60ea-61bc-455c-84bd-b4a50bdf4daf HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60712 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60712 - "GET /stream/ce6d272e-593a-4fb5-97ee-48483853c3f8 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60728 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60728 - "GET /stream/cfbf48a1-b2b3-4058-b92c-2fb3fcf5ac68 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60730 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60730 - "GET /stream/071b5eb8-76e9-4b91-9c06-e6e8b4fda3bc HTTP/1.1" 200 OK
-2026-03-02 17:48:07,901 [INFO] CONTROL: 🚨 [Scale Up] Z=40.50, Drops=5
-2026-03-02 17:48:07,901 [WARNING] CONTROL: ⚠️ [Scale Up] 擴容失敗：沒有可用的待機節點！
-INFO:     127.0.0.1:60748 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60748 - "GET /stream/61b6d19c-7d05-4605-bd55-d14810b2c6d3 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60764 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60764 - "GET /stream/e02338d8-8da6-4b2f-bc11-b9021dce2754 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60778 - "POST /emergency_halt HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43248 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43248 - "GET /stream/dbd30d4e-ae40-44e3-8939-d37bc8dcad3f HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43254 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43254 - "GET /stream/35fdb453-2f7f-459c-a5ee-39900d382020 HTTP/1.1" 200 OK
-2026-03-02 17:48:14,901 [INFO] CONTROL: 🚨 [Scale Up] Z=44.30, Drops=4
-2026-03-02 17:48:14,902 [WARNING] CONTROL: ⚠️ [Scale Up] 擴容失敗：沒有可用的待機節點！
-INFO:     127.0.0.1:43274 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43274 - "GET /stream/167f1a9b-4d8d-497c-ab41-ca5fa44f4ff5 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43288 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43288 - "GET /stream/f1109e6a-3266-40b4-a088-df708b5fda8b HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43298 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43298 - "GET /stream/95ddddc9-9161-47ea-830d-a54d0f3a22e5 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43302 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43302 - "GET /stream/33467a18-3e0b-4af9-9864-9ee73f94de3d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43312 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43312 - "GET /stream/20ae1c8e-c725-40f3-8c07-2f4b60f13d09 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43330 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43330 - "GET /stream/8133f92d-2fed-44b0-870e-b3db723cbe8e HTTP/1.1" 200 OK
-2026-03-02 17:48:20,902 [INFO] CONTROL: 🚨 [Scale Up] Z=48.00, Drops=4
-2026-03-02 17:48:20,902 [WARNING] CONTROL: ⚠️ [Scale Up] 擴容失敗：沒有可用的待機節點！
-INFO:     127.0.0.1:43336 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43336 - "GET /stream/08edf25f-1913-4eaf-90e8-57c3410c07a8 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43338 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43338 - "GET /stream/20a2d3b5-3569-49ce-a4fb-ab44e2d5c02f HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43360 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:43360 - "GET /stream/4da33884-0d71-47a1-9730-a61b70a2189f HTTP/1.1" 200 OK
-INFO:     127.0.0.1:32854 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:32854 - "GET /stream/a3042654-9b5f-4ee6-9a16-2db35d13f265 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:32876 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:32876 - "GET /stream/3f42f591-2b11-4121-bd98-6ca45fcb3da5 HTTP/1.1" 200 OK
-2026-03-02 17:48:26,904 [INFO] CONTROL: 🚨 [Scale Up] Z=52.75, Drops=5
-2026-03-02 17:48:26,904 [WARNING] CONTROL: ⚠️ [Scale Up] 擴容失敗：沒有可用的待機節點！
-INFO:     127.0.0.1:32888 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:32888 - "GET /stream/1785c308-bcd7-4f22-b080-751c9aa795ce HTTP/1.1" 200 OK
-INFO:     127.0.0.1:32906 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:32906 - "GET /stream/2457fa5c-62f1-4ad4-870d-4a55fff2b014 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:32910 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:32910 - "GET /stream/a7f6d2ae-a5a3-424e-9732-6b4a8f5f73cc HTTP/1.1" 200 OK
-INFO:     127.0.0.1:32918 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:32918 - "GET /stream/dc63d0d4-cd7d-4c90-88ea-bd4cbca49600 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:32934 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:32934 - "GET /stream/2d4b724d-a880-4598-96dc-f34f9ffb6606 HTTP/1.1" 200 OK
-2026-03-02 17:48:32,904 [INFO] CONTROL: 🚨 [Scale Up] Z=57.50, Drops=5
-2026-03-02 17:48:32,904 [WARNING] CONTROL: ⚠️ [Scale Up] 擴容失敗：沒有可用的待機節點！
+2026-03-02 18:05:00,167 [INFO] CONTROL: ✅ Registered Node: http://127.0.0.1:8003 | Assigned Status: active
+INFO:     127.0.0.1:38436 - "POST /register_node HTTP/1.1" 200 OK
+2026-03-02 18:05:00,185 [INFO] CONTROL: ✅ Registered Node: http://127.0.0.1:8002 | Assigned Status: standby
+INFO:     127.0.0.1:38446 - "POST /register_node HTTP/1.1" 200 OK
+2026-03-02 18:05:00,195 [INFO] CONTROL: ✅ Registered Node: http://127.0.0.1:8001 | Assigned Status: standby
+INFO:     127.0.0.1:38462 - "POST /register_node HTTP/1.1" 200 OK
+2026-03-02 18:05:06,705 [INFO] CONTROL: 🛑 [SP1 Sync] Initiating system drain & reset...
+2026-03-02 18:05:06,710 [INFO] CONTROL: 🚰 [SP1 Sync] System completely drained. Resetting compute nodes...
+2026-03-02 18:05:06,712 [INFO] CONTROL: ✅ [SP1 Sync] New configuration applied. Target LoRAs: ['LoRA_79', 'LoRA_72', 'LoRA_76', 'LoRA_77', 'LoRA_75', 'LoRA_74', 'LoRA_80', 'LoRA_71', 'LoRA_78', 'LoRA_73']
+2026-03-02 18:05:06,712 [INFO] CONTROL: ▶️ [SP1 Sync] System resumed. Ready for next interval.
+INFO:     127.0.0.1:40744 - "POST /apply_sp1_and_reset HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40752 - "POST /send_request HTTP/1.1" 200 OK
+2026-03-02 18:05:06,727 [WARNING] CONTROL: 🚨 [Backpressure] Capacity exhausted! Broadcasting HALT to other clusters.
+INFO:     127.0.0.1:40752 - "GET /stream/6a7ee879-45b5-420d-ba62-9cfa335ce908 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40768 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40784 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40790 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40796 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40806 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40812 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40768 - "GET /stream/23bc55c9-f472-4487-bf90-49fb2152a2b2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40784 - "GET /stream/c9eb2cd3-0fd7-42cf-992a-bebbcc289597 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40824 - "POST /emergency_halt HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40828 - "POST /emergency_halt HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40790 - "GET /stream/1dff6c74-3cb6-4cc0-a0ed-233bf6b8f44b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40796 - "GET /stream/3dd4829c-8073-49f2-919f-58ad1270a0a4 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40806 - "GET /stream/ad7881ef-1a7a-482e-a29a-2bda32d44fb1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40812 - "GET /stream/900da1ea-73b2-4519-9d05-fe8c0d7c0a43 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40838 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40838 - "GET /stream/a645d66b-18e6-470a-a03a-105c03d134f6 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40846 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40846 - "GET /stream/d787aad3-786a-4948-9e8c-92b2bb4045d8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40854 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40854 - "GET /stream/a882e356-f8e8-4cdb-8abf-b3ba7d656b0c HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40868 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40868 - "GET /stream/8f06a2bd-c552-4bfc-81df-2dadb5b87052 HTTP/1.1" 200 OK
+2026-03-02 18:05:08,150 [INFO] CONTROL: 🚨 [Scale Up] Z=9.45, Drops=10
+2026-03-02 18:05:08,151 [INFO] CONTROL: 🚀 [Scale Up] 成功喚醒待機節點: http://127.0.0.1:8002
+INFO:     127.0.0.1:40884 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40884 - "GET /stream/254ed352-7a26-4a43-b472-8e06b8093d0c HTTP/1.1" 200 OK
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [68405]
+INFO:     Finished server process [73109]

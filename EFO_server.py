@@ -20,8 +20,8 @@ from config import (
     COST_STORE_PER_GB, COST_DOWNLOAD_PER_GB, COST_INST_LOCAL,
     COST_NET_TRAFFIC, COST_DROP_PENALTY, LORA_SIZE_GB,
     DISK_CAPACITY_GB, T_MAX_SLO, SWAP_EPSILON,
-    NETWORK_SIM_PARAMS, EDGE_SYNC_TIMEOUT,
-    SP1_INTERVAL_SECONDS, SP2_INTERVAL_SECONDS
+    NETWORK_SIM_PARAMS, SP2_INTERVAL_SECONDS, EDGE_SYNC_TIMEOUT,
+    SP1_INTERVAL_SECONDS
 )
 
 # ============================================================
@@ -58,7 +58,7 @@ global_lora_disk_inventory: Dict[str, List[str]] = {}
 predicted_demand: Dict[str, Dict[str, float]] = defaultdict(dict)
 azure_mapping: Dict[str, Dict[str, str]] = {}
 
-current_time_step = 0  # CSV 的起始行數 (Time step)
+current_time_step = 0  # 模擬器推進的區間步數
 system_start_event: asyncio.Event = None
 
 # ============================================================
@@ -116,7 +116,7 @@ async def sync_global_routing():
                         "delay": p95_delays.get(cluster_name, {})
                     }
             except Exception as e:
-                logger.error(f"❌ [Routing] Error getting status from {cluster_name}: {e}")
+                pass
 
         if not routing_table: return
 
@@ -173,59 +173,80 @@ async def poll_global_metrics():
             f.write(json.dumps(global_snapshot) + "\n")
 
 # ============================================================
-# SP1: CSV Forecasting & Provisioning (Step-based)
+# SP1: CSV Forecasting (Interval Scanning)
 # ============================================================
 def exact_csv_forecasting(time_step: int):
     """
-    從 CSV (Trace) 中讀取真實數據，精準計算出 time_step 對應的區間內，
-    每個 Cluster 對各個 LoRA 的真實 Request 數量。
+    使用 Pandas 掃描 CSV，精準統計該 time_step 區間內的所有請求數量
     """
     global predicted_demand
     predicted_demand.clear()
     
-    # 這裡的常數需與 test_simulation.py 保持對齊
     START_OFFSET = 86400 * 2
     
-    # 定義此 time_step 的秒數區間 (這與 test_simulation.py 的 req_interval 完美對齊)
     start_sec = time_step * SP1_INTERVAL_SECONDS
     end_sec = (time_step + 1) * SP1_INTERVAL_SECONDS
     
-    # 初始化字典
+    # 初始化每個 active_cluster 對所有 LoRA 的預期需求量為 0
     for cluster_name in active_clusters.keys():
         predicted_demand[cluster_name] = {lora_id: 0.0 for lora_id in global_lora_metadata.keys()}
 
     if not os.path.exists(SIMULATION_DATA_CSV_PATH):
-        logger.error(f"❌ CSV not found at {SIMULATION_DATA_CSV_PATH}. Using 0 demand for all.")
+        logger.error(f"❌ CSV not found at {SIMULATION_DATA_CSV_PATH}")
         return
 
-    with open(SIMULATION_DATA_CSV_PATH, "r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            try:
-                arr_ts = float(row["arrive_timestamp"])
-                arr_sec = arr_ts - START_OFFSET
+    try:
+        # 使用 pandas 讀取，自動處理逗號或 Tab (sep=None)
+        df = pd.read_csv(SIMULATION_DATA_CSV_PATH, sep=None, engine='python')
+        df.columns = df.columns.str.strip() # 清理欄位名稱的空白
+        
+        if "arrive_timestamp" not in df.columns:
+            logger.error("❌ CSV missing 'arrive_timestamp' column!")
+            return
+            
+        df["arrival_sec"] = df["arrive_timestamp"].astype(float)
+        
+        # 【防呆機制】如果 CSV 的時間第一筆就小於 START_OFFSET，代表不需要減 2 天
+        if df["arrival_sec"].min() < START_OFFSET:
+            logger.warning("⚠️ Detected small timestamps, auto-setting START_OFFSET to 0")
+            START_OFFSET = 0
+            
+        df["arrival_sec"] -= START_OFFSET
+        
+        # 過濾出當前區間的資料
+        mask = (df["arrival_sec"] >= start_sec) & (df["arrival_sec"] < end_sec)
+        df_interval = df[mask]
+        
+        parsed_count = 0
+        for _, row in df_interval.iterrows():
+            cluster = str(row["cluster"]).strip()
+            # 強制轉 int 避免 "1.0" 問題
+            lora_id_val = int(float(row["lora_id"]))
+            lora_id = f"LoRA_{lora_id_val}"
+            
+            if cluster in active_clusters and lora_id in predicted_demand[cluster]:
+                predicted_demand[cluster][lora_id] += 1.0
+                parsed_count += 1
                 
-                # 判斷是否落在當前要預測的區間內
-                if start_sec <= arr_sec < end_sec:
-                    cluster = row["cluster"]
-                    lora_id_raw = row["lora_id"]
-                    lora_id = f"LoRA_{lora_id_raw}" # 轉成系統用的名稱，例如 LoRA_1
-                    
-                    if cluster in active_clusters and lora_id in predicted_demand[cluster]:
-                        predicted_demand[cluster][lora_id] += 1.0
-            except (ValueError, KeyError):
-                continue
-                
-    # 印出 Log 確認讀取結果
+    except Exception as e:
+        logger.error(f"❌ CSV Parsing Error: {e}")
+        return
+        
+    # 印出預測總結
     for cluster, demands in predicted_demand.items():
         total_reqs = sum(demands.values())
         active_loras = sum(1 for v in demands.values() if v > 0)
-        logger.info(f"📈 [CSV Forecast] {cluster} step {time_step} ({start_sec}s-{end_sec}s): {total_reqs} reqs, {active_loras} active LoRAs")
+        logger.info(f"📈 [CSV Forecast] {cluster} step {time_step} ({start_sec}s - {end_sec}s): Total {int(total_reqs)} reqs across {active_loras} LoRAs")
+        
+    if parsed_count == 0:
+        logger.warning(f"⚠️ [CSV Forecast] Warning: Parsed 0 valid requests for step {time_step}!")
 
+# ============================================================
+# SP1: Provisioning Algorithm
+# ============================================================
 async def run_sp1_provisioning_and_wait():
-    """SP1: 計算 Adaptive CSG-Swap，下發配置並等待所有節點排空重置"""
     if not global_lora_metadata or not active_clusters: return
-    logger.info("⚙️ Running SP1 Adaptive CSG-Swap Provisioning (CSV based)...")
+    logger.info("⚙️ Running SP1 Adaptive CSG-Swap Provisioning...")
 
     p95_delays = network_simulator.get_p95_info()
     
@@ -273,7 +294,7 @@ async def run_sp1_provisioning_and_wait():
 
             gains[lora_id] = max(0.0, best_offload_cost - C_INST)
 
-        # Step 0: Mandatory Sets
+        # Step 0: Mandatory Sets (Local)
         for lora_id in valid_loras:
             if global_lora_metadata[lora_id].get("type") == "local":
                 mandatory_set.add(lora_id)
@@ -318,7 +339,6 @@ async def run_sp1_provisioning_and_wait():
                     target_disk.add(lora_id)
                     utilities[lora_id] = u_v
 
-        # 計算下載量並印出 Log
         new_downloads = len(target_disk - current_disk)
         if new_downloads > 0:
             async with efo_metrics.lock:
@@ -326,7 +346,16 @@ async def run_sp1_provisioning_and_wait():
 
         cluster_targets[cluster_name] = list(target_disk)
         global_lora_disk_inventory[cluster_name] = cluster_targets[cluster_name]
-        logger.info(f"📊 [SP1] {cluster_name}: Target {len(target_disk)} LoRAs (New DLs: {new_downloads})")
+        
+        # 顯示詳細分配結果 Log
+        local_count = len(mandatory_set)
+        global_count = len(target_disk) - local_count
+        sorted_provisioned_list = sorted(list(target_disk))
+        
+        logger.info(f"📊 [SP1 Result] {cluster_name}: Target {len(target_disk)}/{CAPACITY} LoRAs (New DLs: {new_downloads})")
+        logger.info(f"   ┣ Local (Mandatory): {local_count} models")
+        logger.info(f"   ┣ Global (Dynamic) : {global_count} models")
+        logger.info(f"   ┗ Provisioned List : {sorted_provisioned_list}")
 
     # 2. 發送並「阻塞等待」所有 Control Node 排空與重置
     logger.info("⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...")
@@ -335,7 +364,6 @@ async def run_sp1_provisioning_and_wait():
         for cluster_name, target_loras in cluster_targets.items():
             url = active_clusters[cluster_name]
             payload = {"loras": target_loras}
-            # 注意這裡呼叫的是新 API /apply_sp1_and_reset
             tasks.append(client.post(f"{url}/apply_sp1_and_reset", json=payload))
         
         if tasks:
@@ -351,7 +379,7 @@ async def run_sp1_provisioning_and_wait():
     logger.info("✨ All clusters have applied SP1 and are ready for the next time step.")
 
 # ============================================================
-# Background Tasks (Event Loops)
+# Background Tasks & Lifecycle
 # ============================================================
 async def sp2_routing_loop():
     await system_start_event.wait()
@@ -360,9 +388,6 @@ async def sp2_routing_loop():
         await asyncio.sleep(SP2_INTERVAL_SECONDS)
         await sync_global_routing()
 
-# ============================================================
-# Lifecycle & API Endpoints
-# ============================================================
 class RegisterClusterRequest(BaseModel):
     cluster_name: str
     control_node_url: str
@@ -404,20 +429,15 @@ async def trigger_time_edge():
     """
     global current_time_step
     
-    # 第一次呼叫時，解鎖背景迴圈 (SP2 Routing & Metrics)
     if not system_start_event.is_set():
         system_start_event.set()
         logger.info("🚀 System initialized via first /time_edge trigger!")
 
     logger.info(f"\n{'='*50}\n⏱️ [TIME EDGE] Advancing to Time Step {current_time_step}\n{'='*50}")
     
-    # 1. 精準讀取 CSV (只取 Active Clusters)
     exact_csv_forecasting(current_time_step)
-    
-    # 2. 執行 SP1 計算，並「等待」所有 Control Node 排空與重置
     await run_sp1_provisioning_and_wait()
     
-    # 3. 推進時間步，回傳成功給 test_simulation.py 讓其開始發送請求
     completed_step = current_time_step
     current_time_step += 1
     
@@ -429,4 +449,4 @@ async def trigger_time_edge():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 9900)))
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 9100)))

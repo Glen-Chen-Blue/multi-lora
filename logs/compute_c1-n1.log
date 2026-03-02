@@ -1,26 +1,19 @@
-INFO:     Started server process [68442]
+INFO:     Started server process [73140]
 INFO:     Waiting for application startup.
-2026-03-02 17:46:55,913 [INFO] ComputeNode: Initializing Compute Node c1-n1 (Research Note Config: Merged=15, Unmerged=12)...
-2026-03-02 17:46:55,913 [INFO] ComputeNode: 🚀 Engine loop started.
-2026-03-02 17:46:55,913 [INFO] ComputeNode: 🔄 Attempting to register to Control Node at http://127.0.0.1:9000 with my URL: http://127.0.0.1:8001
+2026-03-02 18:05:00,182 [INFO] ComputeNode: Initializing Compute Node c1-n1 (Research Note Config: Merged=15, Unmerged=12)...
+2026-03-02 18:05:00,182 [INFO] ComputeNode: 🚀 Engine loop started.
+2026-03-02 18:05:00,182 [INFO] ComputeNode: 🔄 Attempting to register to Control Node at http://127.0.0.1:9000 with my URL: http://127.0.0.1:8001
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
-2026-03-02 17:46:55,927 [INFO] httpx: HTTP Request: POST http://127.0.0.1:9000/register_node "HTTP/1.1 200 OK"
-2026-03-02 17:46:55,927 [INFO] ComputeNode: ✅ Successfully registered to Control Node!
-2026-03-02 17:46:55,929 [INFO] ComputeNode: 🔄 狀態變更為: standby
+2026-03-02 18:05:00,196 [INFO] httpx: HTTP Request: POST http://127.0.0.1:9000/register_node "HTTP/1.1 200 OK"
+2026-03-02 18:05:00,196 [INFO] ComputeNode: ✅ Successfully registered to Control Node!
+2026-03-02 18:05:00,197 [INFO] ComputeNode: 🔄 狀態變更為: standby
 🟢 [Engine] Running in PURE SIMULATION MODE (No GPU/PyTorch required).
-INFO:     127.0.0.1:37214 - "POST /set_status HTTP/1.1" 200 OK
-2026-03-02 17:47:06,239 [WARNING] ComputeNode: 🚨 [SP1 Sync] NODE RESET TRIGGERED! Clearing VRAM and Memory Cache...
-INFO:     127.0.0.1:37214 - "POST /reset HTTP/1.1" 200 OK
-2026-03-02 17:47:07,877 [INFO] ComputeNode: 🔄 狀態變更為: active
-INFO:     127.0.0.1:37214 - "POST /set_status HTTP/1.1" 200 OK
-2026-03-02 17:47:25,885 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
-INFO:     127.0.0.1:37214 - "POST /drain HTTP/1.1" 200 OK
-2026-03-02 17:47:25,920 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
-2026-03-02 17:47:31,891 [INFO] ComputeNode: 🔄 狀態變更為: active
-INFO:     127.0.0.1:37214 - "POST /set_status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47252 - "POST /set_status HTTP/1.1" 200 OK
+2026-03-02 18:05:06,711 [WARNING] ComputeNode: 🚨 [SP1 Sync] NODE RESET TRIGGERED! Clearing VRAM and Memory Cache...
+INFO:     127.0.0.1:47252 - "POST /reset HTTP/1.1" 200 OK
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
-2026-03-02 17:48:33,754 [INFO] ComputeNode: Shutting down...
+2026-03-02 18:05:10,517 [INFO] ComputeNode: Shutting down...
 INFO:     Application shutdown complete.
-INFO:     Finished server process [68442]
+INFO:     Finished server process [73140]

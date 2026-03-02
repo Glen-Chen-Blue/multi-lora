@@ -1,279 +1,41 @@
-INFO:     Started server process [68407]
+INFO:     Started server process [73111]
 INFO:     Waiting for application startup.
-2026-03-02 17:46:53,868 [INFO] CONTROL: 🔄 Registering with EFO at http://127.0.0.1:9900...
-2026-03-02 17:46:53,874 [INFO] CONTROL: ✅ Successfully registered to EFO. Loaded 100 LoRA metadata entries.
-2026-03-02 17:46:53,874 [INFO] CONTROL: ⏳ SP2 Full-Function Scheduler loop started.
-2026-03-02 17:46:53,874 [INFO] CONTROL: ⚖️ Auto-Scaling Monitor started.
-2026-03-02 17:46:53,874 [INFO] CONTROL: 📊 Cluster Metrics Polling started (10s interval).
+2026-03-02 18:04:58,138 [INFO] CONTROL: 🔄 Registering with EFO at http://127.0.0.1:9900...
+2026-03-02 18:04:58,144 [INFO] CONTROL: ✅ Successfully registered to EFO. Loaded 100 LoRA metadata entries.
+2026-03-02 18:04:58,144 [INFO] CONTROL: ⏳ SP2 Full-Function Scheduler loop started.
+2026-03-02 18:04:58,144 [INFO] CONTROL: ⚖️ Auto-Scaling Monitor started.
+2026-03-02 18:04:58,144 [INFO] CONTROL: 📊 Cluster Metrics Polling started (10s interval).
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:9002 (Press CTRL+C to quit)
-2026-03-02 17:46:55,895 [INFO] CONTROL: ✅ Registered Node: http://127.0.0.1:8022 | Assigned Status: active
-INFO:     127.0.0.1:56378 - "POST /register_node HTTP/1.1" 200 OK
-2026-03-02 17:46:55,916 [INFO] CONTROL: ✅ Registered Node: http://127.0.0.1:8023 | Assigned Status: standby
-INFO:     127.0.0.1:56382 - "POST /register_node HTTP/1.1" 200 OK
-2026-03-02 17:46:55,941 [INFO] CONTROL: ✅ Registered Node: http://127.0.0.1:8021 | Assigned Status: standby
-INFO:     127.0.0.1:56384 - "POST /register_node HTTP/1.1" 200 OK
-2026-03-02 17:47:06,234 [INFO] CONTROL: 🛑 [SP1 Sync] Initiating system drain & reset...
-2026-03-02 17:47:06,237 [INFO] CONTROL: 🚰 [SP1 Sync] System completely drained. Resetting compute nodes...
-2026-03-02 17:47:06,239 [INFO] CONTROL: ✅ [SP1 Sync] New configuration applied. Target LoRAs: ['LoRA_95', 'LoRA_100', 'LoRA_94', 'LoRA_93', 'LoRA_91', 'LoRA_99', 'LoRA_97', 'LoRA_96', 'LoRA_92', 'LoRA_98']
-2026-03-02 17:47:06,239 [INFO] CONTROL: ▶️ [SP1 Sync] System resumed. Ready for next interval.
-INFO:     127.0.0.1:60264 - "POST /apply_sp1_and_reset HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60286 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60294 - "POST /send_request HTTP/1.1" 200 OK
-2026-03-02 17:47:06,265 [WARNING] CONTROL: 🚨 [Backpressure] Capacity exhausted! Broadcasting HALT to other clusters.
-INFO:     127.0.0.1:60294 - "GET /stream/32a75fd7-ce7d-44e8-91b9-9a2bea0e8af7 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60286 - "GET /stream/9e46471c-5f3e-467a-9c20-a59b5700b353 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60296 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60308 - "POST /emergency_halt HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60296 - "GET /stream/ede917fa-683c-4a0e-b7db-c54b39b570be HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60316 - "POST /emergency_halt HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60330 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60330 - "GET /stream/8e3eb0b5-e8db-4a72-8f03-25229fc51947 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60342 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60342 - "GET /stream/275073f1-6a88-4fec-b1cd-f53b055fdb22 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60348 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60348 - "GET /stream/b4707574-7aea-4ab5-810c-24d7f59c7e5d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60356 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60356 - "GET /stream/66f60be6-ec3b-4bd4-94f5-04f05831b5c1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60376 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60376 - "GET /stream/42ffc472-d119-41eb-9e31-0821a38cad76 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60378 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60378 - "GET /stream/cd26638d-697c-4014-9ddb-079c99cc4ca2 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60390 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60390 - "GET /stream/ccb8df34-1325-41a0-b9a4-062fcf685dbe HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60406 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60406 - "GET /stream/ed66dee9-e99c-4f34-8b0b-610920ddcbf6 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60412 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60412 - "GET /stream/9f14bbc4-d6cd-4ffd-a75f-156f9d589d9d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45298 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45298 - "GET /stream/9521249b-7f22-4ce4-88cd-25272b3408dc HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45304 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45304 - "GET /stream/206aa56e-ad58-426f-8897-474778aba883 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45318 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45318 - "GET /stream/452910db-6839-4b16-91eb-aa5b51b33499 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45320 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45320 - "GET /stream/44d46eff-2a5b-4ce2-9fa4-309fc9ded1d6 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45334 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45334 - "GET /stream/21a19542-f14c-40a5-b322-ebd22ecec43b HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45356 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45356 - "GET /stream/0108d333-3bd4-41a5-921e-1e8119b98964 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45358 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45358 - "GET /stream/bf8e8798-c092-49b4-929f-3ec4f102a792 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45362 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45362 - "GET /stream/e8d7ee1b-2eec-4035-9a2b-455cddf65cf0 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45368 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45368 - "GET /stream/469379e0-64aa-4615-b66b-fbea3c2205e5 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45370 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45370 - "GET /stream/e1897171-3da8-4d4d-a2eb-edca35aa3ac0 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45378 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45378 - "GET /stream/b2aabf31-fd85-4d16-ad99-dd136c7c7c07 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45394 - "POST /emergency_halt HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45402 - "POST /send_request HTTP/1.1" 200 OK
-2026-03-02 17:47:17,505 [WARNING] CONTROL: 🚨 [Backpressure] Capacity exhausted! Broadcasting HALT to other clusters.
-INFO:     127.0.0.1:45402 - "GET /stream/5cb6c897-7bc7-4df6-83c5-a76e3ce4c2ff HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45412 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45412 - "GET /stream/81e08198-8f19-4a1b-95e1-8598e7721fc9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45418 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45418 - "GET /stream/ce8fd4a1-2548-49e7-8f14-9190c78cc9e1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45420 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45420 - "GET /stream/50500196-adb1-468d-bb6a-5b2d98e777d3 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45442 - "POST /send_request HTTP/1.1" 200 OK
-2026-03-02 17:47:18,742 [WARNING] CONTROL: 🚨 [Backpressure] Capacity exhausted! Broadcasting HALT to other clusters.
-INFO:     127.0.0.1:45442 - "GET /stream/d842d15d-6bec-4ad5-9ed6-23d7f120e06c HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45450 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45450 - "GET /stream/d8a547a7-4068-4f20-a5f1-08d1ad18cca7 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45466 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45466 - "GET /stream/fe41eff2-b34d-47fb-bc6c-eb9449c692b6 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45476 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45476 - "GET /stream/84ca61da-2d93-4566-a654-8b55c926c392 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45488 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45488 - "GET /stream/088d7d4d-0a58-4071-8249-fc8cf61e23ef HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45490 - "POST /emergency_halt HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45494 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45494 - "GET /stream/b007fa17-5a75-4080-b3de-c5bf89bf5019 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45504 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45504 - "GET /stream/f31b1950-2c2b-4a07-8a6c-ce4a9a708540 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:45522 - "POST /emergency_halt HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52244 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52244 - "GET /stream/a030ef23-a10a-4c5a-abee-eeb6904ea2f7 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52262 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52262 - "GET /stream/7e5a03db-ad28-4069-b4a1-efd6c1036cac HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52288 - "POST /send_request HTTP/1.1" 200 OK
-2026-03-02 17:47:28,218 [WARNING] CONTROL: 🚨 [Backpressure] Capacity exhausted! Broadcasting HALT to other clusters.
-INFO:     127.0.0.1:52288 - "GET /stream/7066e1b4-39f0-4726-8c43-9328cdd57449 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52292 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52292 - "GET /stream/98a3d87e-e768-4e52-8e74-8074f2d7e537 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52306 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52306 - "GET /stream/cb524a02-1236-40db-bf3b-72112a7603e1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52310 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52310 - "GET /stream/9db130e4-684f-4c38-ae52-c232e15e1477 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52326 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52326 - "GET /stream/261604c0-2aa4-49db-8bda-712fc5a14a51 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56494 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56494 - "GET /stream/ae9d7d18-4ba2-4af5-9c7e-49d3d3ce6f34 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56506 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56506 - "GET /stream/49da488f-62f8-49b1-86a9-bd29442e868b HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56522 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56522 - "GET /stream/8917814d-17e7-4b19-843d-fa00dc4c155f HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56530 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56530 - "GET /stream/da09bd4d-69f9-46da-b2a5-57fd5f54cffb HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56532 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56532 - "GET /stream/8f469c67-cd71-4cda-959e-59f57501df56 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56536 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56536 - "GET /stream/a54957a0-4460-4458-86db-385a8e842d93 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56544 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56544 - "GET /stream/1654c019-9e32-4aa7-8242-ff3b0fdf8b61 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56562 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56562 - "GET /stream/80f79eaf-8208-4b63-8cc9-355b2dcd506a HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56578 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56578 - "GET /stream/7e5d8410-072b-496d-9bf4-cb7049612cb2 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56594 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56594 - "GET /stream/6603c17a-65de-4951-b595-d46a1ea669cd HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49560 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49560 - "GET /stream/368a7b2f-d339-4560-86c8-aa808ee351ff HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49568 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49568 - "GET /stream/92893064-e7f7-4719-90b3-c8c6e291ee5e HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49572 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49572 - "GET /stream/f7b5f51d-6f27-4558-b711-e998737261df HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49576 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49576 - "GET /stream/4e5c4d6d-f048-41e8-8a9b-0d38efdb78f7 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49584 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49584 - "GET /stream/4cda5eea-5e03-4184-b8fe-e1948d41f848 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49594 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49594 - "GET /stream/d9f7c41c-e8dd-4673-8f9d-eb3f05827daf HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49604 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49604 - "GET /stream/ba8af192-8bc4-4fc7-8bae-f1bb25d0c982 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49610 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49610 - "GET /stream/b8f6f8dd-a141-40b6-9624-bb944f108770 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49640 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49640 - "GET /stream/fb277260-1bec-4ffa-80a0-c1ba645c4087 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49642 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49642 - "GET /stream/247651f7-aaad-4777-8f08-4b41988bd026 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49644 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49644 - "GET /stream/32bf37cd-7432-4099-8fef-bb1b52150f9b HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49660 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49660 - "GET /stream/9855aeef-cb52-4771-8733-6d08248f26a1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56148 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56148 - "GET /stream/5d3901d1-23ce-43a3-a2c7-f60bafd99278 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56150 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56150 - "GET /stream/9b090cdb-4d69-4a48-b2b8-45d58b5688f4 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56164 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56164 - "GET /stream/e8080cc7-8939-4951-a62f-a70f5661fed8 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56176 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56176 - "GET /stream/779b16e3-5e35-4d52-908c-25cf205a510e HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56188 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56188 - "GET /stream/504b4163-e31d-490a-ac71-c42f840676b1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56190 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56190 - "GET /stream/d6bc5af7-6a9b-4e9f-a843-9d12a2852dbc HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56198 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56198 - "GET /stream/ee4410c4-4e12-4003-8cc2-044575778d05 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56212 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56212 - "GET /stream/ae9875d5-ad65-43f4-9407-0d241a825d61 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56220 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56220 - "GET /stream/c63a758b-4969-4030-b51d-166c7a6375e3 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56246 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56246 - "GET /stream/958d20a2-9b78-4c85-9eac-4b0afed45f56 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56258 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56258 - "GET /stream/93c04eb3-48dd-45e4-9dda-861c9bdf65ce HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56260 - "POST /send_request HTTP/1.1" 200 OK
-2026-03-02 17:47:58,146 [WARNING] CONTROL: 🚨 [Backpressure] Capacity exhausted! Broadcasting HALT to other clusters.
-INFO:     127.0.0.1:56260 - "GET /stream/6c118c3e-736c-4ab8-a907-6e73ebbfafdc HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56266 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56266 - "GET /stream/ae213c3a-1c5c-4b95-9edc-52881fa2a885 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56268 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56268 - "GET /stream/7cf61e08-54c8-4037-a90a-e0463bfe33a8 HTTP/1.1" 200 OK
-2026-03-02 17:47:58,889 [INFO] CONTROL: 🚨 [Scale Up] Z=8.30, Drops=3
-2026-03-02 17:47:58,891 [INFO] CONTROL: 🚀 [Scale Up] 成功喚醒待機節點: http://127.0.0.1:8023
-INFO:     127.0.0.1:56272 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56272 - "GET /stream/c2d8d599-f12a-4398-aa85-25d894e2340f HTTP/1.1" 200 OK
-2026-03-02 17:47:59,194 [INFO] CONTROL: ✅ Mode Switch /merge Success: http://127.0.0.1:8022
-INFO:     127.0.0.1:56278 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56278 - "GET /stream/a43227df-5c08-4a34-93d4-6543f552a326 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56284 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56284 - "GET /stream/f6d6b20d-b544-43bc-8923-2c157a200311 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56312 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56312 - "GET /stream/91933440-142a-4d3a-b9dc-01ad5f15ecee HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56320 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56320 - "GET /stream/05deeb22-aecc-42a8-9339-17b9f3976899 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53636 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53636 - "GET /stream/d2660421-52e0-4b34-aeee-1b44567e994d HTTP/1.1" 200 OK
-2026-03-02 17:48:05,794 [INFO] CONTROL: ✅ Mode Switch /unmerge Success: http://127.0.0.1:8022
-INFO:     127.0.0.1:53680 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53680 - "GET /stream/ffbb6a4a-233e-47ac-b673-ddd7bb731aa1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53696 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53696 - "GET /stream/3fbd7635-0246-46d5-8726-68c8ce6d76b7 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53708 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53708 - "GET /stream/393cd9bd-c9bd-4d67-8f07-a921dfe2f2fe HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53714 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53714 - "GET /stream/24e6c6bf-d497-49ad-a9b2-bdbd334e20e9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53742 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53742 - "GET /stream/608ac99e-c634-46d6-ae22-02894121f52f HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53754 - "POST /send_request HTTP/1.1" 200 OK
-2026-03-02 17:48:12,157 [WARNING] CONTROL: 🚨 [Backpressure] Capacity exhausted! Broadcasting HALT to other clusters.
-INFO:     127.0.0.1:53754 - "GET /stream/1a11ea81-7633-42b0-b443-5ffa6f9d8ace HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53764 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53764 - "GET /stream/8462e10e-a214-423c-8ea3-9bf696af9ad3 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58298 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58298 - "GET /stream/4a1028fc-0c9a-48b2-a2cf-c0180d706688 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58312 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58312 - "GET /stream/8e0d968d-b4aa-4baa-9f18-449fdb1ab1da HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58326 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58326 - "GET /stream/8a4c4499-ebb3-43ab-b7d1-2932e8853c4b HTTP/1.1" 200 OK
-2026-03-02 17:48:13,896 [INFO] CONTROL: 🚰 [Scale Down] 節點進入 Draining: http://127.0.0.1:8023
-INFO:     127.0.0.1:58330 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58330 - "GET /stream/0d1e8c7c-5c7e-4046-a34e-6367d2106d1b HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58340 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58340 - "GET /stream/84879969-f45a-41ed-9f93-7d9095630ccb HTTP/1.1" 200 OK
-2026-03-02 17:48:14,397 [INFO] CONTROL: ❄️ [Scale Down] 節點已完全排空，自動轉為 Standby: http://127.0.0.1:8023
-INFO:     127.0.0.1:58346 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58346 - "GET /stream/6a55231e-5b5f-46b9-a306-7c335f29ac33 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58358 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58358 - "GET /stream/3b6de5ec-80a4-49df-810d-bb8812fb0ceb HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58374 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58374 - "GET /stream/889757f8-bdde-47e3-bc33-691b5ac54e3d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58390 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58390 - "GET /stream/06bdeb37-0de5-47ee-b91d-46b67001bb33 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58410 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58410 - "GET /stream/0bdec5ad-55d5-4551-a91e-d445615a9a0c HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58416 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58416 - "GET /stream/ca5f2e22-338c-4574-8edf-f8cd8b8b98c8 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58428 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58428 - "GET /stream/24681a8c-e804-42fa-8075-6499a4a20ec9 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58432 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58432 - "GET /stream/f89dabec-d4b2-4d2d-877f-d73c641a24a3 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58450 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58450 - "GET /stream/371bd138-9aae-42df-9b2c-269f60b14eaf HTTP/1.1" 200 OK
-INFO:     127.0.0.1:41980 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:41980 - "GET /stream/76541885-15d1-4fe7-98bb-0e1b1f7022dc HTTP/1.1" 200 OK
-INFO:     127.0.0.1:41990 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:41990 - "GET /stream/fbdd47c1-1f8a-477f-9187-b2a81312852d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42002 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42002 - "GET /stream/f206150d-9c6c-4206-a195-39a23f68ae0b HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42004 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42004 - "GET /stream/8953e4df-9cf6-4a4d-b6b9-03f1381ef75a HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42012 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42012 - "GET /stream/75e1b70e-02d8-4a96-8b9a-b8d576b9a871 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42024 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42024 - "GET /stream/d9544a85-4f7a-4a17-a198-0d1ff364bde2 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42026 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42026 - "GET /stream/dcc09d10-33e5-4622-a084-da27e83d64cb HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42042 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42042 - "GET /stream/9579c49d-0871-437b-9072-c425b18cd075 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42050 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42050 - "GET /stream/8307b706-a3ed-423c-8b8a-e17850352dfb HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42056 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42056 - "GET /stream/9430d676-1672-4565-a0bd-a87fa10be3d3 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42072 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42072 - "GET /stream/4377e7c4-0b8e-4ffa-baf1-5d938e396439 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42078 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42078 - "GET /stream/cb23adcf-3db2-488d-b1a8-46c876077a91 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42084 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42084 - "GET /stream/6bd08f72-23fe-4e47-919d-d3d49c191a4d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42096 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42096 - "GET /stream/157d1872-ce95-40d7-8a24-0a0a71101845 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42106 - "POST /send_request HTTP/1.1" 200 OK
-INFO:     127.0.0.1:42106 - "GET /stream/0736b4cb-2d60-4132-9b4e-08222f05defb HTTP/1.1" 200 OK
+2026-03-02 18:05:00,166 [INFO] CONTROL: ✅ Registered Node: http://127.0.0.1:8023 | Assigned Status: active
+INFO:     127.0.0.1:50204 - "POST /register_node HTTP/1.1" 200 OK
+2026-03-02 18:05:00,167 [INFO] CONTROL: ✅ Registered Node: http://127.0.0.1:8021 | Assigned Status: standby
+INFO:     127.0.0.1:50216 - "POST /register_node HTTP/1.1" 200 OK
+2026-03-02 18:05:00,258 [INFO] CONTROL: ✅ Registered Node: http://127.0.0.1:8022 | Assigned Status: standby
+INFO:     127.0.0.1:50222 - "POST /register_node HTTP/1.1" 200 OK
+2026-03-02 18:05:06,705 [INFO] CONTROL: 🛑 [SP1 Sync] Initiating system drain & reset...
+2026-03-02 18:05:06,709 [INFO] CONTROL: 🚰 [SP1 Sync] System completely drained. Resetting compute nodes...
+2026-03-02 18:05:06,711 [INFO] CONTROL: ✅ [SP1 Sync] New configuration applied. Target LoRAs: ['LoRA_92', 'LoRA_98', 'LoRA_95', 'LoRA_99', 'LoRA_93', 'LoRA_94', 'LoRA_97', 'LoRA_96', 'LoRA_100', 'LoRA_91']
+2026-03-02 18:05:06,711 [INFO] CONTROL: ▶️ [SP1 Sync] System resumed. Ready for next interval.
+INFO:     127.0.0.1:44002 - "POST /apply_sp1_and_reset HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44016 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44026 - "POST /send_request HTTP/1.1" 200 OK
+2026-03-02 18:05:06,736 [WARNING] CONTROL: 🚨 [Backpressure] Capacity exhausted! Broadcasting HALT to other clusters.
+INFO:     127.0.0.1:44016 - "GET /stream/f8d9f124-8b17-44d8-a7f9-ef43805f9c43 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44026 - "GET /stream/0aa59e12-2c14-47d7-bb5e-e6c910fe2b30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44028 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44042 - "POST /emergency_halt HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44056 - "POST /emergency_halt HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44028 - "GET /stream/56f438f6-06dd-42a0-8f7c-f8a7f4e3e522 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44070 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44070 - "GET /stream/0da7a7b1-c9c6-4c55-aa57-9aa1468d2e87 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44074 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44074 - "GET /stream/d00db3e1-4f45-4352-bc6a-4e5fd01c4b33 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44080 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44080 - "GET /stream/a011e41a-da60-4ca4-9884-16e4ac9c818a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44092 - "POST /send_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44092 - "GET /stream/aa382ffd-7a28-422a-ac31-1461ac003bcf HTTP/1.1" 200 OK
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [68407]
+INFO:     Finished server process [73111]
