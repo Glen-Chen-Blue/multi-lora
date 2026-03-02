@@ -61,16 +61,15 @@ start() {
   echo "🧹 Cleaning target ports..."
 
   kill_port 9900
-  for p in {9000..9002}; do kill_port $p; done
-  for p in {8001..8003}; do kill_port $p; done
-  for p in {8011..8013}; do kill_port $p; done
-  for p in {8021..8023}; do kill_port $p; done
+  kill_port 9000
+  kill_port 8001
+  kill_port 8002
 
-  echo "=== Phase 1: Infrastructure Test (Dynamic Registration Mode) ==="
+  echo "=== Phase 1: Infrastructure Test (Single Cluster Mode) ==="
 
   echo "🚀 Starting EFO (Port 9900)..."
   PORT=9900 \
-  CLUSTERS='{"cluster_1":"http://127.0.0.1:9000","cluster_2":"http://127.0.0.1:9001","cluster_3":"http://127.0.0.1:9002"}' \
+  CLUSTERS='{"cluster_1":"http://127.0.0.1:9000"}' \
   uvicorn EFO_server:app --host 0.0.0.0 --port 9900 \
   >> logs/efo.log 2>&1 &
   PIDS+=($!)
@@ -78,7 +77,7 @@ start() {
   sleep 5
 
   echo "🚀 Starting Control Nodes..."
-  for c in 1 2 3; do
+  for c in 1; do
     CTRL_PORT=$((8999 + c))
     echo "   -> Control Node cluster_$c (Port $CTRL_PORT)"
     
@@ -94,16 +93,18 @@ start() {
   sleep 2
 
   echo "🚀 Starting Compute Nodes..."
-  for c in 1 2 3; do
+  for c in 1; do
     CTRL_PORT=$((8999 + c))
     echo "   --- Cluster $c (Connecting to Control Node $CTRL_PORT) ---"
     
-    for n in 1 2 3; do
+    for n in 1 2; do
       COMP_PORT=$(( 8000 + (c-1)*10 + n ))
       NODE_ID="c${c}-n${n}"
+      GPU_ID=$((n-1)) # 自動分配 GPU：n=1 給 GPU 0, n=2 給 GPU 1
       
-      echo "      -> Compute Node $NODE_ID (Port $COMP_PORT)"
+      echo "      -> Compute Node $NODE_ID (Port $COMP_PORT, GPU $GPU_ID)"
       
+      CUDA_VISIBLE_DEVICES=$GPU_ID \
       NODE_ID=$NODE_ID \
       CONTROL_NODE_URL="http://127.0.0.1:$CTRL_PORT" \
       PORT=$COMP_PORT \

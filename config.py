@@ -27,11 +27,18 @@ MAX_CPU_LORAS = 30           # Host Memory (CPU RAM) 最多可快取的 LoRA 數
 # ------------------------------------------------------------
 # 3. 模擬引擎延遲與速度常數 (Simulation Engine Latencies)
 # ------------------------------------------------------------
-SIM_LOAD_DELAY = 0.200           # 從 Disk 載入到 Host Memory 的 I/O 延遲 (秒)
-SIM_PREFILL_BASE_TIME = 0.050    # Prefill 階段處理單一請求的基礎時間 (秒)
+# SIM_LOAD_DELAY = 0.200           # 從 Disk 載入到 Host Memory 的 I/O 延遲 (秒)
+# SIM_PREFILL_BASE_TIME = 0.050    # Prefill 階段處理單一請求的基礎時間 (秒)
+# SIM_DECODE_BASE_TIME = 0.025     # Decode 階段產生單一 Token 的基礎時間 (秒)
+# SIM_DECODE_SLOPE = 0.0012        # Decode 階段受 Batch Size 影響的斜率 (增加的干擾時間)
+# MERGE_SPEED_MULTIPLIER = 0.8     # 當處於 Merged 模式時的運算加速/時間折扣乘數
+
+
+SIM_LOAD_DELAY = 0.066           # 從 Disk 載入到 Host Memory 的 I/O 延遲 (秒)
+SIM_PREFILL_BASE_TIME = 0.065    # Prefill 階段處理單一請求的基礎時間 (秒)
 SIM_DECODE_BASE_TIME = 0.025     # Decode 階段產生單一 Token 的基礎時間 (秒)
-SIM_DECODE_SLOPE = 0.0012        # Decode 階段受 Batch Size 影響的斜率 (增加的干擾時間)
-MERGE_SPEED_MULTIPLIER = 0.8     # 當處於 Merged 模式時的運算加速/時間折扣乘數
+SIM_DECODE_SLOPE = 0.0010        # Decode 階段受 Batch Size 影響的斜率 (增加的干擾時間)
+MERGE_SPEED_MULTIPLIER = 0.861     # 當處於 Merged 模式時的運算加速/時間折扣乘數
 
 # [衍生常數] 供 Control Node 預估 TTFT 使用
 SCHEDULER_OVERHEAD = 0.010       # Control Node 排程與派發的基礎開銷

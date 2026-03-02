@@ -1,28 +1,30 @@
-INFO:     Started server process [2403690]
+/home/glenchen/miniconda3/envs/myenv/lib/python3.10/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+INFO:     Started server process [18724]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-INFO:     Uvicorn running on http://0.0.0.0:9100 (Press CTRL+C to quit)
-2026-02-26 15:46:45,210 [INFO] EFO: 🔗 Cluster Registered: cluster_3
-INFO:     127.0.0.1:45442 - "POST /register_cluster HTTP/1.1" 200 OK
-2026-02-26 15:46:45,223 [INFO] EFO: 🔗 Cluster Registered: cluster_2
-INFO:     127.0.0.1:45452 - "POST /register_cluster HTTP/1.1" 200 OK
-2026-02-26 15:46:45,231 [INFO] EFO: 🔗 Cluster Registered: cluster_1
-INFO:     127.0.0.1:45454 - "POST /register_cluster HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59748 - "POST /start HTTP/1.1" 200 OK
-2026-02-26 15:46:51,863 [INFO] EFO: 🚀 System Started! Running initial SP1 Pipeline...
-2026-02-26 15:46:51,864 [INFO] EFO: 🧠 LSTM Forecasting Start... (Simulated Hour: 48)
-2026-02-26 15:46:52,226 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning...
-2026-02-26 15:46:52,239 [INFO] EFO: 📊 [SP1 Result] cluster_3: Total 12/50 LoRAs (New DLs: 12)
-2026-02-26 15:46:52,239 [INFO] EFO:    ┣ Mandatory (Local) : 10 models
-2026-02-26 15:46:52,239 [INFO] EFO:    ┗ Dynamic (Global)  : 2 models (Top: LoRA_70(U:0.21), LoRA_16(U:0.03))
-2026-02-26 15:46:52,240 [INFO] EFO: 📊 Global Metrics Polling started (60s interval).
-2026-02-26 15:46:52,250 [INFO] EFO: 📊 [SP1 Result] cluster_2: Total 16/50 LoRAs (New DLs: 16)
-2026-02-26 15:46:52,250 [INFO] EFO:    ┣ Mandatory (Local) : 10 models
-2026-02-26 15:46:52,250 [INFO] EFO:    ┗ Dynamic (Global)  : 6 models (Top: LoRA_24(U:0.69), LoRA_33(U:0.42), LoRA_1(U:0.11), LoRA_26(U:0.02), LoRA_5(U:0.01))
-2026-02-26 15:46:52,260 [INFO] EFO: 📊 [SP1 Result] cluster_1: Total 21/50 LoRAs (New DLs: 21)
-2026-02-26 15:46:52,260 [INFO] EFO:    ┣ Mandatory (Local) : 10 models
-2026-02-26 15:46:52,260 [INFO] EFO:    ┗ Dynamic (Global)  : 11 models (Top: LoRA_34(U:3.84), LoRA_47(U:0.36), LoRA_35(U:0.21), LoRA_55(U:0.11), LoRA_38(U:0.11))
+INFO:     Uvicorn running on http://0.0.0.0:9900 (Press CTRL+C to quit)
+2026-03-02 12:07:36,091 [INFO] EFO: 🔗 Cluster Registered: cluster_1
+INFO:     127.0.0.1:46840 - "POST /register_cluster HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40260 - "POST /start HTTP/1.1" 200 OK
+2026-03-02 12:07:42,880 [INFO] EFO: 🚀 System Started! Running initial SP1 Pipeline...
+2026-03-02 12:07:42,880 [INFO] EFO: 🧠 LSTM Forecasting Start... (Simulated Hour: 48)
+2026-03-02 12:07:43,051 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning...
+2026-03-02 12:07:43,062 [INFO] EFO: 📊 [SP1 Result] cluster_1: Total 27/50 LoRAs (New DLs: 27)
+2026-03-02 12:07:43,062 [INFO] EFO:    ┣ Mandatory (Local) : 10 models
+2026-03-02 12:07:43,062 [INFO] EFO:    ┗ Dynamic (Global)  : 17 models (Top: LoRA_34(U:179.45), LoRA_47(U:17.47), LoRA_35(U:10.15), LoRA_55(U:5.69), LoRA_38(U:5.59))
+2026-03-02 12:07:43,062 [INFO] EFO: 📊 Global Metrics Polling started (60s interval).
+2026-03-02 13:07:43,085 [INFO] EFO: 🧠 LSTM Forecasting Start... (Simulated Hour: 49)
+2026-03-02 13:07:43,182 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning...
+2026-03-02 13:07:43,192 [INFO] EFO: 📊 [SP1 Result] cluster_1: Total 25/50 LoRAs (New DLs: 1)
+2026-03-02 13:07:43,192 [INFO] EFO:    ┣ Mandatory (Local) : 10 models
+2026-03-02 13:07:43,192 [INFO] EFO:    ┗ Dynamic (Global)  : 15 models (Top: LoRA_34(U:228.98), LoRA_47(U:36.08), LoRA_35(U:32.76), LoRA_55(U:5.70), LoRA_17(U:2.85))
+2026-03-02 14:07:43,210 [INFO] EFO: 🧠 LSTM Forecasting Start... (Simulated Hour: 50)
+2026-03-02 14:07:43,308 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning...
+2026-03-02 14:07:43,318 [INFO] EFO: 📊 [SP1 Result] cluster_1: Total 21/50 LoRAs (New DLs: 2)
+2026-03-02 14:07:43,318 [INFO] EFO:    ┣ Mandatory (Local) : 10 models
+2026-03-02 14:07:43,318 [INFO] EFO:    ┗ Dynamic (Global)  : 11 models (Top: LoRA_55(U:5.03), LoRA_17(U:2.85), LoRA_35(U:2.40), LoRA_70(U:1.14), LoRA_42(U:1.14))
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [2403690]
+INFO:     Finished server process [18724]

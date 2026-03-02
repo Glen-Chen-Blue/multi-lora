@@ -2,7 +2,7 @@ import os
 import torch
 from safetensors.torch import save_file
 
-def generate_fake_lora(lora_name, base_dir="./testLoRA", r=16, num_layers=32):
+def generate_fake_lora(lora_name, base_dir="../testLoRA", r=16, num_layers=32):
     # LLaMA-3-8B 的維度常數
     hidden_size = 4096
     intermediate_size = 14336

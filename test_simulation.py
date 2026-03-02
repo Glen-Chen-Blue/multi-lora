@@ -13,7 +13,10 @@ TIMEOUT = 120
 # ===== NEW =====
 # SPEEDUP > 1.0 => replay faster (more req/sec).
 # SPEEDUP = 2.0 means timeline is compressed by 2x.
-SPEEDUP = 4.0
+SPEEDUP = 1.0
+
+# 只有在這個列表中的 Cluster 請求兩會被發送，其餘會被忽略
+TARGET_CLUSTERS = ["cluster_1"] 
 # ==============
 
 CLUSTER_PORT_MAP = {
@@ -42,11 +45,16 @@ df["arrival_sec"] = df["arrive_timestamp"].astype(float)
 df = df[df["arrival_sec"] >= START_OFFSET].copy()
 df["arrival_sec"] -= START_OFFSET
 df = df[df["arrival_sec"] <= RUN_DURATION]
+
+# 過濾出目標 Cluster 的請求
+df = df[df["cluster"].isin(TARGET_CLUSTERS)]
+
 df = df.sort_values("arrival_sec").reset_index(drop=True)
 
 TOTAL_REQUESTS = len(df)
 
 print(f"⏱ Replay Duration={RUN_DURATION}s (speedup={SPEEDUP}x, effective duration={RUN_DURATION / SPEEDUP:.2f}s)")
+print(f"🎯 Target Clusters: {TARGET_CLUSTERS}")
 print(f"📦 Requests={TOTAL_REQUESTS}")
 
 # ====================
@@ -136,12 +144,8 @@ async def main():
         tasks = []
 
         for i, row in df.iterrows():
-            # ===== NEW =====
-            # Compress the replay timeline by SPEEDUP:
-            # original arrival_sec=10s, SPEEDUP=2 => scheduled at 5s after start.
             scheduled_offset = float(row["arrival_sec"]) / SPEEDUP
             send_time = start + scheduled_offset
-            # ==============
 
             delay = send_time - time.time()
             if delay > 0:
