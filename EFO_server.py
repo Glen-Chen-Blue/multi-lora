@@ -3,6 +3,7 @@ import json
 import logging
 import asyncio
 import httpx
+import time
 import random
 import numpy as np
 from contextlib import asynccontextmanager
@@ -28,10 +29,25 @@ from config import (
 # ============================================================
 # Config & Logging
 # ============================================================
+class MetricsAccessFilter(logging.Filter):
+    def filter(self, record):
+        return "/cluster_metrics" not in record.getMessage()
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] EFO: %(message)s")
 logger = logging.getLogger("EFOServer")
 logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("uvicorn.access").addFilter(MetricsAccessFilter())
 CLUSTERS_ENV = os.environ.get("CLUSTERS", "{}")
+
+# ============================================================
+# 📊 EFO Global Metrics State
+# ============================================================
+class EFOMetrics:
+    def __init__(self):
+        self.lock = asyncio.Lock()
+        self.artifact_downloads = 0  # 累計下載次數 (對應 J_net,artifact)
+
+efo_metrics = EFOMetrics()
 
 # ============================================================
 # Global State & System Variables
@@ -142,6 +158,57 @@ async def sync_global_routing():
                 await client.post(f"{url}/update_global_routing", json={"routing_table": routing_table})
             except Exception as e:
                 pass
+
+# ============================================================
+# 📊 Global Metrics Polling (60s interval)
+# ============================================================
+async def poll_global_metrics():
+    await system_start_event.wait()
+    logger.info("📊 Global Metrics Polling started (60s interval).")
+    os.makedirs("logs", exist_ok=True)
+    log_file = "logs/efo_global_metrics.log"
+    
+    while True:
+        await asyncio.sleep(60)
+        
+        global_snapshot = {
+            "timestamp": time.time(),
+            "clusters": {},
+            "efo_totals": {
+                "total_inference_time": 0.0,
+                "total_drops": 0,
+                "total_offloads": 0,
+                "total_local_completed": 0,
+                "total_offload_completed": 0,
+                "artifact_downloads": 0,
+                "total_stored_loras": sum(len(loras) for loras in global_lora_disk_inventory.values())
+            }
+        }
+        
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            for cluster_name, url in active_clusters.items():
+                try:
+                    resp = await client.get(f"{url}/cluster_metrics")
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        global_snapshot["clusters"][cluster_name] = data
+                        
+                        # 匯總全域指標
+                        global_snapshot["efo_totals"]["total_inference_time"] += data.get("total_effective_inference_time", 0.0)
+                        global_snapshot["efo_totals"]["total_drops"] += (data.get("drop_queue", 0) + data.get("drop_slo", 0))
+                        global_snapshot["efo_totals"]["total_offloads"] += data.get("offload_out", 0)
+                        global_snapshot["efo_totals"]["total_local_completed"] += data.get("local_completed", 0)
+                        global_snapshot["efo_totals"]["total_offload_completed"] += data.get("offload_in_completed", 0)
+                except Exception as e:
+                    logger.error(f"❌ Failed to fetch metrics from {cluster_name}: {e}")
+        
+        # 讀取 EFO 本身的下載次數
+        async with efo_metrics.lock:
+            global_snapshot["efo_totals"]["artifact_downloads"] = efo_metrics.artifact_downloads
+        
+        # 寫入日誌檔
+        with open(log_file, "a") as f:
+            f.write(json.dumps(global_snapshot) + "\n")
 
 # ============================================================
 # SP1: Forecasting & Provisioning (1-hour interval)
@@ -299,6 +366,14 @@ async def run_sp1_provisioning():
                         utilities[lora_id] = u_v
 
             # ==========================================
+            # 📊 計算 Artifact Migration (新下載數量)
+            # ==========================================
+            new_downloads = len(target_disk - current_disk)
+            if new_downloads > 0:
+                async with efo_metrics.lock:
+                    efo_metrics.artifact_downloads += new_downloads
+
+            # ==========================================
             # 印出 SP1 決策結果與詳細資訊
             # ==========================================
             target_loras = list(target_disk)
@@ -312,7 +387,7 @@ async def run_sp1_provisioning():
             if not top_globals_str:
                 top_globals_str = "None (No Global LoRAs worth storing)"
             
-            logger.info(f"📊 [SP1 Result] {cluster_name}: Total {len(target_loras)}/{CAPACITY} LoRAs")
+            logger.info(f"📊 [SP1 Result] {cluster_name}: Total {len(target_loras)}/{CAPACITY} LoRAs (New DLs: {new_downloads})")
             logger.info(f"   ┣ Mandatory (Local) : {local_count} models")
             logger.info(f"   ┗ Dynamic (Global)  : {global_count} models (Top: {top_globals_str})")
 
@@ -381,6 +456,7 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(sp2_routing_loop())
     asyncio.create_task(sp1_provisioning_loop())
+    asyncio.create_task(poll_global_metrics())  # [Metrics] 啟動 60 秒聚合迴圈
     yield
         
 app = FastAPI(title="Edge Federation Orchestrator (EFO)", lifespan=lifespan)

@@ -34,9 +34,7 @@ SIM_DECODE_SLOPE = 0.0012        # Decode 階段受 Batch Size 影響的斜率 (
 MERGE_SPEED_MULTIPLIER = 0.8     # 當處於 Merged 模式時的運算加速/時間折扣乘數
 
 # [衍生常數] 供 Control Node 預估 TTFT 使用
-SCHEDULER_OVERHEAD = 0.100       # Control Node 排程與派發的基礎開銷
-# 預估 P95 Decode 速度：以滿載 12~13 個請求來估算 (0.025 + 0.0012 * 12.5) ≈ 0.040
-SIM_DECODE_P95_SPEED = SIM_DECODE_BASE_TIME + (SIM_DECODE_SLOPE * (UNMERGED_CAPACITY + 0.5))
+SCHEDULER_OVERHEAD = 0.010       # Control Node 排程與派發的基礎開銷
 
 # ------------------------------------------------------------
 # 4. Control Node - Lyapunov、QoE 與自動擴縮容超參數

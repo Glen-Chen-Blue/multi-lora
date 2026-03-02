@@ -31,7 +31,7 @@ from config import (
 class RoutingAccessFilter(logging.Filter):
     def filter(self, record):
         msg = record.getMessage()
-        return "/update_global_routing" not in msg and "/offload_status" not in msg
+        return "/update_global_routing" not in msg and "/offload_status" not in msg and "/cluster_metrics" not in msg
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] CONTROL: %(message)s")
 logger = logging.getLogger("ControlNode")
@@ -46,6 +46,39 @@ MY_URL = os.environ.get("CONTROL_NODE_URL", "http://127.0.0.1:9000")
 # 擴大連線池上限，避免突發流量導致 Socket 枯竭
 limits = httpx.Limits(max_keepalive_connections=200, max_connections=HTTP_MAX_CONNECTIONS)
 client = httpx.AsyncClient(limits=limits, timeout=60.0)
+
+# ============================================================
+# 📊 Metrics Collection State
+# ============================================================
+class ClusterMetrics:
+    def __init__(self):
+        self.lock = asyncio.Lock()
+        # 累積計數器 (供 EFO 算 Delta)
+        self.local_completed = 0
+        self.offload_in_completed = 0
+        self.drop_queue = 0
+        self.drop_slo = 0
+        self.offload_out = 0
+        # 即時數據
+        self.ttft_records: List[float] = []
+        self.latest_p95 = 0.0
+
+    async def record_ttft(self, ttft: float):
+        async with self.lock:
+            self.ttft_records.append(ttft)
+
+    async def calculate_p95_and_clear(self) -> float:
+        async with self.lock:
+            if self.ttft_records:
+                self.ttft_records.sort()
+                idx = int(0.95 * len(self.ttft_records))
+                idx = min(idx, len(self.ttft_records) - 1)
+                self.latest_p95 = self.ttft_records[idx]
+                self.ttft_records.clear()
+            return self.latest_p95
+
+cluster_metrics = ClusterMetrics()
+node_cumulative_inf_time: Dict[str, float] = {}
 
 # ============================================================
 # Lyapunov & Auto-Scaling Global States
@@ -95,10 +128,15 @@ class NodeManager:
             self.nodes[url]["metrics"] = metrics
             self.nodes[url]["last_seen"] = time.time()
             
+            # 更新 Compute Node 的有效推論時間
+            if "metrics" in metrics:
+                node_cumulative_inf_time[url] = metrics["metrics"].get("effective_inference_time", 0.0)
+            
             # 只有在節點完成排空任務時，才允許 Compute Node 的狀態覆寫 Control Node
             reported_status = metrics.get("status", "standby")
             if self.nodes[url]["status"] == "draining" and reported_status == "standby":
                 logger.info(f"❄️ [Scale Down] 節點已完全排空，自動轉為 Standby: {url}")
+                engine.unmerge_all()
                 self.nodes[url]["status"] = "standby"
             
     async def scale_up_one_node(self) -> bool:
@@ -241,9 +279,7 @@ def predict_cluster_ttft(nodes: List[VirtualNodeState], target_lora: str, global
     else:
         needed_to_finish = my_position - total_free
         
-        # [動態解碼速度計算] 拔除 Hardcode，使用節點實際設定容量
         if has_merged_node:
-            # 取第一個 Merge Node 的容量作為估算基準
             merge_node = next((n for n in nodes if n.mode == "merge"), nodes[0])
             assumed_batch = merge_node.capacity_merged 
             multiplier = MERGE_SPEED_MULTIPLIER
@@ -305,6 +341,10 @@ async def dispatch_task(v_node_url: str, req_data: dict, v_node_ptr: Optional[Vi
     user_data = stream_queues.get(rid)
     if not user_data: return
     user_q = user_data["q"]
+    
+    arrival_time = req_data.get("arrival_time", time.time())
+    is_delegated = req_data.get("is_delegated", False)
+    first_token_received = False
 
     try:
         payload = {"prompt": req_data["prompt"], "adapter_id": target_lora, "max_new_tokens": req_data.get("max_new_tokens", 256)}
@@ -313,15 +353,79 @@ async def dispatch_task(v_node_url: str, req_data: dict, v_node_ptr: Optional[Vi
                 if v_node_ptr: v_node_ptr.rollback_request(target_lora)
                 await user_q.put({"type": "error", "message": f"Node Error {resp.status_code}"})
                 return
+            
             async for line in resp.aiter_lines():
-                if line.startswith("data:") and user_q:
+                if line.startswith("data:"):
                     content = line[len("data:"):].strip()
-                    if content: await user_q.put(content)
+                    if content and content != "[DONE]":
+                        # [Metrics] 攔截第一個 Token，記錄 TTFT
+                        if not first_token_received:
+                            first_token_received = True
+                            ttft = time.time() - arrival_time
+                            await cluster_metrics.record_ttft(ttft)
+                        await user_q.put(content)
+                    elif content == "[DONE]":
+                        # [Metrics] 記錄完成次數
+                        async with cluster_metrics.lock:
+                            if is_delegated: cluster_metrics.offload_in_completed += 1
+                            else: cluster_metrics.local_completed += 1
+                        
     except Exception as e:
         if v_node_ptr: v_node_ptr.rollback_request(target_lora)
         if user_q: await user_q.put({"type": "error", "message": str(e)})
     finally:
         if user_q: await user_q.put(None)
+
+async def trigger_delegated_offload(target: dict, original_req: 'AddRequest', local_rid: str):
+    user_q = stream_queues.get(local_rid, {}).get("q")
+    if not user_q: return
+
+    arrival_time = original_req.arrival_time or time.time()
+    first_token_received = False
+
+    payload = {
+        "prompt": original_req.prompt,
+        "adapter_id": original_req.adapter_id,
+        "max_new_tokens": original_req.max_new_tokens,
+        "is_delegated": True,
+        "network_delay": target["delay_sec"]
+    }
+
+    try:
+        resp = await client.post(f"{target['url']}/send_request", json=payload, timeout=5.0)
+        if resp.status_code != 200:
+            await user_q.put({"type": "error", "message": f"Offload Target Rejected: HTTP {resp.status_code}"})
+            return
+
+        data = resp.json()
+        target_rid = data.get("request_id")
+        
+        async with client.stream("GET", f"{target['url']}/stream/{target_rid}", timeout=120.0) as stream_resp:
+            async for line in stream_resp.aiter_lines():
+                if line.startswith("data:"):
+                    content = line[len("data:"):].strip()
+                    if content == "[DONE]": 
+                        break
+                    elif content:
+                        try:
+                            content_obj = json.loads(content)
+                            if isinstance(content_obj, dict) and content_obj.get("type") == "error":
+                                await user_q.put(content_obj)
+                                break
+                        except: pass
+                        
+                        # [Metrics] 攔截第一個 Token，為來源端 User 記錄 TTFT
+                        if not first_token_received:
+                            first_token_received = True
+                            ttft = time.time() - arrival_time
+                            await cluster_metrics.record_ttft(ttft)
+                            
+                        await user_q.put(content)
+
+    except Exception as e:
+        await user_q.put({"type": "error", "message": f"Offload Proxy Exception: {str(e)}"})
+    finally:
+        await user_q.put(None)
 
 async def scheduler_loop():
     global global_request_list
@@ -346,7 +450,6 @@ async def scheduler_loop():
 
             for v in v_nodes:
                 if v.url in switching_nodes: continue 
-                # 依您需求保留飽和度切換規則 (>=10)
                 if v.mode == "unmerge" and unmerged_count > 1 and v.running_batch >= 10 and len(v.active_loras) == 1:
                     aid = next(iter(v.active_loras))
                     if len(request_queues[aid]) > 0:
@@ -422,7 +525,6 @@ async def auto_scaling_monitor():
         
         recent_valid_drops = get_recent_capacity_drops_count(6.0)
         
-        # 修正：只要近期丟棄數量達到閥值(>=)即可立刻擴容
         if Z_debt > (PSI_DROP * 0.8) and recent_valid_drops >= SCALE_UP_DROP_THRESHOLD:
             if now - last_scale_action_time > 6.0:
                 logger.info(f"🚨 [Scale Up] Z={Z_debt:.2f}, Drops={recent_valid_drops}")
@@ -451,6 +553,43 @@ async def auto_scaling_monitor():
                     surplus_duration = 0.0
 
 # ============================================================
+# 📊 Metrics Polling Loop (10s)
+# ============================================================
+async def poll_cluster_metrics():
+    logger.info("📊 Cluster Metrics Polling started (10s interval).")
+    os.makedirs("logs", exist_ok=True)
+    log_file = f"logs/control_{CLUSTER_NAME}_metrics.log"
+    
+    while True:
+        await asyncio.sleep(10)
+        
+        # 計算總有效推論時間 (匯總各 Compute Node 累積值)
+        total_inf_time = sum(node_cumulative_inf_time.values())
+        
+        # 結算這 10 秒區間的 P95 TTFT
+        p95 = await cluster_metrics.calculate_p95_and_clear()
+        
+        async with cluster_metrics.lock:
+            snapshot = {
+                "local_completed": cluster_metrics.local_completed,
+                "offload_in_completed": cluster_metrics.offload_in_completed,
+                "drop_queue": cluster_metrics.drop_queue,
+                "drop_slo": cluster_metrics.drop_slo,
+                "offload_out": cluster_metrics.offload_out,
+                "total_effective_inference_time": total_inf_time,
+                "p95_ttft": p95,
+                "z_debt": Z_debt
+            }
+            
+        with open(log_file, "a") as f:
+            log_entry = {
+                "timestamp": time.time(),
+                "cluster": CLUSTER_NAME,
+                "metrics": snapshot
+            }
+            f.write(json.dumps(log_entry) + "\n")
+
+# ============================================================
 # API Routes & Lifespan
 # ============================================================
 @asynccontextmanager
@@ -474,6 +613,7 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(scheduler_loop())
     asyncio.create_task(auto_scaling_monitor()) 
+    asyncio.create_task(poll_cluster_metrics()) # [Metrics] 啟動 10秒拉取迴圈
     
     async def cleanup_streams():
         while True:
@@ -493,6 +633,7 @@ class AddRequest(BaseModel):
     max_new_tokens: int = 256
     is_delegated: bool = False
     network_delay: float = 0.0
+    arrival_time: Optional[float] = None # [Metrics] 支援傳遞到達時間
 
 class UpdateLorasRequest(BaseModel):
     loras: List[str]
@@ -507,7 +648,6 @@ def select_best_offload_target(adapter_id: str) -> Optional[dict]:
     best_target = None
     best_score = float('inf')
 
-    # 1. 取得目標 LoRA 及其所有合法的替代模型 (Substitutes)
     meta = LORA_METADATA_TABLE.get(adapter_id, {})
     valid_aids = [adapter_id] + meta.get("substitutes", [])
 
@@ -521,8 +661,6 @@ def select_best_offload_target(adapter_id: str) -> Optional[dict]:
         loaded = set(lora_status.get("loaded", []))
         unloaded = set(lora_status.get("unloaded", []))
 
-        # 2. 檢查目標叢集是否擁有精確模型或替代模型，並給予對應的狀態懲罰
-        # 優先權：Merged > Loaded > Unloaded
         status_penalty = float('inf')
         
         if any(aid in merged for aid in valid_aids):
@@ -532,7 +670,6 @@ def select_best_offload_target(adapter_id: str) -> Optional[dict]:
         elif any(aid in unloaded for aid in valid_aids):
             status_penalty = 1.0
             
-        # 如果目標叢集完全沒有目標模型也沒有任何合法的替代模型，則跳過
         if status_penalty == float('inf'):
             continue
 
@@ -546,46 +683,6 @@ def select_best_offload_target(adapter_id: str) -> Optional[dict]:
             
     return best_target
 
-async def trigger_delegated_offload(target: dict, original_req: AddRequest, local_rid: str):
-    user_q = stream_queues.get(local_rid, {}).get("q")
-    if not user_q: return
-
-    payload = {
-        "prompt": original_req.prompt,
-        "adapter_id": original_req.adapter_id,
-        "max_new_tokens": original_req.max_new_tokens,
-        "is_delegated": True,
-        "network_delay": target["delay_sec"]
-    }
-
-    try:
-        resp = await client.post(f"{target['url']}/send_request", json=payload, timeout=5.0)
-        if resp.status_code != 200:
-            await user_q.put({"type": "error", "message": f"Offload Target Rejected: HTTP {resp.status_code}"})
-            return
-
-        data = resp.json()
-        target_rid = data.get("request_id")
-        
-        async with client.stream("GET", f"{target['url']}/stream/{target_rid}", timeout=120.0) as stream_resp:
-            async for line in stream_resp.aiter_lines():
-                if line.startswith("data:"):
-                    content = line[len("data:"):].strip()
-                    if content == "[DONE]": break
-                    elif content:
-                        try:
-                            content_obj = json.loads(content)
-                            if isinstance(content_obj, dict) and content_obj.get("type") == "error":
-                                await user_q.put(content_obj)
-                                break
-                        except: pass
-                        await user_q.put(content)
-
-    except Exception as e:
-        await user_q.put({"type": "error", "message": f"Offload Proxy Exception: {str(e)}"})
-    finally:
-        await user_q.put(None)
-
 @app.post("/update_local_loras")
 async def update_local_loras(req: UpdateLorasRequest):
     global LOCAL_AVAILABLE_LORAS
@@ -595,6 +692,10 @@ async def update_local_loras(req: UpdateLorasRequest):
 @app.post("/send_request")
 async def send_request(req: AddRequest):
     global Z_debt, can_accept_offload
+    
+    if req.arrival_time is None:
+        req.arrival_time = time.time()
+        
     rid = str(uuid.uuid4())
     stream_queues[rid] = {"q": asyncio.Queue(), "ts": time.time()}
 
@@ -603,6 +704,7 @@ async def send_request(req: AddRequest):
 
     if not meta or (is_local and meta.get("cluster") != CLUSTER_ID):
         logger.warning(f"🚫 [Drop] {rid[:8]} | Sovereignty Violation")
+        async with cluster_metrics.lock: cluster_metrics.drop_queue += 1
         await stream_queues[rid]["q"].put({"type": "error", "message": "Sovereignty Violation"})
         await stream_queues[rid]["q"].put(None)
         return {"request_id": rid}
@@ -635,6 +737,7 @@ async def send_request(req: AddRequest):
         if s_eff < 0:
             if req.is_delegated:
                 Z_debt = max(0.0, Z_debt + 1.0 - EPSILON) 
+                async with cluster_metrics.lock: cluster_metrics.drop_queue += 1
                 await stream_queues[rid]["q"].put({"type": "error", "message": "Delegated target overloaded."})
                 await stream_queues[rid]["q"].put(None)
                 return {"request_id": rid}
@@ -642,6 +745,7 @@ async def send_request(req: AddRequest):
             if is_local:
                 record_capacity_drop()
                 Z_debt = max(0.0, Z_debt + 1.0 - EPSILON)
+                async with cluster_metrics.lock: cluster_metrics.drop_slo += 1
                 await stream_queues[rid]["q"].put({"type": "error", "message": "System Congested (Local Drop)"})
                 await stream_queues[rid]["q"].put(None)
                 return {"request_id": rid}
@@ -650,11 +754,13 @@ async def send_request(req: AddRequest):
             if not target:
                 record_capacity_drop()
                 Z_debt = max(0.0, Z_debt + 1.0 - EPSILON)
+                async with cluster_metrics.lock: cluster_metrics.drop_queue += 1
                 await stream_queues[rid]["q"].put({"type": "error", "message": "System Congested (No Targets)"})
                 await stream_queues[rid]["q"].put(None)
                 return {"request_id": rid}
 
             logger.info(f"🌐 [Offload] Forwarding {rid[:8]} to {target['cluster_name']}")
+            async with cluster_metrics.lock: cluster_metrics.offload_out += 1
             asyncio.create_task(trigger_delegated_offload(target, req, rid))
             return {"request_id": rid}
         else:
@@ -662,7 +768,8 @@ async def send_request(req: AddRequest):
 
     req_obj = {
         "request_id": rid, "prompt": req.prompt, "adapter_id": req.adapter_id,
-        "original_aid": req.adapter_id, "max_new_tokens": req.max_new_tokens, "arrival_time": time.time()
+        "original_aid": req.adapter_id, "max_new_tokens": req.max_new_tokens, 
+        "arrival_time": req.arrival_time, "is_delegated": req.is_delegated
     }
     request_queues[req.adapter_id].append(req_obj)
     global_request_list.append({"request_id": rid, "original_aid": req.adapter_id, "arrival_time": req_obj["arrival_time"]})
@@ -700,6 +807,20 @@ async def status():
         "recent_drops": get_recent_capacity_drops_count(),
         "can_accept_offload": can_accept_offload
     }
+
+@app.get("/cluster_metrics")
+async def get_cluster_metrics():
+    """供 EFO (每 60 秒) 拉取的 API，回傳最新的累積計數與 P95 TTFT"""
+    async with cluster_metrics.lock:
+        return {
+            "local_completed": cluster_metrics.local_completed,
+            "offload_in_completed": cluster_metrics.offload_in_completed,
+            "drop_queue": cluster_metrics.drop_queue,
+            "drop_slo": cluster_metrics.drop_slo,
+            "offload_out": cluster_metrics.offload_out,
+            "total_effective_inference_time": sum(node_cumulative_inf_time.values()),
+            "latest_p95_ttft": cluster_metrics.latest_p95
+        }
 
 @app.get("/fetch_adapter/{adapter_id}")
 async def fetch(adapter_id: str): 

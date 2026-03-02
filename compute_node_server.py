@@ -52,6 +52,12 @@ client = httpx.AsyncClient(timeout=120.0)
 # [新增] 狀態機狀態：active | standby | draining
 current_status = "standby"
 
+# [新增] 累加型監控指標 (Cumulative Metrics)
+cumulative_metrics = {
+    "effective_inference_time": 0.0  # 累計的 Active Batching Time (秒)
+}
+metrics_lock = threading.Lock()
+
 # ============================================================
 # Background Registration Task
 # ============================================================
@@ -133,8 +139,16 @@ def engine_loop_thread():
         engine_wakeup.wait(timeout=1.0)
         if shutdown_event.is_set(): break
         try:
+            # [修改] 加入精確計時器，計算 Effective Inference Time
+            start_time = time.time()
             did_work = engine.step()
             
+            # 若 engine.step() 有真正在推進推論（Batch 中有任務）
+            if did_work:
+                elapsed = time.time() - start_time
+                with metrics_lock:
+                    cumulative_metrics["effective_inference_time"] += elapsed
+
             # [核心機制] 如果處於排空模式，且手上的任務都清空了，自動轉為 Standby
             if current_status == "draining" and engine.is_idle():
                 logger.info("❄️ 所有任務已排空，節點自動轉為 Standby")
@@ -220,6 +234,10 @@ def metrics():
     """回報節點的狀態與負載，Control Node 將以這裡的 status 為準"""
     if not engine: return {}
     
+    # [新增] 安全讀取累積數據
+    with metrics_lock:
+        inf_time = cumulative_metrics["effective_inference_time"]
+
     with engine.lock:
         running_cnt = len(engine.running_queue)
         waiting_cnt = len(engine.request_queue)
@@ -243,7 +261,7 @@ def metrics():
     return {
         "node_id": NODE_ID,
         "mode": current_mode,
-        "status": current_status,  # [新增] 回報當前狀態，讓 Control Node 同步
+        "status": current_status,  # 回報當前狀態，讓 Control Node 同步
         "request_set": request_set, 
         "load": {
             "running_batch": running_cnt + waiting_cnt,
@@ -259,7 +277,11 @@ def metrics():
             "max_cpu_loras": engine.max_cpu_loras
         },
         "idle": engine.is_idle(),
-        "config_version": last_config_version
+        "config_version": last_config_version,
+        # [新增] 將指標回報給 Control Node
+        "metrics": {
+            "effective_inference_time": inf_time
+        }
     }
 
 @app.post("/sync_adapters")
