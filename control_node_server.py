@@ -22,7 +22,8 @@ from config import (
     HTTP_MAX_CONNECTIONS,
     SCHEDULER_OVERHEAD, SIM_LOAD_DELAY,
     SIM_PREFILL_BASE_TIME, MERGE_SPEED_MULTIPLIER,
-    SIM_DECODE_BASE_TIME, SIM_DECODE_SLOPE
+    SIM_DECODE_BASE_TIME, SIM_DECODE_SLOPE,
+    SP1_INTERVAL_SECONDS  # [新增] 引入區間秒數設定
 )
 
 # ============================================================
@@ -79,6 +80,63 @@ class ClusterMetrics:
 
 cluster_metrics = ClusterMetrics()
 node_cumulative_inf_time: Dict[str, float] = {}
+
+# [新增] 用於管理 Log 任務的全域變數
+metrics_logging_task: Optional[asyncio.Task] = None
+current_interval_id = 0
+
+async def run_metrics_logging_cycle(interval_id: int):
+    """
+    在收到 SP1 reset 後執行，固定紀錄 10 次 Metrics。
+    頻率：SP1_INTERVAL_SECONDS / 10
+    """
+    logger.info(f"📊 [Metrics] Starting logging cycle for Interval {interval_id}")
+    
+    os.makedirs("logs", exist_ok=True)
+    log_file = f"logs/control_{CLUSTER_NAME}_metrics.log"
+    
+    # 計算每次紀錄的間隔時間
+    logging_interval = SP1_INTERVAL_SECONDS / 10.0
+    
+    try:
+        # 只執行 10 次 (0~9)
+        for step in range(10):
+            # 先等待一段時間再紀錄，代表蒐集了 1/10 區間的數據
+            await asyncio.sleep(logging_interval)
+            
+            # 計算總有效推論時間
+            total_inf_time = sum(node_cumulative_inf_time.values())
+            
+            # 結算這段時間的 P95 TTFT
+            p95 = await cluster_metrics.calculate_p95_and_clear()
+            
+            async with cluster_metrics.lock:
+                snapshot = {
+                    "interval_id": interval_id,      # [新增] 標記區間 ID
+                    "step_in_interval": step + 1,    # [新增] 標記是第幾次 log (1~10)
+                    "local_completed": cluster_metrics.local_completed,
+                    "offload_in_completed": cluster_metrics.offload_in_completed,
+                    "drop_queue": cluster_metrics.drop_queue,
+                    "drop_slo": cluster_metrics.drop_slo,
+                    "offload_out": cluster_metrics.offload_out,
+                    "total_effective_inference_time": total_inf_time,
+                    "p95_ttft": p95,
+                    "z_debt": Z_debt
+                }
+                
+            with open(log_file, "a") as f:
+                log_entry = {
+                    "timestamp": time.time(),
+                    "cluster": CLUSTER_NAME,
+                    "metrics": snapshot
+                }
+                f.write(json.dumps(log_entry) + "\n")
+                
+        logger.info(f"📊 [Metrics] Interval {interval_id} logging finished (10/10). Waiting for next edge.")
+        
+    except asyncio.CancelledError:
+        logger.info(f"📊 [Metrics] Cycle {interval_id} cancelled (New Time Edge arrived).")
+        raise
 
 # ============================================================
 # Lyapunov & Auto-Scaling Global States
@@ -431,11 +489,8 @@ async def scheduler_loop():
     global global_request_list, system_paused
     logger.info("⏳ SP2 Full-Function Scheduler loop started.")
     while True:
-        if system_paused:
-            await asyncio.sleep(0.5)
-            continue
-            
         try:
+            # 1. 更新節點 Metrics
             all_node_urls = list(node_mgr.nodes.keys())
             if all_node_urls:
                 tasks = [client.get(f"{u}/metrics", timeout=1.0) for u in all_node_urls]
@@ -447,9 +502,18 @@ async def scheduler_loop():
             active_node_urls = [u for u, d in node_mgr.nodes.items() if d["status"] == "active"]
             v_nodes = [VirtualNodeState(u, node_mgr.nodes[u]["metrics"]) for u in active_node_urls if node_mgr.nodes[u].get("metrics")]
             
-            if not v_nodes: await asyncio.sleep(0.1); continue
+            if not v_nodes: 
+                await asyncio.sleep(0.1)
+                continue
 
+            # [關鍵修正] 只有當 "沒有積壓任務" 時，System Paused 才會生效
+            # 目的是確保在 SP1 更新期間，佇列中的殘餘請求仍能被派發出去 (Drain)
             total_pending = sum(len(q) for q in request_queues.values())
+            if system_paused and total_pending == 0:
+                await asyncio.sleep(0.5)
+                continue
+
+            # 2. 狀態切換邏輯 (Merge/Unmerge)
             unmerged_count = sum(1 for n in v_nodes if n.mode == "unmerge")
 
             for v in v_nodes:
@@ -464,6 +528,7 @@ async def scheduler_loop():
                         asyncio.create_task(safe_mode_switch(v.url, "/unmerge", {"force": False}))
                         v.mode = "switching"; unmerged_count += 1
 
+            # 3. 請求分派邏輯 (Dispatching)
             dispatched_any = True
             while dispatched_any and global_request_list:
                 dispatched_any = False
@@ -561,43 +626,6 @@ async def auto_scaling_monitor():
                     surplus_duration = 0.0
 
 # ============================================================
-# 📊 Metrics Polling Loop (10s)
-# ============================================================
-async def poll_cluster_metrics():
-    logger.info("📊 Cluster Metrics Polling started (10s interval).")
-    os.makedirs("logs", exist_ok=True)
-    log_file = f"logs/control_{CLUSTER_NAME}_metrics.log"
-    
-    while True:
-        await asyncio.sleep(10)
-        
-        # 計算總有效推論時間 (匯總各 Compute Node 累積值)
-        total_inf_time = sum(node_cumulative_inf_time.values())
-        
-        # 結算這 10 秒區間的 P95 TTFT
-        p95 = await cluster_metrics.calculate_p95_and_clear()
-        
-        async with cluster_metrics.lock:
-            snapshot = {
-                "local_completed": cluster_metrics.local_completed,
-                "offload_in_completed": cluster_metrics.offload_in_completed,
-                "drop_queue": cluster_metrics.drop_queue,
-                "drop_slo": cluster_metrics.drop_slo,
-                "offload_out": cluster_metrics.offload_out,
-                "total_effective_inference_time": total_inf_time,
-                "p95_ttft": p95,
-                "z_debt": Z_debt
-            }
-            
-        with open(log_file, "a") as f:
-            log_entry = {
-                "timestamp": time.time(),
-                "cluster": CLUSTER_NAME,
-                "metrics": snapshot
-            }
-            f.write(json.dumps(log_entry) + "\n")
-
-# ============================================================
 # API Routes & Lifespan
 # ============================================================
 @asynccontextmanager
@@ -621,7 +649,7 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(scheduler_loop())
     asyncio.create_task(auto_scaling_monitor()) 
-    asyncio.create_task(poll_cluster_metrics()) # [Metrics] 啟動 10秒拉取迴圈
+    
     
     async def cleanup_streams():
         while True:
@@ -694,13 +722,23 @@ def select_best_offload_target(adapter_id: str) -> Optional[dict]:
 # [新增] 包含排空與重置機制的 SP1 套用 API
 @app.post("/apply_sp1_and_reset")
 async def apply_sp1_and_reset(req: UpdateLorasRequest):
-    global system_paused, LOCAL_AVAILABLE_LORAS
+    global system_paused, LOCAL_AVAILABLE_LORAS, metrics_logging_task, current_interval_id
     
     logger.info("🛑 [SP1 Sync] Initiating system drain & reset...")
-    system_paused = True  # 暫停所有調度與新進請求
+    system_paused = True  # 暫停所有調度與新進請求 (scheduler 會等佇列排空)
     
     try:
-        # 1. 等待排空 (Drain)
+        # === 1. 重置 Metrics Logging 任務 (關鍵修改) ===
+        if metrics_logging_task and not metrics_logging_task.done():
+            metrics_logging_task.cancel()
+            try:
+                await metrics_logging_task
+            except asyncio.CancelledError:
+                pass
+        
+        current_interval_id += 1
+        
+        # 2. 等待排空 (Drain)
         while True:
             # 確保 Control Node 沒有待分配的排隊任務
             if len(global_request_list) > 0:
@@ -710,7 +748,6 @@ async def apply_sp1_and_reset(req: UpdateLorasRequest):
             # 確保所有 Compute Node 皆已完成運算
             all_idle = True
             for url, node_data in node_mgr.nodes.items():
-                # 要求最新的 metrics，確保沒有在運作的 Batch
                 try:
                     resp = await client.get(f"{url}/metrics", timeout=2.0)
                     if resp.status_code == 200:
@@ -720,7 +757,6 @@ async def apply_sp1_and_reset(req: UpdateLorasRequest):
                             all_idle = False
                             break
                 except Exception:
-                    # 如果連線失敗，視為未閒置，避免誤判
                     all_idle = False
                     break
             
@@ -730,7 +766,7 @@ async def apply_sp1_and_reset(req: UpdateLorasRequest):
 
         logger.info("🚰 [SP1 Sync] System completely drained. Resetting compute nodes...")
         
-        # 2. 對所有 Compute Node 下達重置 (Reset) 指令
+        # 3. 對所有 Compute Node 下達重置 (Reset) 指令
         reset_tasks = []
         for url in node_mgr.nodes.keys():
             reset_tasks.append(client.post(f"{url}/reset", timeout=5.0))
@@ -741,13 +777,16 @@ async def apply_sp1_and_reset(req: UpdateLorasRequest):
                 if isinstance(res, Exception) or res.status_code != 200:
                     logger.error(f"❌ [SP1 Sync] Failed to reset node {url}: {res}")
             
-        # 3. 更新本地支援的 LoRA 列表
+        # 4. 更新本地支援的 LoRA 列表
         LOCAL_AVAILABLE_LORAS = set(req.loras)
-        logger.info(f"✅ [SP1 Sync] New configuration applied. Target LoRAs: {list(LOCAL_AVAILABLE_LORAS)}")
+        logger.info(f"✅ [SP1 Sync] New configuration applied. LoRAs: {list(LOCAL_AVAILABLE_LORAS)}")
+        
+        # === 5. 啟動新一輪的 Logging (關鍵修改) ===
+        metrics_logging_task = asyncio.create_task(run_metrics_logging_cycle(current_interval_id))
         
         return {"status": "success"}
     finally:
-        # 4. 解除鎖定
+        # 6. 解除鎖定
         system_paused = False
         logger.info("▶️ [SP1 Sync] System resumed. Ready for next interval.")
 

@@ -8,7 +8,7 @@ import time
 import numpy as np
 import pandas as pd
 from contextlib import asynccontextmanager
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from collections import defaultdict
 
 from fastapi import FastAPI
@@ -61,6 +61,9 @@ azure_mapping: Dict[str, Dict[str, str]] = {}
 
 current_time_step = 0  # 模擬器推進的區間步數
 system_start_event: asyncio.Event = None
+
+# [新增] 全域 Log 任務管理
+efo_logging_task: Optional[asyncio.Task] = None
 
 # ============================================================
 # Network Simulator (Shifted Lognormal & P95)
@@ -128,57 +131,72 @@ async def sync_global_routing():
                 pass
 
 # ============================================================
-# 📊 Global Metrics Polling (60s interval)
+# 📊 Global Metrics Logging Cycle (Triggered by Time Edge)
 # ============================================================
-async def poll_global_metrics():
-    await system_start_event.wait()
-    logger.info("📊 Global Metrics Polling started (60s interval).")
+async def run_efo_metrics_cycle(step_id: int):
+    """
+    對應 Time Edge，紀錄 10 次 Global Metrics (間隔 SP1_INTERVAL / 10)
+    """
+    logger.info(f"📊 [EFO Metrics] Starting cycle for Time Step {step_id}")
     os.makedirs("logs", exist_ok=True)
     log_file = "logs/efo_global_metrics.log"
     
-    while True:
-        await asyncio.sleep(60)
-        global_snapshot = {
-            "timestamp": time.time(),
-            "clusters": {},
-            "efo_totals": {
-                "total_inference_time": 0.0,
-                "total_drops": 0,
-                "total_offloads": 0,
-                "total_local_completed": 0,
-                "total_offload_completed": 0,
-                "artifact_downloads": 0,
-                "total_stored_loras": sum(len(loras) for loras in global_lora_disk_inventory.values())
+    logging_interval = SP1_INTERVAL_SECONDS / 10.0
+    
+    try:
+        for sub_step in range(10):
+            await asyncio.sleep(logging_interval)
+            
+            global_snapshot = {
+                "timestamp": time.time(),
+                "step_id": step_id,              # [新增] 區間 ID
+                "sub_step": sub_step + 1,        # [新增] 子步數 (1~10)
+                "clusters": {},
+                "efo_totals": {
+                    "total_inference_time": 0.0,
+                    "total_drops": 0,
+                    "total_offloads": 0,
+                    "total_local_completed": 0,
+                    "total_offload_completed": 0,
+                    "artifact_downloads": 0,
+                    "total_stored_loras": sum(len(loras) for loras in global_lora_disk_inventory.values())
+                }
             }
-        }
+            
+            # 拉取各 Cluster Metrics
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                for cluster_name, url in active_clusters.items():
+                    try:
+                        resp = await client.get(f"{url}/cluster_metrics")
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            global_snapshot["clusters"][cluster_name] = data
+                            global_snapshot["efo_totals"]["total_inference_time"] += data.get("total_effective_inference_time", 0.0)
+                            global_snapshot["efo_totals"]["total_drops"] += (data.get("drop_queue", 0) + data.get("drop_slo", 0))
+                            global_snapshot["efo_totals"]["total_offloads"] += data.get("offload_out", 0)
+                            global_snapshot["efo_totals"]["total_local_completed"] += data.get("local_completed", 0)
+                            global_snapshot["efo_totals"]["total_offload_completed"] += data.get("offload_in_completed", 0)
+                    except Exception as e:
+                        logger.error(f"❌ Failed to fetch metrics from {cluster_name}: {e}")
+            
+            # 加入 EFO 自身的指標
+            async with efo_metrics.lock:
+                global_snapshot["efo_totals"]["artifact_downloads"] = efo_metrics.artifact_downloads
+            
+            with open(log_file, "a") as f:
+                f.write(json.dumps(global_snapshot) + "\n")
+                
+        logger.info(f"📊 [EFO Metrics] Step {step_id} finished (10/10). Waiting for next Time Edge...")
         
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            for cluster_name, url in active_clusters.items():
-                try:
-                    resp = await client.get(f"{url}/cluster_metrics")
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        global_snapshot["clusters"][cluster_name] = data
-                        global_snapshot["efo_totals"]["total_inference_time"] += data.get("total_effective_inference_time", 0.0)
-                        global_snapshot["efo_totals"]["total_drops"] += (data.get("drop_queue", 0) + data.get("drop_slo", 0))
-                        global_snapshot["efo_totals"]["total_offloads"] += data.get("offload_out", 0)
-                        global_snapshot["efo_totals"]["total_local_completed"] += data.get("local_completed", 0)
-                        global_snapshot["efo_totals"]["total_offload_completed"] += data.get("offload_in_completed", 0)
-                except Exception as e:
-                    logger.error(f"❌ Failed to fetch metrics from {cluster_name}: {e}")
-        
-        async with efo_metrics.lock:
-            global_snapshot["efo_totals"]["artifact_downloads"] = efo_metrics.artifact_downloads
-        
-        with open(log_file, "a") as f:
-            f.write(json.dumps(global_snapshot) + "\n")
+    except asyncio.CancelledError:
+        logger.info(f"📊 [EFO Metrics] Step {step_id} cancelled (New Time Edge arrived).")
+        raise
 
 # ============================================================
 # SP1: CSV Forecasting (Interval Scanning)
 # ============================================================
 def exact_csv_forecasting(time_step: int):
     """
-    參考使用者提供的 pandas 做法進行重構：
     1. 讀取完整 TRACE_CSV。
     2. 進行 START_OFFSET 校正。
     3. 過濾出當前 SP1 區間 (start_sec 到 end_sec) 的請求。
@@ -201,44 +219,33 @@ def exact_csv_forecasting(time_step: int):
         return
 
     try:
-        # --- 參考使用者提供的做法 ---
         # 1. 讀取 CSV
         df = pd.read_csv(SIMULATION_DATA_CSV_PATH)
         
         # 2. 時間轉換與對齊 (START_OFFSET)
         df["arrival_sec"] = df["arrive_timestamp"].astype(float)
         
-        # 防呆：若資料起始時間小於 offset，則不進行偏移
         if df["arrival_sec"].min() >= START_OFFSET:
             df["arrival_sec"] -= START_OFFSET
         
-        # 3. 過濾出目標區間 (SP1 Interval)
-        # 這裡對應使用者的 df["arrival_sec"] <= RUN_DURATION，但精確到當前步進區間
+        # 3. 過濾出目標區間
         df = df[(df["arrival_sec"] >= start_sec) & (df["arrival_sec"] < end_sec)]
         
-        # 4. 過濾出目標 Cluster (僅限目前 active 的節點)
+        # 4. 過濾出目標 Cluster
         target_clusters = list(active_clusters.keys())
         df = df[df["cluster"].isin(target_clusters)]
-        # --------------------------
 
-        # 5. 統計結果至 predicted_demand
-        parsed_count = 0
+        # 5. 統計結果
         for _, row in df.iterrows():
             cluster = str(row["cluster"]).strip()
             lora_id_val = int(float(row["lora_id"]))
-            
-            # 支援 "LoRA_1" 格式的 Key
             lora_id = f"LoRA_{lora_id_val}"
             
             if lora_id in predicted_demand[cluster]:
                 predicted_demand[cluster][lora_id] += 1.0
-                parsed_count += 1
-            # 支援純數字字串 "1" 格式的 Key
             elif str(lora_id_val) in predicted_demand[cluster]:
                 predicted_demand[cluster][str(lora_id_val)] += 1.0
-                parsed_count += 1
 
-        # Log 輸出
         for cluster in target_clusters:
             count = sum(predicted_demand[cluster].values())
             logger.info(f"📈 [Pandas Forecast] {cluster} 步進 {time_step}: 預計有 {int(count)} 個請求")
@@ -300,6 +307,7 @@ async def run_sp1_provisioning_and_wait():
             gains[lora_id] = max(0.0, best_offload_cost - C_INST)
 
         # Step 0: Mandatory Sets (Local)
+        # 這些是本地專用模型，強制保留，不參與成本比較
         for lora_id in valid_loras:
             if global_lora_metadata[lora_id].get("type") == "local":
                 mandatory_set.add(lora_id)
@@ -344,23 +352,23 @@ async def run_sp1_provisioning_and_wait():
                     target_disk.add(lora_id)
                     utilities[lora_id] = u_v
 
-        new_downloads = len(target_disk - current_disk)
-        if new_downloads > 0:
+        # [修正] 計算真正的 "新下載" (排除 Local LoRA)
+        # Local LoRA 被視為本地預裝，不消耗 WAN 頻寬成本
+        diff_set = target_disk - current_disk
+        real_new_downloads = 0
+        for lora_id in diff_set:
+            # 只有 type 不是 local 的才算下載成本
+            if global_lora_metadata.get(lora_id, {}).get("type") != "local":
+                real_new_downloads += 1
+                
+        if real_new_downloads > 0:
             async with efo_metrics.lock:
-                efo_metrics.artifact_downloads += new_downloads
+                efo_metrics.artifact_downloads += real_new_downloads
 
         cluster_targets[cluster_name] = list(target_disk)
         global_lora_disk_inventory[cluster_name] = cluster_targets[cluster_name]
         
-        # 顯示詳細分配結果 Log
-        local_count = len(mandatory_set)
-        global_count = len(target_disk) - local_count
-        sorted_provisioned_list = sorted(list(target_disk))
-        
-        logger.info(f"📊 [SP1 Result] {cluster_name}: Target {len(target_disk)}/{CAPACITY} LoRAs (New DLs: {new_downloads})")
-        logger.info(f"   ┣ Local (Mandatory): {local_count} models")
-        logger.info(f"   ┣ Global (Dynamic) : {global_count} models")
-        logger.info(f"   ┗ Provisioned List : {sorted_provisioned_list}")
+        logger.info(f"📊 [SP1 Result] {cluster_name}: Target {len(target_disk)}/{CAPACITY} LoRAs (WAN DLs: {real_new_downloads})")
 
     # 2. 發送並「阻塞等待」所有 Control Node 排空與重置
     logger.info("⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...")
@@ -415,7 +423,8 @@ async def lifespan(app: FastAPI):
             azure_mapping = json.load(f)
 
     asyncio.create_task(sp2_routing_loop())
-    asyncio.create_task(poll_global_metrics())
+    # [變更] 移除原來的背景輪詢，改由 /time_edge 觸發
+    # asyncio.create_task(poll_global_metrics())
     yield
         
 app = FastAPI(title="Edge Federation Orchestrator (EFO)", lifespan=lifespan)
@@ -431,14 +440,25 @@ async def trigger_time_edge():
     """
     接收 test_simulation.py 的步進訊號。
     讀取 CSV -> 計算 SP1 -> 等待所有節點套用 -> 回傳 OK。
+    並啟動與區間對齊的 Metrics Logging。
     """
-    global current_time_step
+    global current_time_step, efo_logging_task
     
     if not system_start_event.is_set():
         system_start_event.set()
         logger.info("🚀 System initialized via first /time_edge trigger!")
 
     logger.info(f"\n{'='*50}\n⏱️ [TIME EDGE] Advancing to Time Step {current_time_step}\n{'='*50}")
+    
+    # === 1. 重置並啟動 EFO Metrics Logging (任務切換) ===
+    if efo_logging_task and not efo_logging_task.done():
+        efo_logging_task.cancel()
+        try:
+            await efo_logging_task
+        except asyncio.CancelledError: pass
+            
+    efo_logging_task = asyncio.create_task(run_efo_metrics_cycle(current_time_step))
+    # =======================================================
     
     exact_csv_forecasting(current_time_step)
     await run_sp1_provisioning_and_wait()

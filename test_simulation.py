@@ -10,7 +10,7 @@ from config import SP1_INTERVAL_SECONDS
 
 TRACE_CSV = "./information/simulation_data.csv"
 START_OFFSET = 86400 * 2
-RUN_DURATION = 3600 * 12
+RUN_DURATION = 3600*2
 TIMEOUT = 120
 
 EFO_URL = "http://localhost:9900"
@@ -164,6 +164,9 @@ async def main():
 
             # 2. 跨越時間區間，暫停並觸發新的 SP1
             if req_interval > current_interval:
+                print(f"\n{YELLOW}⏳ Reached interval {req_interval}... Waiting for pending requests...{RESET}")
+                # [新增] 等待 2 秒，確保上一區間發出的 request 都能順利進入 Server 佇列，避免被 503
+                await asyncio.sleep(10.0)
                 print(f"\n{YELLOW}⏳ Reached interval {req_interval} (Arrival Sec: {arrival_sec:.1f}). Triggering /time_edge...{RESET}")
                 edge_start_time = time.time()
                 try:
