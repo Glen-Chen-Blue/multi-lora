@@ -10,7 +10,7 @@ from config import SP1_INTERVAL_SECONDS
 
 TRACE_CSV = "./information/simulation_data.csv"
 START_OFFSET = 86400 * 2
-RUN_DURATION = 3600*2
+RUN_DURATION = 3600 * 12
 TIMEOUT = 120
 
 EFO_URL = "http://localhost:9900"
@@ -164,20 +164,15 @@ async def main():
 
             # 2. 跨越時間區間，暫停並觸發新的 SP1
             if req_interval > current_interval:
-                print(f"\n{YELLOW}⏳ Reached interval {req_interval}... Waiting for pending requests...{RESET}")
-                # [新增] 等待 2 秒，確保上一區間發出的 request 都能順利進入 Server 佇列，避免被 503
+                print("waiting...")
+                sleep_start = time.time()
                 await asyncio.sleep(10.0)
-                print(f"\n{YELLOW}⏳ Reached interval {req_interval} (Arrival Sec: {arrival_sec:.1f}). Triggering /time_edge...{RESET}")
-                edge_start_time = time.time()
-                try:
-                    resp = await client.post(f"{EFO_URL}/time_edge", timeout=600.0)
-                    print(f"{GREEN}✅ SP1 Interval {req_interval} complete: {resp.json()}{RESET}\n")
-                except Exception as e:
-                    print(f"{RED}❌ SP1 Interval {req_interval} failed: {e}{RESET}\n")
-                
-                # 時鐘補償：把等待排空的時間加回 start_time，避免後續 Request 認為遲到而瞬間暴衝
-                edge_duration = time.time() - edge_start_time
-                start_time += edge_duration
+
+                resp = await client.post(f"{EFO_URL}/time_edge", timeout=600.0)
+
+                total_pause = time.time() - sleep_start
+                start_time += total_pause
+
                 current_interval = req_interval
 
             scheduled_offset = arrival_sec / SPEEDUP

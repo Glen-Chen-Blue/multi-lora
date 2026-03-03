@@ -1,19 +1,81 @@
-INFO:     Started server process [141618]
+INFO:     Started server process [181964]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:9900 (Press CTRL+C to quit)
-2026-03-03 12:42:48,128 [INFO] EFO: 🔗 Cluster Registered: cluster_1
-INFO:     127.0.0.1:55460 - "POST /register_cluster HTTP/1.1" 200 OK
-2026-03-03 12:43:06,980 [INFO] EFO: 🚀 System initialized via first /time_edge trigger!
-2026-03-03 12:43:06,980 [INFO] EFO: 
+2026-03-03 15:15:09,325 [INFO] EFO: 🔗 Cluster Registered: cluster_1
+INFO:     127.0.0.1:47080 - "POST /register_cluster HTTP/1.1" 200 OK
+2026-03-03 15:15:27,732 [INFO] EFO: 🚀 System initialized via first /time_edge trigger!
+2026-03-03 15:15:27,732 [INFO] EFO: 
 ==================================================
 ⏱️ [TIME EDGE] Advancing to Time Step 0
 ==================================================
-2026-03-03 12:43:07,216 [INFO] EFO: 📈 [Pandas Forecast] cluster_1 步進 0: 預計有 255 個請求
-2026-03-03 12:43:07,216 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning...
-2026-03-03 12:43:07,216 [INFO] EFO: 📊 [SP1 Result] cluster_1: Target 21/50 LoRAs (WAN DLs: 11)
-2026-03-03 12:43:07,216 [INFO] EFO: ⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...
-2026-03-03 12:43:07,245 [INFO] EFO: 📊 [EFO Metrics] Starting cycle for Time Step 0
-2026-03-03 12:43:07,251 [INFO] EFO: ✅ cluster_1 synced successfully.
-2026-03-03 12:43:07,252 [INFO] EFO: ✨ All clusters have applied SP1 and are ready for the next time step.
-INFO:     127.0.0.1:47590 - "POST /time_edge HTTP/1.1" 200 OK
+2026-03-03 15:15:27,965 [INFO] EFO: 📈 [Pandas Forecast] cluster_1 步進 0: 預計有 255 個請求
+2026-03-03 15:15:27,965 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning (With Semantic Similarity)...
+2026-03-03 15:15:27,965 [INFO] EFO: 📊 [SP1 Result] cluster_1: Target 17/50 LoRAs (WAN DLs: 7)
+2026-03-03 15:15:27,965 [INFO] EFO: 📦 [SP1 Storage] Added 17 to cumulative storage count.
+2026-03-03 15:15:27,965 [INFO] EFO: ⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...
+2026-03-03 15:15:27,996 [INFO] EFO: 📊 [EFO Metrics] Starting cycle for Time Step 0
+2026-03-03 15:15:28,002 [INFO] EFO: ✅ cluster_1 synced successfully.
+2026-03-03 15:15:28,002 [INFO] EFO: ✨ All clusters have applied SP1 and are ready for the next time step.
+INFO:     127.0.0.1:53128 - "POST /time_edge HTTP/1.1" 200 OK
+2026-03-03 16:15:28,117 [INFO] EFO: 📊 [EFO Metrics] Step 0 finished (10/10). Waiting for next Time Edge...
+2026-03-03 16:15:37,945 [INFO] EFO: 
+==================================================
+⏱️ [TIME EDGE] Advancing to Time Step 1
+==================================================
+2026-03-03 16:15:38,187 [INFO] EFO: 📈 [Pandas Forecast] cluster_1 步進 1: 預計有 642 個請求
+2026-03-03 16:15:38,187 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning (With Semantic Similarity)...
+2026-03-03 16:15:38,188 [INFO] EFO: 📊 [SP1 Result] cluster_1: Target 17/50 LoRAs (WAN DLs: 1)
+2026-03-03 16:15:38,188 [INFO] EFO: 📦 [SP1 Storage] Added 17 to cumulative storage count.
+2026-03-03 16:15:38,188 [INFO] EFO: ⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...
+2026-03-03 16:15:38,198 [INFO] EFO: 📊 [EFO Metrics] Starting cycle for Time Step 1
+2026-03-03 16:15:38,211 [INFO] EFO: ✅ cluster_1 synced successfully.
+2026-03-03 16:15:38,211 [INFO] EFO: ✨ All clusters have applied SP1 and are ready for the next time step.
+INFO:     127.0.0.1:52694 - "POST /time_edge HTTP/1.1" 200 OK
+2026-03-03 17:15:38,321 [INFO] EFO: 📊 [EFO Metrics] Step 1 finished (10/10). Waiting for next Time Edge...
+2026-03-03 17:15:45,674 [INFO] EFO: 
+==================================================
+⏱️ [TIME EDGE] Advancing to Time Step 2
+==================================================
+2026-03-03 17:15:45,988 [INFO] EFO: 📈 [Pandas Forecast] cluster_1 步進 2: 預計有 6372 個請求
+2026-03-03 17:15:45,988 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning (With Semantic Similarity)...
+2026-03-03 17:15:45,988 [INFO] EFO: 📊 [SP1 Result] cluster_1: Target 16/50 LoRAs (WAN DLs: 1)
+2026-03-03 17:15:45,988 [INFO] EFO: 📦 [SP1 Storage] Added 16 to cumulative storage count.
+2026-03-03 17:15:45,988 [INFO] EFO: ⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...
+2026-03-03 17:15:45,998 [INFO] EFO: 📊 [EFO Metrics] Starting cycle for Time Step 2
+2026-03-03 17:15:46,018 [INFO] EFO: ✅ cluster_1 synced successfully.
+2026-03-03 17:15:46,018 [INFO] EFO: ✨ All clusters have applied SP1 and are ready for the next time step.
+INFO:     127.0.0.1:55158 - "POST /time_edge HTTP/1.1" 200 OK
+2026-03-03 18:15:46,142 [INFO] EFO: 📊 [EFO Metrics] Step 2 finished (10/10). Waiting for next Time Edge...
+2026-03-03 18:15:58,626 [INFO] EFO: 
+==================================================
+⏱️ [TIME EDGE] Advancing to Time Step 3
+==================================================
+2026-03-03 18:15:58,935 [INFO] EFO: 📈 [Pandas Forecast] cluster_1 步進 3: 預計有 4757 個請求
+2026-03-03 18:15:58,935 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning (With Semantic Similarity)...
+2026-03-03 18:15:58,935 [INFO] EFO: 📊 [SP1 Result] cluster_1: Target 16/50 LoRAs (WAN DLs: 0)
+2026-03-03 18:15:58,935 [INFO] EFO: 📦 [SP1 Storage] Added 16 to cumulative storage count.
+2026-03-03 18:15:58,935 [INFO] EFO: ⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...
+2026-03-03 18:15:58,946 [INFO] EFO: 📊 [EFO Metrics] Starting cycle for Time Step 3
+2026-03-03 18:20:58,948 [ERROR] EFO: ❌ cluster_1 apply_sp1_and_reset failed: 
+2026-03-03 18:20:58,948 [INFO] EFO: ✨ All clusters have applied SP1 and are ready for the next time step.
+INFO:     127.0.0.1:46356 - "POST /time_edge HTTP/1.1" 200 OK
+2026-03-03 19:15:59,179 [INFO] EFO: 📊 [EFO Metrics] Step 3 finished (10/10). Waiting for next Time Edge...
+2026-03-03 19:21:07,928 [INFO] EFO: 
+==================================================
+⏱️ [TIME EDGE] Advancing to Time Step 4
+==================================================
+2026-03-03 19:21:08,221 [INFO] EFO: 📈 [Pandas Forecast] cluster_1 步進 4: 預計有 3754 個請求
+2026-03-03 19:21:08,221 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning (With Semantic Similarity)...
+2026-03-03 19:21:08,221 [INFO] EFO: 📊 [SP1 Result] cluster_1: Target 15/50 LoRAs (WAN DLs: 0)
+2026-03-03 19:21:08,221 [INFO] EFO: 📦 [SP1 Storage] Added 15 to cumulative storage count.
+2026-03-03 19:21:08,221 [INFO] EFO: ⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...
+2026-03-03 19:21:08,231 [INFO] EFO: 📊 [EFO Metrics] Starting cycle for Time Step 4
+2026-03-03 19:26:08,246 [ERROR] EFO: ❌ cluster_1 apply_sp1_and_reset failed: 
+2026-03-03 19:26:08,246 [INFO] EFO: ✨ All clusters have applied SP1 and are ready for the next time step.
+INFO:     127.0.0.1:51024 - "POST /time_edge HTTP/1.1" 200 OK
+2026-03-03 20:21:08,440 [INFO] EFO: 📊 [EFO Metrics] Step 4 finished (10/10). Waiting for next Time Edge...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [181964]

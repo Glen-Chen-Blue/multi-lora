@@ -23,7 +23,7 @@ from config import (
     SCHEDULER_OVERHEAD, SIM_LOAD_DELAY,
     SIM_PREFILL_BASE_TIME, MERGE_SPEED_MULTIPLIER,
     SIM_DECODE_BASE_TIME, SIM_DECODE_SLOPE,
-    SP1_INTERVAL_SECONDS  # [新增] 引入區間秒數設定
+    SP1_INTERVAL_SECONDS
 )
 
 # ============================================================
@@ -40,26 +40,28 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("uvicorn.access").addFilter(RoutingAccessFilter())
 
 CLUSTER_NAME = os.environ.get("CLUSTER_NAME", "cluster_1")
-CLUSTER_ID = CLUSTER_NAME  # 保留向下相容
+CLUSTER_ID = CLUSTER_NAME
 EFO_URL = os.environ.get("EFO_URL", "http://127.0.0.1:9100")
 MY_URL = os.environ.get("CONTROL_NODE_URL", "http://127.0.0.1:9000")
 
-# 擴大連線池上限，避免突發流量導致 Socket 枯竭
 limits = httpx.Limits(max_keepalive_connections=200, max_connections=HTTP_MAX_CONNECTIONS)
 client = httpx.AsyncClient(limits=limits, timeout=60.0)
 
 # ============================================================
-# 📊 Metrics Collection State
+# 📊 Metrics Collection State (Modified)
 # ============================================================
 class ClusterMetrics:
     def __init__(self):
         self.lock = asyncio.Lock()
-        # 累積計數器 (供 EFO 算 Delta)
+        # 累積計數器
         self.local_completed = 0
         self.offload_in_completed = 0
-        self.drop_queue = 0
-        self.drop_slo = 0
         self.offload_out = 0
+        
+        # [修改] 只保留兩種 Drop 類型
+        self.drop_local_congestion = 0      # 本地壅塞 (包含被 Offload 進來但過載的情況)
+        self.drop_no_target = 0             # 無處可去 (No Targets)
+
         # 即時數據
         self.ttft_records: List[float] = []
         self.latest_p95 = 0.0
@@ -81,44 +83,37 @@ class ClusterMetrics:
 cluster_metrics = ClusterMetrics()
 node_cumulative_inf_time: Dict[str, float] = {}
 
-# [新增] 用於管理 Log 任務的全域變數
 metrics_logging_task: Optional[asyncio.Task] = None
 current_interval_id = 0
 
 async def run_metrics_logging_cycle(interval_id: int):
     """
-    在收到 SP1 reset 後執行，固定紀錄 10 次 Metrics。
-    頻率：SP1_INTERVAL_SECONDS / 10
+    在收到 SP1 reset 後執行，固定紀錄 20 次 Metrics。
     """
     logger.info(f"📊 [Metrics] Starting logging cycle for Interval {interval_id}")
     
     os.makedirs("logs", exist_ok=True)
     log_file = f"logs/control_{CLUSTER_NAME}_metrics.log"
     
-    # 計算每次紀錄的間隔時間
-    logging_interval = SP1_INTERVAL_SECONDS / 10.0
+    logging_interval = SP1_INTERVAL_SECONDS / 20.0
     
     try:
-        # 只執行 10 次 (0~9)
-        for step in range(10):
-            # 先等待一段時間再紀錄，代表蒐集了 1/10 區間的數據
+        for step in range(20):
             await asyncio.sleep(logging_interval)
             
-            # 計算總有效推論時間
             total_inf_time = sum(node_cumulative_inf_time.values())
-            
-            # 結算這段時間的 P95 TTFT
             p95 = await cluster_metrics.calculate_p95_and_clear()
             
             async with cluster_metrics.lock:
                 snapshot = {
-                    "interval_id": interval_id,      # [新增] 標記區間 ID
-                    "step_in_interval": step + 1,    # [新增] 標記是第幾次 log (1~10)
+                    "interval_id": interval_id,
+                    "step_in_interval": step + 1,
                     "local_completed": cluster_metrics.local_completed,
                     "offload_in_completed": cluster_metrics.offload_in_completed,
-                    "drop_queue": cluster_metrics.drop_queue,
-                    "drop_slo": cluster_metrics.drop_slo,
                     "offload_out": cluster_metrics.offload_out,
+                    # [修改] 紀錄簡化後的 Drop
+                    "drop_local_congestion": cluster_metrics.drop_local_congestion,
+                    "drop_no_target": cluster_metrics.drop_no_target,
                     "total_effective_inference_time": total_inf_time,
                     "p95_ttft": p95,
                     "z_debt": Z_debt
@@ -132,7 +127,7 @@ async def run_metrics_logging_cycle(interval_id: int):
                 }
                 f.write(json.dumps(log_entry) + "\n")
                 
-        logger.info(f"📊 [Metrics] Interval {interval_id} logging finished (10/10). Waiting for next edge.")
+        logger.info(f"📊 [Metrics] Interval {interval_id} logging finished (20/20). Waiting for next edge.")
         
     except asyncio.CancelledError:
         logger.info(f"📊 [Metrics] Cycle {interval_id} cancelled (New Time Edge arrived).")
@@ -163,10 +158,10 @@ LORA_METADATA_TABLE: Dict[str, Any] = {}
 LOCAL_AVAILABLE_LORAS: Set[str] = set()
 global_routing_table: Dict[str, Any] = {}
 can_accept_offload: bool = True
-system_paused: bool = False  # [新增] 系統更新與排空期間的鎖定標記
+system_paused: bool = False
 
 # ============================================================
-# Global State (含待機與 Draining 機制)
+# Global State
 # ============================================================
 class NodeManager:
     def __init__(self): 
@@ -187,11 +182,9 @@ class NodeManager:
             self.nodes[url]["metrics"] = metrics
             self.nodes[url]["last_seen"] = time.time()
             
-            # 更新 Compute Node 的有效推論時間
             if "metrics" in metrics:
                 node_cumulative_inf_time[url] = metrics["metrics"].get("effective_inference_time", 0.0)
             
-            # 只有在節點完成排空任務時，才允許 Compute Node 的狀態覆寫 Control Node
             reported_status = metrics.get("status", "standby")
             if self.nodes[url]["status"] == "draining" and reported_status == "standby":
                 logger.info(f"❄️ [Scale Down] 節點已完全排空，自動轉為 Standby: {url}")
@@ -507,7 +500,6 @@ async def scheduler_loop():
                 continue
 
             # [關鍵修正] 只有當 "沒有積壓任務" 時，System Paused 才會生效
-            # 目的是確保在 SP1 更新期間，佇列中的殘餘請求仍能被派發出去 (Drain)
             total_pending = sum(len(q) for q in request_queues.values())
             if system_paused and total_pending == 0:
                 await asyncio.sleep(0.5)
@@ -669,7 +661,7 @@ class AddRequest(BaseModel):
     max_new_tokens: int = 256
     is_delegated: bool = False
     network_delay: float = 0.0
-    arrival_time: Optional[float] = None # [Metrics] 支援傳遞到達時間
+    arrival_time: Optional[float] = None 
 
 class UpdateLorasRequest(BaseModel):
     loras: List[str]
@@ -725,10 +717,9 @@ async def apply_sp1_and_reset(req: UpdateLorasRequest):
     global system_paused, LOCAL_AVAILABLE_LORAS, metrics_logging_task, current_interval_id
     
     logger.info("🛑 [SP1 Sync] Initiating system drain & reset...")
-    system_paused = True  # 暫停所有調度與新進請求 (scheduler 會等佇列排空)
+    system_paused = True 
     
     try:
-        # === 1. 重置 Metrics Logging 任務 (關鍵修改) ===
         if metrics_logging_task and not metrics_logging_task.done():
             metrics_logging_task.cancel()
             try:
@@ -738,14 +729,11 @@ async def apply_sp1_and_reset(req: UpdateLorasRequest):
         
         current_interval_id += 1
         
-        # 2. 等待排空 (Drain)
         while True:
-            # 確保 Control Node 沒有待分配的排隊任務
             if len(global_request_list) > 0:
                 await asyncio.sleep(0.5)
                 continue
             
-            # 確保所有 Compute Node 皆已完成運算
             all_idle = True
             for url, node_data in node_mgr.nodes.items():
                 try:
@@ -766,7 +754,6 @@ async def apply_sp1_and_reset(req: UpdateLorasRequest):
 
         logger.info("🚰 [SP1 Sync] System completely drained. Resetting compute nodes...")
         
-        # 3. 對所有 Compute Node 下達重置 (Reset) 指令
         reset_tasks = []
         for url in node_mgr.nodes.keys():
             reset_tasks.append(client.post(f"{url}/reset", timeout=5.0))
@@ -777,22 +764,18 @@ async def apply_sp1_and_reset(req: UpdateLorasRequest):
                 if isinstance(res, Exception) or res.status_code != 200:
                     logger.error(f"❌ [SP1 Sync] Failed to reset node {url}: {res}")
             
-        # 4. 更新本地支援的 LoRA 列表
         LOCAL_AVAILABLE_LORAS = set(req.loras)
         logger.info(f"✅ [SP1 Sync] New configuration applied. LoRAs: {list(LOCAL_AVAILABLE_LORAS)}")
         
-        # === 5. 啟動新一輪的 Logging (關鍵修改) ===
         metrics_logging_task = asyncio.create_task(run_metrics_logging_cycle(current_interval_id))
         
         return {"status": "success"}
     finally:
-        # 6. 解除鎖定
         system_paused = False
         logger.info("▶️ [SP1 Sync] System resumed. Ready for next interval.")
 
 @app.post("/update_local_loras")
 async def update_local_loras(req: UpdateLorasRequest):
-    # 保留此 API 供不需排空時的強制測試使用
     global LOCAL_AVAILABLE_LORAS
     LOCAL_AVAILABLE_LORAS = set(req.loras)
     return {"status": "ok"}
@@ -801,7 +784,6 @@ async def update_local_loras(req: UpdateLorasRequest):
 async def send_request(req: AddRequest):
     global Z_debt, can_accept_offload, system_paused
     
-    # [新增] 如果系統正在進行 SP1 交接排空，直接拒絕請求 (503)
     if system_paused:
         raise HTTPException(status_code=503, detail="System is paused for SP1 synchronization")
         
@@ -814,9 +796,9 @@ async def send_request(req: AddRequest):
     meta = LORA_METADATA_TABLE.get(req.adapter_id)
     is_local = (meta and meta.get("type") == "local")
 
+    # [修改] Sovereignty Violation 不記錄為 Metric
     if not meta or (is_local and meta.get("cluster") != CLUSTER_ID):
         logger.warning(f"🚫 [Drop] {rid[:8]} | Sovereignty Violation")
-        async with cluster_metrics.lock: cluster_metrics.drop_queue += 1
         await stream_queues[rid]["q"].put({"type": "error", "message": "Sovereignty Violation"})
         await stream_queues[rid]["q"].put(None)
         return {"request_id": rid}
@@ -849,7 +831,8 @@ async def send_request(req: AddRequest):
         if s_eff < 0:
             if req.is_delegated:
                 Z_debt = max(0.0, Z_debt + 1.0 - EPSILON) 
-                async with cluster_metrics.lock: cluster_metrics.drop_queue += 1
+                # [修改] Offload 進來但過載 -> 算在 Local Congestion (Target Overloaded)
+                async with cluster_metrics.lock: cluster_metrics.drop_local_congestion += 1
                 await stream_queues[rid]["q"].put({"type": "error", "message": "Delegated target overloaded."})
                 await stream_queues[rid]["q"].put(None)
                 return {"request_id": rid}
@@ -857,7 +840,8 @@ async def send_request(req: AddRequest):
             if is_local:
                 record_capacity_drop()
                 Z_debt = max(0.0, Z_debt + 1.0 - EPSILON)
-                async with cluster_metrics.lock: cluster_metrics.drop_slo += 1
+                # [修改] 本地專用但滿載 -> Local Congestion
+                async with cluster_metrics.lock: cluster_metrics.drop_local_congestion += 1
                 await stream_queues[rid]["q"].put({"type": "error", "message": "System Congested (Local Drop)"})
                 await stream_queues[rid]["q"].put(None)
                 return {"request_id": rid}
@@ -866,7 +850,8 @@ async def send_request(req: AddRequest):
             if not target:
                 record_capacity_drop()
                 Z_debt = max(0.0, Z_debt + 1.0 - EPSILON)
-                async with cluster_metrics.lock: cluster_metrics.drop_queue += 1
+                # [修改] 找不到 Target -> No Target
+                async with cluster_metrics.lock: cluster_metrics.drop_no_target += 1
                 await stream_queues[rid]["q"].put({"type": "error", "message": "System Congested (No Targets)"})
                 await stream_queues[rid]["q"].put(None)
                 return {"request_id": rid}
@@ -922,14 +907,15 @@ async def status():
 
 @app.get("/cluster_metrics")
 async def get_cluster_metrics():
-    """供 EFO (每 60 秒) 拉取的 API，回傳最新的累積計數與 P95 TTFT"""
+    """供 EFO (每 60 秒) 拉取的 API"""
     async with cluster_metrics.lock:
         return {
             "local_completed": cluster_metrics.local_completed,
             "offload_in_completed": cluster_metrics.offload_in_completed,
-            "drop_queue": cluster_metrics.drop_queue,
-            "drop_slo": cluster_metrics.drop_slo,
             "offload_out": cluster_metrics.offload_out,
+            # [修改] 回傳簡化後的 Drop
+            "drop_local_congestion": cluster_metrics.drop_local_congestion,
+            "drop_no_target": cluster_metrics.drop_no_target,
             "total_effective_inference_time": sum(node_cumulative_inf_time.values()),
             "latest_p95_ttft": cluster_metrics.latest_p95
         }

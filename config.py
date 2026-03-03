@@ -53,7 +53,7 @@ EDGE_SYNC_TIMEOUT = 300.0          # [新增] 等待節點排空與重置的 HTT
 # 5. EFO Server - SP1 全域最佳化與預測模型常數
 # ------------------------------------------------------------
 # 成本權重設定 (抽象單位 Credit)
-COST_STORE_PER_GB = 0.01     # kappa_store: 1GB 模型本地存放 1 個時隙的成本
+COST_STORE_PER_GB = 0.005     # kappa_store: 1GB 模型本地存放 1 個時隙的成本
 COST_DOWNLOAD_PER_GB = 3   # kappa_inter: 跨區下載 1GB 模型的頻寬成本
 COST_INST_LOCAL = 0.001      # kappa_inst: 本地處理 1 個 Request 的算力成本
 COST_NET_TRAFFIC = 0.001     # kappa_net: 跨 Cluster 處理 1 個 Request 的流量成本
@@ -63,7 +63,7 @@ COST_DROP_PENALTY = 0.1      # SP1 視角的 Drop 懲罰 (對應 Psi_drop)
 LORA_SIZE_GB = 0.1           # S_lora: 單一 LoRA Adapter 的檔案大小估算 (GB)
 DISK_CAPACITY_GB = 5.0       # 每個 Cluster 硬碟的 LoRA 儲存容量上限 (GB)
 T_MAX_SLO = 6.0              # EFO 全域視角的 SLO 承諾最大端到端延遲 (秒)
-SWAP_EPSILON = 0.01           # 演算法微調常數：新模型多帶來的淨效用必須大於此門檻才允許替換 (防震盪)
+SWAP_EPSILON = 0           # 演算法微調常數：新模型多帶來的淨效用必須大於此門檻才允許替換 (防震盪)
 
 # 時序與 LSTM 預測模型常數
 T_TOTAL_HOURS = 336          # 總模擬時間週期 (例如 14 天)
