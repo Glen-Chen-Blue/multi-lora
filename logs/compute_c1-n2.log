@@ -1,21 +1,459 @@
-INFO:     Started server process [73141]
+/home/glenchen/miniconda3/envs/myenv/lib/python3.10/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+INFO:     Started server process [80929]
 INFO:     Waiting for application startup.
-2026-03-02 18:05:00,171 [INFO] ComputeNode: Initializing Compute Node c1-n2 (Research Note Config: Merged=15, Unmerged=12)...
-2026-03-02 18:05:00,171 [INFO] ComputeNode: 🚀 Engine loop started.
-2026-03-02 18:05:00,171 [INFO] ComputeNode: 🔄 Attempting to register to Control Node at http://127.0.0.1:9000 with my URL: http://127.0.0.1:8002
+2026-03-02 18:27:30,586 [INFO] ComputeNode: Initializing Compute Node c1-n2 (Research Note Config: Merged=15, Unmerged=12)...
+2026-03-02 18:27:34.207482: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-03-02 18:27:34.231425: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2026-03-02 18:27:34.756130: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+⏳ [Engine] Loading base model: unsloth/Meta-Llama-3.1-8B on cuda...
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:00<00:00, 302.94it/s]
+2026-03-02 18:27:38,417 [INFO] ComputeNode: 🚀 Engine loop started.
+2026-03-02 18:27:38,417 [INFO] ComputeNode: 🔄 Attempting to register to Control Node at http://127.0.0.1:9000 with my URL: http://127.0.0.1:8002
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8002 (Press CTRL+C to quit)
-2026-03-02 18:05:00,185 [INFO] httpx: HTTP Request: POST http://127.0.0.1:9000/register_node "HTTP/1.1 200 OK"
-2026-03-02 18:05:00,185 [INFO] ComputeNode: ✅ Successfully registered to Control Node!
-2026-03-02 18:05:00,187 [INFO] ComputeNode: 🔄 狀態變更為: standby
-🟢 [Engine] Running in PURE SIMULATION MODE (No GPU/PyTorch required).
-INFO:     127.0.0.1:48938 - "POST /set_status HTTP/1.1" 200 OK
-2026-03-02 18:05:06,711 [WARNING] ComputeNode: 🚨 [SP1 Sync] NODE RESET TRIGGERED! Clearing VRAM and Memory Cache...
-INFO:     127.0.0.1:48938 - "POST /reset HTTP/1.1" 200 OK
-2026-03-02 18:05:08,151 [INFO] ComputeNode: 🔄 狀態變更為: active
-INFO:     127.0.0.1:48938 - "POST /set_status HTTP/1.1" 200 OK
+2026-03-02 18:27:38,432 [INFO] httpx: HTTP Request: POST http://127.0.0.1:9000/register_node "HTTP/1.1 200 OK"
+2026-03-02 18:27:38,432 [INFO] ComputeNode: ✅ Successfully registered to Control Node!
+2026-03-02 18:27:38,433 [INFO] ComputeNode: 🔄 狀態變更為: standby
+🔧 [Engine] Replaced 224 layers with DynamicLoRALinear (Slots=12).
+INFO:     127.0.0.1:46124 - "POST /set_status HTTP/1.1" 200 OK
+2026-03-02 18:27:54,555 [WARNING] ComputeNode: 🚨 [SP1 Sync] NODE RESET TRIGGERED! Clearing VRAM and Memory Cache...
+INFO:     127.0.0.1:46124 - "POST /reset HTTP/1.1" 200 OK
+2026-03-02 19:03:54,117 [INFO] ComputeNode: 🔄 狀態變更為: active
+INFO:     127.0.0.1:46124 - "POST /set_status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47130 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47144 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47134 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+2026-03-02 19:03:54,484 [INFO] httpx: HTTP Request: GET http://127.0.0.1:9000/fetch_adapter/LoRA_42 "HTTP/1.1 200 OK"
+2026-03-02 19:03:54,674 [INFO] httpx: HTTP Request: GET http://127.0.0.1:9000/fetch_adapter/LoRA_76 "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:47160 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47180 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47174 - "POST /add_request HTTP/1.1" 200 OK
+2026-03-02 19:03:55,287 [INFO] httpx: HTTP Request: GET http://127.0.0.1:9000/fetch_adapter/LoRA_38 "HTTP/1.1 200 OK"
+2026-03-02 19:03:55,511 [INFO] httpx: HTTP Request: GET http://127.0.0.1:9000/fetch_adapter/LoRA_55 "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:47192 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47130 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47160 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47144 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47134 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47180 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47174 - "POST /add_request HTTP/1.1" 200 OK
+2026-03-02 19:04:22,120 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
+INFO:     127.0.0.1:46124 - "POST /drain HTTP/1.1" 200 OK
+2026-03-02 19:04:22,308 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
+2026-03-02 19:05:10,127 [INFO] ComputeNode: 🔄 狀態變更為: active
+INFO:     127.0.0.1:46124 - "POST /set_status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41242 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41256 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41232 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41268 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41278 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41284 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48624 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41284 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48624 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+2026-03-02 19:05:38,133 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
+INFO:     127.0.0.1:41284 - "POST /drain HTTP/1.1" 200 OK
+2026-03-02 19:05:43,882 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
+2026-03-02 19:06:18,138 [INFO] ComputeNode: 🔄 狀態變更為: active
+INFO:     127.0.0.1:46124 - "POST /set_status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48724 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48746 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48734 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48750 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48754 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48756 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48762 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52382 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52398 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48724 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48734 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48750 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48754 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48756 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52382 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52398 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48724 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48734 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48750 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48754 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48756 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52382 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48724 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52398 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48734 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48750 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48754 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48756 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52382 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48724 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52398 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48734 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48750 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48754 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48756 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48724 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52382 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52398 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48734 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48750 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48754 - "POST /add_request HTTP/1.1" 200 OK
+2026-03-02 19:07:34,148 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
+INFO:     127.0.0.1:46124 - "POST /drain HTTP/1.1" 200 OK
+2026-03-02 19:07:34,864 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
+2026-03-02 19:07:55,151 [INFO] ComputeNode: 🔄 狀態變更為: active
+INFO:     127.0.0.1:46124 - "POST /set_status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39102 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39156 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39148 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39116 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39160 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39132 - "POST /add_request HTTP/1.1" 200 OK
+2026-03-02 19:07:55,886 [INFO] httpx: HTTP Request: GET http://127.0.0.1:9000/fetch_adapter/LoRA_6 "HTTP/1.1 200 OK"
+2026-03-02 19:07:56,082 [INFO] httpx: HTTP Request: GET http://127.0.0.1:9000/fetch_adapter/LoRA_73 "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:39168 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39102 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39148 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39116 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39132 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39102 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45742 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32950 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32966 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32968 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32984 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32990 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39102 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32998 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33014 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45742 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32950 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39102 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32966 - "POST /add_request HTTP/1.1" 200 OK
+2026-03-02 19:08:52,157 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
+INFO:     127.0.0.1:46124 - "POST /drain HTTP/1.1" 200 OK
+2026-03-02 19:08:53,153 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
+2026-03-02 19:09:22,160 [INFO] ComputeNode: 🔄 狀態變更為: active
+INFO:     127.0.0.1:46124 - "POST /set_status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50550 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50558 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50220 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50550 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50226 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50228 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50558 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52196 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52200 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52204 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52210 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50550 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50558 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50220 - "POST /add_request HTTP/1.1" 200 OK
+2026-03-02 19:09:49,122 [INFO] httpx: HTTP Request: GET http://127.0.0.1:9000/fetch_adapter/LoRA_9 "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:52196 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52200 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45702 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52210 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50550 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50558 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50220 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45714 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50550 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50558 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52196 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+2026-03-02 19:10:19,169 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
+INFO:     127.0.0.1:50550 - "POST /drain HTTP/1.1" 200 OK
+2026-03-02 19:10:25,767 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
+2026-03-02 19:12:55,187 [INFO] ComputeNode: 🔄 狀態變更為: active
+INFO:     127.0.0.1:46124 - "POST /set_status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59376 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59360 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59396 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59390 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59350 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59408 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59414 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59430 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59350 - "POST /add_request HTTP/1.1" 200 OK
+2026-03-02 19:13:16,192 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
+INFO:     127.0.0.1:59360 - "POST /drain HTTP/1.1" 200 OK
+2026-03-02 19:13:17,120 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
+2026-03-02 19:15:56,217 [INFO] ComputeNode: 🔄 狀態變更為: active
+INFO:     127.0.0.1:46124 - "POST /set_status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33438 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33400 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33452 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33412 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33424 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33456 - "POST /add_request HTTP/1.1" 200 OK
+2026-03-02 19:16:11,220 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
+INFO:     127.0.0.1:46124 - "POST /drain HTTP/1.1" 200 OK
+2026-03-02 19:16:11,520 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
+2026-03-02 19:17:03,228 [INFO] ComputeNode: 🔄 狀態變更為: active
+INFO:     127.0.0.1:46124 - "POST /set_status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47852 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47898 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47854 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47884 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47886 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47870 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47902 - "POST /add_request HTTP/1.1" 200 OK
+2026-03-02 19:17:19,231 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
+INFO:     127.0.0.1:46124 - "POST /drain HTTP/1.1" 200 OK
+2026-03-02 19:17:19,984 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
+2026-03-02 19:17:55,234 [INFO] ComputeNode: 🔄 狀態變更為: active
+INFO:     127.0.0.1:46124 - "POST /set_status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56822 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56844 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56866 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56858 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56830 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56854 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56868 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56822 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56830 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56854 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56844 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56866 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56858 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56868 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36350 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56822 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56830 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56844 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56844 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60714 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32998 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33004 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+2026-03-02 19:19:09,250 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
+INFO:     127.0.0.1:60714 - "POST /drain HTTP/1.1" 200 OK
+2026-03-02 19:19:11,098 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
+2026-03-02 19:19:49,258 [INFO] ComputeNode: 🔄 狀態變更為: active
+INFO:     127.0.0.1:46124 - "POST /set_status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58014 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58046 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58050 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58030 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58056 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32816 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32822 - "POST /add_request HTTP/1.1" 200 OK
+2026-03-02 19:19:56,326 [INFO] httpx: HTTP Request: GET http://127.0.0.1:9000/fetch_adapter/LoRA_17 "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58014 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58030 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58056 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58014 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57804 - "POST /add_request HTTP/1.1" 200 OK
+2026-03-02 19:20:24,264 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
+INFO:     127.0.0.1:46124 - "POST /drain HTTP/1.1" 200 OK
+2026-03-02 19:20:24,837 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
+2026-03-02 19:20:58,268 [INFO] ComputeNode: 🔄 狀態變更為: active
+INFO:     127.0.0.1:46124 - "POST /set_status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36066 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36058 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36064 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36068 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36058 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36064 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36066 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36068 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36066 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36064 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36068 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36012 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36028 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36064 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36066 - "POST /add_request HTTP/1.1" 200 OK
+2026-03-02 19:21:39,276 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
+INFO:     127.0.0.1:36068 - "POST /drain HTTP/1.1" 200 OK
+2026-03-02 19:21:45,082 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
+2026-03-02 19:21:56,278 [INFO] ComputeNode: 🔄 狀態變更為: active
+INFO:     127.0.0.1:46124 - "POST /set_status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32936 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32950 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32952 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32968 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32936 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32950 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44726 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35008 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32936 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35010 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35016 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32950 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35028 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35030 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35032 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44726 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35008 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32936 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35010 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35016 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35028 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32950 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35030 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35032 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44726 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35008 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32936 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35010 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35016 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32950 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35030 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35028 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35032 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44726 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35008 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32936 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35016 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35010 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35030 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32950 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35028 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35032 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44726 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35008 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35010 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32936 - "POST /add_request HTTP/1.1" 200 OK
+2026-03-02 19:23:07,838 [INFO] httpx: HTTP Request: GET http://127.0.0.1:9000/fetch_adapter/LoRA_79 "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:35016 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32950 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35030 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35028 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35032 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44726 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35008 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32936 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35010 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35048 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35030 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32950 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35016 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35028 - "POST /add_request HTTP/1.1" 200 OK
+🔀 [Seamless] Merging LoRA_76 into base model on-the-fly...
+INFO:     127.0.0.1:35032 - "POST /merge HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35032 - "POST /add_request HTTP/1.1" 200 OK
+🔀 [Seamless] Unmerging LoRA_76...
+INFO:     127.0.0.1:46124 - "POST /unmerge HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44726 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32950 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:32936 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35008 - "POST /add_request HTTP/1.1" 200 OK
+2026-03-02 19:23:48,290 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
+INFO:     127.0.0.1:46124 - "POST /drain HTTP/1.1" 200 OK
+2026-03-02 19:23:48,987 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
+2026-03-02 19:25:10,295 [INFO] ComputeNode: 🔄 狀態變更為: active
+INFO:     127.0.0.1:46124 - "POST /set_status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34716 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34734 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34738 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34728 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34730 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34758 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34746 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34774 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+2026-03-02 19:25:27,296 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
+INFO:     127.0.0.1:34774 - "POST /drain HTTP/1.1" 200 OK
+2026-03-02 19:25:33,316 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
+2026-03-02 19:25:39,299 [INFO] ComputeNode: 🔄 狀態變更為: active
+INFO:     127.0.0.1:46124 - "POST /set_status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43436 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43444 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43460 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43470 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43486 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43492 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43508 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48654 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43492 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58576 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43508 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58580 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58588 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48654 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48654 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47762 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47764 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48654 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47780 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58680 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58690 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47762 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58702 - "POST /add_request HTTP/1.1" 200 OK
+2026-03-02 19:26:44,310 [INFO] ComputeNode: 🚰 收到 Drain 指令，停止接收新請求，等待手上任務排空...
+INFO:     127.0.0.1:46124 - "POST /drain HTTP/1.1" 200 OK
+2026-03-02 19:26:44,848 [INFO] ComputeNode: ❄️ 所有任務已排空，節點自動轉為 Standby
+2026-03-02 19:27:54,322 [INFO] ComputeNode: 🔄 狀態變更為: active
+INFO:     127.0.0.1:46124 - "POST /set_status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53060 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46124 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53036 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53030 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53000 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53048 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53016 - "POST /add_request HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53034 - "POST /add_request HTTP/1.1" 200 OK
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
-2026-03-02 18:05:10,514 [INFO] ComputeNode: Shutting down...
+2026-03-03 11:17:21,069 [INFO] ComputeNode: Shutting down...
 INFO:     Application shutdown complete.
-INFO:     Finished server process [73141]
+INFO:     Finished server process [80929]

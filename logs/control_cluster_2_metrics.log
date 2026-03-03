@@ -1,1 +1,0 @@
-{"timestamp": 1772445908.143575, "cluster": "cluster_2", "metrics": {"local_completed": 0, "offload_in_completed": 0, "drop_queue": 4, "drop_slo": 0, "offload_out": 0, "total_effective_inference_time": 0.9964747428894043, "p95_ttft": 0.23499011993408203, "z_debt": 3.7500000000000004}}

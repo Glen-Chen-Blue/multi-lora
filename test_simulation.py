@@ -10,7 +10,7 @@ from config import SP1_INTERVAL_SECONDS
 
 TRACE_CSV = "./information/simulation_data.csv"
 START_OFFSET = 86400 * 2
-RUN_DURATION = 3600
+RUN_DURATION = 3600 * 12
 TIMEOUT = 120
 
 EFO_URL = "http://localhost:9900"
@@ -21,7 +21,7 @@ EFO_URL = "http://localhost:9900"
 SPEEDUP = 1.0
 
 # 只有在這個列表中的 Cluster 請求兩會被發送，其餘會被忽略
-TARGET_CLUSTERS = ["cluster_1", "cluster_2", "cluster_3"] 
+TARGET_CLUSTERS = ["cluster_1"] 
 # ==============
 
 CLUSTER_PORT_MAP = {

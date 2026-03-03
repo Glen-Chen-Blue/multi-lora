@@ -1,40 +1,180 @@
-INFO:     Started server process [72975]
+INFO:     Started server process [80704]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:9900 (Press CTRL+C to quit)
-2026-03-02 18:04:58,141 [INFO] EFO: 🔗 Cluster Registered: cluster_2
-INFO:     127.0.0.1:57744 - "POST /register_cluster HTTP/1.1" 200 OK
-2026-03-02 18:04:58,142 [INFO] EFO: 🔗 Cluster Registered: cluster_3
-INFO:     127.0.0.1:57746 - "POST /register_cluster HTTP/1.1" 200 OK
-2026-03-02 18:04:58,143 [INFO] EFO: 🔗 Cluster Registered: cluster_1
-INFO:     127.0.0.1:57762 - "POST /register_cluster HTTP/1.1" 200 OK
-2026-03-02 18:05:06,672 [INFO] EFO: 🚀 System initialized via first /time_edge trigger!
-2026-03-02 18:05:06,672 [INFO] EFO: 
+2026-03-02 18:27:26,835 [INFO] EFO: 🔗 Cluster Registered: cluster_1
+INFO:     127.0.0.1:50418 - "POST /register_cluster HTTP/1.1" 200 OK
+2026-03-02 18:27:54,289 [INFO] EFO: 🚀 System initialized via first /time_edge trigger!
+2026-03-02 18:27:54,289 [INFO] EFO: 
 ==================================================
 ⏱️ [TIME EDGE] Advancing to Time Step 0
 ==================================================
-2026-03-02 18:05:06,672 [ERROR] EFO: ❌ CSV Parsing Error: name 'pd' is not defined
-2026-03-02 18:05:06,672 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning...
-2026-03-02 18:05:06,672 [INFO] EFO: 📊 [SP1 Result] cluster_2: Target 10/50 LoRAs (New DLs: 10)
-2026-03-02 18:05:06,672 [INFO] EFO:    ┣ Local (Mandatory): 10 models
-2026-03-02 18:05:06,672 [INFO] EFO:    ┣ Global (Dynamic) : 0 models
-2026-03-02 18:05:06,672 [INFO] EFO:    ┗ Provisioned List : ['LoRA_81', 'LoRA_82', 'LoRA_83', 'LoRA_84', 'LoRA_85', 'LoRA_86', 'LoRA_87', 'LoRA_88', 'LoRA_89', 'LoRA_90']
-2026-03-02 18:05:06,673 [INFO] EFO: 📊 [SP1 Result] cluster_3: Target 10/50 LoRAs (New DLs: 10)
-2026-03-02 18:05:06,673 [INFO] EFO:    ┣ Local (Mandatory): 10 models
-2026-03-02 18:05:06,673 [INFO] EFO:    ┣ Global (Dynamic) : 0 models
-2026-03-02 18:05:06,673 [INFO] EFO:    ┗ Provisioned List : ['LoRA_100', 'LoRA_91', 'LoRA_92', 'LoRA_93', 'LoRA_94', 'LoRA_95', 'LoRA_96', 'LoRA_97', 'LoRA_98', 'LoRA_99']
-2026-03-02 18:05:06,673 [INFO] EFO: 📊 [SP1 Result] cluster_1: Target 10/50 LoRAs (New DLs: 10)
-2026-03-02 18:05:06,673 [INFO] EFO:    ┣ Local (Mandatory): 10 models
-2026-03-02 18:05:06,673 [INFO] EFO:    ┣ Global (Dynamic) : 0 models
-2026-03-02 18:05:06,673 [INFO] EFO:    ┗ Provisioned List : ['LoRA_71', 'LoRA_72', 'LoRA_73', 'LoRA_74', 'LoRA_75', 'LoRA_76', 'LoRA_77', 'LoRA_78', 'LoRA_79', 'LoRA_80']
-2026-03-02 18:05:06,673 [INFO] EFO: ⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...
-2026-03-02 18:05:06,703 [INFO] EFO: 📊 Global Metrics Polling started (60s interval).
-2026-03-02 18:05:06,712 [INFO] EFO: ✅ cluster_2 synced successfully.
-2026-03-02 18:05:06,712 [INFO] EFO: ✅ cluster_3 synced successfully.
-2026-03-02 18:05:06,712 [INFO] EFO: ✅ cluster_1 synced successfully.
-2026-03-02 18:05:06,712 [INFO] EFO: ✨ All clusters have applied SP1 and are ready for the next time step.
-INFO:     127.0.0.1:43588 - "POST /time_edge HTTP/1.1" 200 OK
+2026-03-02 18:27:54,521 [INFO] EFO: 📈 [Pandas Forecast] cluster_1 步進 0: 預計有 255 個請求
+2026-03-02 18:27:54,521 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning...
+2026-03-02 18:27:54,521 [INFO] EFO: 📊 [SP1 Result] cluster_1: Target 24/50 LoRAs (New DLs: 24)
+2026-03-02 18:27:54,521 [INFO] EFO:    ┣ Local (Mandatory): 10 models
+2026-03-02 18:27:54,521 [INFO] EFO:    ┣ Global (Dynamic) : 14 models
+2026-03-02 18:27:54,521 [INFO] EFO:    ┗ Provisioned List : ['LoRA_1', 'LoRA_14', 'LoRA_17', 'LoRA_25', 'LoRA_38', 'LoRA_4', 'LoRA_42', 'LoRA_45', 'LoRA_50', 'LoRA_51', 'LoRA_55', 'LoRA_6', 'LoRA_64', 'LoRA_71', 'LoRA_72', 'LoRA_73', 'LoRA_74', 'LoRA_75', 'LoRA_76', 'LoRA_77', 'LoRA_78', 'LoRA_79', 'LoRA_80', 'LoRA_9']
+2026-03-02 18:27:54,521 [INFO] EFO: ⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...
+2026-03-02 18:27:54,550 [INFO] EFO: 📊 Global Metrics Polling started (60s interval).
+2026-03-02 18:27:54,556 [INFO] EFO: ✅ cluster_1 synced successfully.
+2026-03-02 18:27:54,556 [INFO] EFO: ✨ All clusters have applied SP1 and are ready for the next time step.
+INFO:     127.0.0.1:48438 - "POST /time_edge HTTP/1.1" 200 OK
+2026-03-02 19:27:54,497 [INFO] EFO: 
+==================================================
+⏱️ [TIME EDGE] Advancing to Time Step 1
+==================================================
+2026-03-02 19:27:54,747 [INFO] EFO: 📈 [Pandas Forecast] cluster_1 步進 1: 預計有 642 個請求
+2026-03-02 19:27:54,747 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning...
+2026-03-02 19:27:54,747 [INFO] EFO: 📊 [SP1 Result] cluster_1: Target 23/50 LoRAs (New DLs: 1)
+2026-03-02 19:27:54,747 [INFO] EFO:    ┣ Local (Mandatory): 10 models
+2026-03-02 19:27:54,747 [INFO] EFO:    ┣ Global (Dynamic) : 13 models
+2026-03-02 19:27:54,747 [INFO] EFO:    ┗ Provisioned List : ['LoRA_14', 'LoRA_17', 'LoRA_25', 'LoRA_4', 'LoRA_42', 'LoRA_45', 'LoRA_50', 'LoRA_51', 'LoRA_55', 'LoRA_6', 'LoRA_64', 'LoRA_70', 'LoRA_71', 'LoRA_72', 'LoRA_73', 'LoRA_74', 'LoRA_75', 'LoRA_76', 'LoRA_77', 'LoRA_78', 'LoRA_79', 'LoRA_80', 'LoRA_9']
+2026-03-02 19:27:54,747 [INFO] EFO: ⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...
+2026-03-02 19:32:54,759 [ERROR] EFO: ❌ cluster_1 apply_sp1_and_reset failed: 
+2026-03-02 19:32:54,759 [INFO] EFO: ✨ All clusters have applied SP1 and are ready for the next time step.
+INFO:     127.0.0.1:38290 - "POST /time_edge HTTP/1.1" 200 OK
+2026-03-02 20:32:52,226 [INFO] EFO: 
+==================================================
+⏱️ [TIME EDGE] Advancing to Time Step 2
+==================================================
+2026-03-02 20:32:52,547 [INFO] EFO: 📈 [Pandas Forecast] cluster_1 步進 2: 預計有 6372 個請求
+2026-03-02 20:32:52,547 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning...
+2026-03-02 20:32:52,548 [INFO] EFO: 📊 [SP1 Result] cluster_1: Target 21/50 LoRAs (New DLs: 2)
+2026-03-02 20:32:52,548 [INFO] EFO:    ┣ Local (Mandatory): 10 models
+2026-03-02 20:32:52,548 [INFO] EFO:    ┣ Global (Dynamic) : 11 models
+2026-03-02 20:32:52,548 [INFO] EFO:    ┗ Provisioned List : ['LoRA_1', 'LoRA_14', 'LoRA_16', 'LoRA_17', 'LoRA_25', 'LoRA_42', 'LoRA_50', 'LoRA_55', 'LoRA_6', 'LoRA_64', 'LoRA_70', 'LoRA_71', 'LoRA_72', 'LoRA_73', 'LoRA_74', 'LoRA_75', 'LoRA_76', 'LoRA_77', 'LoRA_78', 'LoRA_79', 'LoRA_80']
+2026-03-02 20:32:52,548 [INFO] EFO: ⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...
+2026-03-02 20:37:52,559 [ERROR] EFO: ❌ cluster_1 apply_sp1_and_reset failed: 
+2026-03-02 20:37:52,559 [INFO] EFO: ✨ All clusters have applied SP1 and are ready for the next time step.
+INFO:     127.0.0.1:36246 - "POST /time_edge HTTP/1.1" 200 OK
+2026-03-02 21:37:55,172 [INFO] EFO: 
+==================================================
+⏱️ [TIME EDGE] Advancing to Time Step 3
+==================================================
+2026-03-02 21:37:55,462 [INFO] EFO: 📈 [Pandas Forecast] cluster_1 步進 3: 預計有 4757 個請求
+2026-03-02 21:37:55,462 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning...
+2026-03-02 21:37:55,462 [INFO] EFO: 📊 [SP1 Result] cluster_1: Target 21/50 LoRAs (New DLs: 2)
+2026-03-02 21:37:55,462 [INFO] EFO:    ┣ Local (Mandatory): 10 models
+2026-03-02 21:37:55,462 [INFO] EFO:    ┣ Global (Dynamic) : 11 models
+2026-03-02 21:37:55,462 [INFO] EFO:    ┗ Provisioned List : ['LoRA_1', 'LoRA_16', 'LoRA_17', 'LoRA_25', 'LoRA_42', 'LoRA_50', 'LoRA_55', 'LoRA_6', 'LoRA_7', 'LoRA_70', 'LoRA_71', 'LoRA_72', 'LoRA_73', 'LoRA_74', 'LoRA_75', 'LoRA_76', 'LoRA_77', 'LoRA_78', 'LoRA_79', 'LoRA_80', 'LoRA_9']
+2026-03-02 21:37:55,462 [INFO] EFO: ⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...
+2026-03-02 21:42:55,474 [ERROR] EFO: ❌ cluster_1 apply_sp1_and_reset failed: 
+2026-03-02 21:42:55,474 [INFO] EFO: ✨ All clusters have applied SP1 and are ready for the next time step.
+INFO:     127.0.0.1:35564 - "POST /time_edge HTTP/1.1" 200 OK
+2026-03-02 22:42:54,448 [INFO] EFO: 
+==================================================
+⏱️ [TIME EDGE] Advancing to Time Step 4
+==================================================
+2026-03-02 22:42:54,733 [INFO] EFO: 📈 [Pandas Forecast] cluster_1 步進 4: 預計有 3754 個請求
+2026-03-02 22:42:54,734 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning...
+2026-03-02 22:42:54,734 [INFO] EFO: 📊 [SP1 Result] cluster_1: Target 20/50 LoRAs (New DLs: 0)
+2026-03-02 22:42:54,734 [INFO] EFO:    ┣ Local (Mandatory): 10 models
+2026-03-02 22:42:54,734 [INFO] EFO:    ┣ Global (Dynamic) : 10 models
+2026-03-02 22:42:54,734 [INFO] EFO:    ┗ Provisioned List : ['LoRA_16', 'LoRA_17', 'LoRA_25', 'LoRA_42', 'LoRA_50', 'LoRA_55', 'LoRA_6', 'LoRA_7', 'LoRA_70', 'LoRA_71', 'LoRA_72', 'LoRA_73', 'LoRA_74', 'LoRA_75', 'LoRA_76', 'LoRA_77', 'LoRA_78', 'LoRA_79', 'LoRA_80', 'LoRA_9']
+2026-03-02 22:42:54,734 [INFO] EFO: ⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...
+2026-03-02 22:47:54,745 [ERROR] EFO: ❌ cluster_1 apply_sp1_and_reset failed: 
+2026-03-02 22:47:54,746 [INFO] EFO: ✨ All clusters have applied SP1 and are ready for the next time step.
+INFO:     127.0.0.1:45166 - "POST /time_edge HTTP/1.1" 200 OK
+2026-03-02 23:47:55,386 [INFO] EFO: 
+==================================================
+⏱️ [TIME EDGE] Advancing to Time Step 5
+==================================================
+2026-03-02 23:47:55,625 [INFO] EFO: 📈 [Pandas Forecast] cluster_1 步進 5: 預計有 935 個請求
+2026-03-02 23:47:55,625 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning...
+2026-03-02 23:47:55,625 [INFO] EFO: 📊 [SP1 Result] cluster_1: Target 22/50 LoRAs (New DLs: 5)
+2026-03-02 23:47:55,625 [INFO] EFO:    ┣ Local (Mandatory): 10 models
+2026-03-02 23:47:55,625 [INFO] EFO:    ┣ Global (Dynamic) : 12 models
+2026-03-02 23:47:55,625 [INFO] EFO:    ┗ Provisioned List : ['LoRA_1', 'LoRA_17', 'LoRA_25', 'LoRA_32', 'LoRA_4', 'LoRA_42', 'LoRA_45', 'LoRA_50', 'LoRA_51', 'LoRA_55', 'LoRA_6', 'LoRA_70', 'LoRA_71', 'LoRA_72', 'LoRA_73', 'LoRA_74', 'LoRA_75', 'LoRA_76', 'LoRA_77', 'LoRA_78', 'LoRA_79', 'LoRA_80']
+2026-03-02 23:47:55,625 [INFO] EFO: ⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...
+2026-03-02 23:52:55,637 [ERROR] EFO: ❌ cluster_1 apply_sp1_and_reset failed: 
+2026-03-02 23:52:55,637 [INFO] EFO: ✨ All clusters have applied SP1 and are ready for the next time step.
+INFO:     127.0.0.1:59780 - "POST /time_edge HTTP/1.1" 200 OK
+2026-03-03 00:52:55,990 [INFO] EFO: 
+==================================================
+⏱️ [TIME EDGE] Advancing to Time Step 6
+==================================================
+2026-03-03 00:52:56,265 [INFO] EFO: 📈 [Pandas Forecast] cluster_1 步進 6: 預計有 3886 個請求
+2026-03-03 00:52:56,266 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning...
+2026-03-03 00:52:56,266 [INFO] EFO: 📊 [SP1 Result] cluster_1: Target 19/50 LoRAs (New DLs: 0)
+2026-03-03 00:52:56,266 [INFO] EFO:    ┣ Local (Mandatory): 10 models
+2026-03-03 00:52:56,266 [INFO] EFO:    ┣ Global (Dynamic) : 9 models
+2026-03-03 00:52:56,266 [INFO] EFO:    ┗ Provisioned List : ['LoRA_1', 'LoRA_17', 'LoRA_25', 'LoRA_42', 'LoRA_50', 'LoRA_51', 'LoRA_55', 'LoRA_6', 'LoRA_70', 'LoRA_71', 'LoRA_72', 'LoRA_73', 'LoRA_74', 'LoRA_75', 'LoRA_76', 'LoRA_77', 'LoRA_78', 'LoRA_79', 'LoRA_80']
+2026-03-03 00:52:56,266 [INFO] EFO: ⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...
+2026-03-03 00:57:56,278 [ERROR] EFO: ❌ cluster_1 apply_sp1_and_reset failed: 
+2026-03-03 00:57:56,278 [INFO] EFO: ✨ All clusters have applied SP1 and are ready for the next time step.
+INFO:     127.0.0.1:58338 - "POST /time_edge HTTP/1.1" 200 OK
+2026-03-03 01:57:55,958 [INFO] EFO: 
+==================================================
+⏱️ [TIME EDGE] Advancing to Time Step 7
+==================================================
+2026-03-03 01:57:56,278 [INFO] EFO: 📈 [Pandas Forecast] cluster_1 步進 7: 預計有 6219 個請求
+2026-03-03 01:57:56,278 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning...
+2026-03-03 01:57:56,278 [INFO] EFO: 📊 [SP1 Result] cluster_1: Target 18/50 LoRAs (New DLs: 0)
+2026-03-03 01:57:56,278 [INFO] EFO:    ┣ Local (Mandatory): 10 models
+2026-03-03 01:57:56,278 [INFO] EFO:    ┣ Global (Dynamic) : 8 models
+2026-03-03 01:57:56,278 [INFO] EFO:    ┗ Provisioned List : ['LoRA_17', 'LoRA_25', 'LoRA_42', 'LoRA_50', 'LoRA_51', 'LoRA_55', 'LoRA_6', 'LoRA_70', 'LoRA_71', 'LoRA_72', 'LoRA_73', 'LoRA_74', 'LoRA_75', 'LoRA_76', 'LoRA_77', 'LoRA_78', 'LoRA_79', 'LoRA_80']
+2026-03-03 01:57:56,278 [INFO] EFO: ⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...
+2026-03-03 02:02:56,290 [ERROR] EFO: ❌ cluster_1 apply_sp1_and_reset failed: 
+2026-03-03 02:02:56,290 [INFO] EFO: ✨ All clusters have applied SP1 and are ready for the next time step.
+INFO:     127.0.0.1:42000 - "POST /time_edge HTTP/1.1" 200 OK
+2026-03-03 03:02:56,647 [INFO] EFO: 
+==================================================
+⏱️ [TIME EDGE] Advancing to Time Step 8
+==================================================
+2026-03-03 03:02:56,905 [INFO] EFO: 📈 [Pandas Forecast] cluster_1 步進 8: 預計有 2689 個請求
+2026-03-03 03:02:56,905 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning...
+2026-03-03 03:02:56,905 [INFO] EFO: 📊 [SP1 Result] cluster_1: Target 18/50 LoRAs (New DLs: 0)
+2026-03-03 03:02:56,905 [INFO] EFO:    ┣ Local (Mandatory): 10 models
+2026-03-03 03:02:56,905 [INFO] EFO:    ┣ Global (Dynamic) : 8 models
+2026-03-03 03:02:56,905 [INFO] EFO:    ┗ Provisioned List : ['LoRA_17', 'LoRA_25', 'LoRA_42', 'LoRA_50', 'LoRA_51', 'LoRA_55', 'LoRA_6', 'LoRA_70', 'LoRA_71', 'LoRA_72', 'LoRA_73', 'LoRA_74', 'LoRA_75', 'LoRA_76', 'LoRA_77', 'LoRA_78', 'LoRA_79', 'LoRA_80']
+2026-03-03 03:02:56,906 [INFO] EFO: ⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...
+2026-03-03 03:07:56,916 [ERROR] EFO: ❌ cluster_1 apply_sp1_and_reset failed: 
+2026-03-03 03:07:56,917 [INFO] EFO: ✨ All clusters have applied SP1 and are ready for the next time step.
+INFO:     127.0.0.1:59298 - "POST /time_edge HTTP/1.1" 200 OK
+2026-03-03 04:07:56,909 [INFO] EFO: 
+==================================================
+⏱️ [TIME EDGE] Advancing to Time Step 9
+==================================================
+2026-03-03 04:07:57,176 [INFO] EFO: 📈 [Pandas Forecast] cluster_1 步進 9: 預計有 2305 個請求
+2026-03-03 04:07:57,176 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning...
+2026-03-03 04:07:57,182 [INFO] EFO: 📊 [SP1 Result] cluster_1: Target 21/50 LoRAs (New DLs: 3)
+2026-03-03 04:07:57,182 [INFO] EFO:    ┣ Local (Mandatory): 10 models
+2026-03-03 04:07:57,182 [INFO] EFO:    ┣ Global (Dynamic) : 11 models
+2026-03-03 04:07:57,182 [INFO] EFO:    ┗ Provisioned List : ['LoRA_1', 'LoRA_14', 'LoRA_17', 'LoRA_25', 'LoRA_42', 'LoRA_50', 'LoRA_51', 'LoRA_55', 'LoRA_6', 'LoRA_7', 'LoRA_70', 'LoRA_71', 'LoRA_72', 'LoRA_73', 'LoRA_74', 'LoRA_75', 'LoRA_76', 'LoRA_77', 'LoRA_78', 'LoRA_79', 'LoRA_80']
+2026-03-03 04:07:57,182 [INFO] EFO: ⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...
+2026-03-03 04:12:57,194 [ERROR] EFO: ❌ cluster_1 apply_sp1_and_reset failed: 
+2026-03-03 04:12:57,194 [INFO] EFO: ✨ All clusters have applied SP1 and are ready for the next time step.
+INFO:     127.0.0.1:39444 - "POST /time_edge HTTP/1.1" 200 OK
+2026-03-03 05:12:57,155 [INFO] EFO: 
+==================================================
+⏱️ [TIME EDGE] Advancing to Time Step 10
+==================================================
+2026-03-03 05:12:57,404 [INFO] EFO: 📈 [Pandas Forecast] cluster_1 步進 10: 預計有 2284 個請求
+2026-03-03 05:12:57,404 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning...
+2026-03-03 05:12:57,404 [INFO] EFO: 📊 [SP1 Result] cluster_1: Target 20/50 LoRAs (New DLs: 0)
+2026-03-03 05:12:57,404 [INFO] EFO:    ┣ Local (Mandatory): 10 models
+2026-03-03 05:12:57,404 [INFO] EFO:    ┣ Global (Dynamic) : 10 models
+2026-03-03 05:12:57,404 [INFO] EFO:    ┗ Provisioned List : ['LoRA_1', 'LoRA_14', 'LoRA_17', 'LoRA_25', 'LoRA_42', 'LoRA_50', 'LoRA_55', 'LoRA_6', 'LoRA_7', 'LoRA_70', 'LoRA_71', 'LoRA_72', 'LoRA_73', 'LoRA_74', 'LoRA_75', 'LoRA_76', 'LoRA_77', 'LoRA_78', 'LoRA_79', 'LoRA_80']
+2026-03-03 05:12:57,405 [INFO] EFO: ⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...
+2026-03-03 05:17:57,415 [ERROR] EFO: ❌ cluster_1 apply_sp1_and_reset failed: 
+2026-03-03 05:17:57,416 [INFO] EFO: ✨ All clusters have applied SP1 and are ready for the next time step.
+INFO:     127.0.0.1:52844 - "POST /time_edge HTTP/1.1" 200 OK
+2026-03-03 06:17:57,301 [INFO] EFO: 
+==================================================
+⏱️ [TIME EDGE] Advancing to Time Step 11
+==================================================
+2026-03-03 06:17:57,579 [INFO] EFO: 📈 [Pandas Forecast] cluster_1 步進 11: 預計有 4108 個請求
+2026-03-03 06:17:57,579 [INFO] EFO: ⚙️ Running SP1 Adaptive CSG-Swap Provisioning...
+2026-03-03 06:17:57,579 [INFO] EFO: 📊 [SP1 Result] cluster_1: Target 24/50 LoRAs (New DLs: 5)
+2026-03-03 06:17:57,579 [INFO] EFO:    ┣ Local (Mandatory): 10 models
+2026-03-03 06:17:57,579 [INFO] EFO:    ┣ Global (Dynamic) : 14 models
+2026-03-03 06:17:57,579 [INFO] EFO:    ┗ Provisioned List : ['LoRA_14', 'LoRA_17', 'LoRA_25', 'LoRA_37', 'LoRA_4', 'LoRA_42', 'LoRA_45', 'LoRA_50', 'LoRA_51', 'LoRA_55', 'LoRA_6', 'LoRA_64', 'LoRA_7', 'LoRA_70', 'LoRA_71', 'LoRA_72', 'LoRA_73', 'LoRA_74', 'LoRA_75', 'LoRA_76', 'LoRA_77', 'LoRA_78', 'LoRA_79', 'LoRA_80']
+2026-03-03 06:17:57,579 [INFO] EFO: ⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...
+2026-03-03 06:22:57,591 [ERROR] EFO: ❌ cluster_1 apply_sp1_and_reset failed: 
+2026-03-03 06:22:57,591 [INFO] EFO: ✨ All clusters have applied SP1 and are ready for the next time step.
+INFO:     127.0.0.1:34556 - "POST /time_edge HTTP/1.1" 200 OK
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [72975]
+INFO:     Finished server process [80704]

@@ -6,6 +6,7 @@ import asyncio
 import httpx
 import time
 import numpy as np
+import pandas as pd
 from contextlib import asynccontextmanager
 from typing import Dict, Any, List
 from collections import defaultdict
@@ -177,69 +178,73 @@ async def poll_global_metrics():
 # ============================================================
 def exact_csv_forecasting(time_step: int):
     """
-    使用 Pandas 掃描 CSV，精準統計該 time_step 區間內的所有請求數量
+    參考使用者提供的 pandas 做法進行重構：
+    1. 讀取完整 TRACE_CSV。
+    2. 進行 START_OFFSET 校正。
+    3. 過濾出當前 SP1 區間 (start_sec 到 end_sec) 的請求。
+    4. 僅統計目前已註冊 (active_clusters) 的目標叢集。
     """
     global predicted_demand
     predicted_demand.clear()
     
-    START_OFFSET = 86400 * 2
-    
+    # 基礎設定
+    START_OFFSET = 86400 * 2  # 模擬起始偏移量（2天）
     start_sec = time_step * SP1_INTERVAL_SECONDS
     end_sec = (time_step + 1) * SP1_INTERVAL_SECONDS
     
-    # 初始化每個 active_cluster 對所有 LoRA 的預期需求量為 0
+    # 初始化預測表
     for cluster_name in active_clusters.keys():
         predicted_demand[cluster_name] = {lora_id: 0.0 for lora_id in global_lora_metadata.keys()}
 
     if not os.path.exists(SIMULATION_DATA_CSV_PATH):
-        logger.error(f"❌ CSV not found at {SIMULATION_DATA_CSV_PATH}")
+        logger.error(f"❌ 找不到 CSV 檔案: {SIMULATION_DATA_CSV_PATH}")
         return
 
     try:
-        # 使用 pandas 讀取，自動處理逗號或 Tab (sep=None)
-        df = pd.read_csv(SIMULATION_DATA_CSV_PATH, sep=None, engine='python')
-        df.columns = df.columns.str.strip() # 清理欄位名稱的空白
+        # --- 參考使用者提供的做法 ---
+        # 1. 讀取 CSV
+        df = pd.read_csv(SIMULATION_DATA_CSV_PATH)
         
-        if "arrive_timestamp" not in df.columns:
-            logger.error("❌ CSV missing 'arrive_timestamp' column!")
-            return
-            
+        # 2. 時間轉換與對齊 (START_OFFSET)
         df["arrival_sec"] = df["arrive_timestamp"].astype(float)
         
-        # 【防呆機制】如果 CSV 的時間第一筆就小於 START_OFFSET，代表不需要減 2 天
-        if df["arrival_sec"].min() < START_OFFSET:
-            logger.warning("⚠️ Detected small timestamps, auto-setting START_OFFSET to 0")
-            START_OFFSET = 0
-            
-        df["arrival_sec"] -= START_OFFSET
+        # 防呆：若資料起始時間小於 offset，則不進行偏移
+        if df["arrival_sec"].min() >= START_OFFSET:
+            df["arrival_sec"] -= START_OFFSET
         
-        # 過濾出當前區間的資料
-        mask = (df["arrival_sec"] >= start_sec) & (df["arrival_sec"] < end_sec)
-        df_interval = df[mask]
+        # 3. 過濾出目標區間 (SP1 Interval)
+        # 這裡對應使用者的 df["arrival_sec"] <= RUN_DURATION，但精確到當前步進區間
+        df = df[(df["arrival_sec"] >= start_sec) & (df["arrival_sec"] < end_sec)]
         
+        # 4. 過濾出目標 Cluster (僅限目前 active 的節點)
+        target_clusters = list(active_clusters.keys())
+        df = df[df["cluster"].isin(target_clusters)]
+        # --------------------------
+
+        # 5. 統計結果至 predicted_demand
         parsed_count = 0
-        for _, row in df_interval.iterrows():
+        for _, row in df.iterrows():
             cluster = str(row["cluster"]).strip()
-            # 強制轉 int 避免 "1.0" 問題
             lora_id_val = int(float(row["lora_id"]))
+            
+            # 支援 "LoRA_1" 格式的 Key
             lora_id = f"LoRA_{lora_id_val}"
             
-            if cluster in active_clusters and lora_id in predicted_demand[cluster]:
+            if lora_id in predicted_demand[cluster]:
                 predicted_demand[cluster][lora_id] += 1.0
                 parsed_count += 1
-                
+            # 支援純數字字串 "1" 格式的 Key
+            elif str(lora_id_val) in predicted_demand[cluster]:
+                predicted_demand[cluster][str(lora_id_val)] += 1.0
+                parsed_count += 1
+
+        # Log 輸出
+        for cluster in target_clusters:
+            count = sum(predicted_demand[cluster].values())
+            logger.info(f"📈 [Pandas Forecast] {cluster} 步進 {time_step}: 預計有 {int(count)} 個請求")
+
     except Exception as e:
-        logger.error(f"❌ CSV Parsing Error: {e}")
-        return
-        
-    # 印出預測總結
-    for cluster, demands in predicted_demand.items():
-        total_reqs = sum(demands.values())
-        active_loras = sum(1 for v in demands.values() if v > 0)
-        logger.info(f"📈 [CSV Forecast] {cluster} step {time_step} ({start_sec}s - {end_sec}s): Total {int(total_reqs)} reqs across {active_loras} LoRAs")
-        
-    if parsed_count == 0:
-        logger.warning(f"⚠️ [CSV Forecast] Warning: Parsed 0 valid requests for step {time_step}!")
+        logger.error(f"❌ Pandas 處理 CSV 發生錯誤: {e}")
 
 # ============================================================
 # SP1: Provisioning Algorithm
