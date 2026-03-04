@@ -57,7 +57,8 @@ COST_STORE_PER_GB = 0.005     # kappa_store: 1GB 模型本地存放 1 個時隙�
 COST_DOWNLOAD_PER_GB = 3   # kappa_inter: 跨區下載 1GB 模型的頻寬成本
 COST_INST_LOCAL = 0.001      # kappa_inst: 本地處理 1 個 Request 的算力成本
 COST_NET_TRAFFIC = 0.001     # kappa_net: 跨 Cluster 處理 1 個 Request 的流量成本
-COST_DROP_PENALTY = 0.1      # SP1 視角的 Drop 懲罰 (對應 Psi_drop)
+COST_DROP_PENALTY = 0.01      # SP1 視角的 Drop 懲罰 (對應 Psi_drop)
+COST_COMPUTE_PER_SEC = 0.001 # [新增] kappa_compute: 每秒的算力成本 (用於預測模型的成本估計)
 
 # 物理容量與限制
 LORA_SIZE_GB = 0.1           # S_lora: 單一 LoRA Adapter 的檔案大小估算 (GB)

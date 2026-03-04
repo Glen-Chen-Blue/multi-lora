@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from multilora_system import MultiLoRAEngine
 # 匯入集中管理的設定
-from config import MODEL_ID, FIXED_OUTPUT_LEN
+from config import MERGED_CAPACITY, MODEL_ID, FIXED_OUTPUT_LEN, UNMERGED_CAPACITY
 
 # ============================================================
 # Logging
@@ -164,7 +164,7 @@ def engine_loop_thread():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global engine
-    logger.info(f"Initializing Compute Node {NODE_ID} (Research Note Config: Merged=15, Unmerged=12)...")
+    logger.info(f"Initializing Compute Node {NODE_ID} (Config: Merged={MERGED_CAPACITY}, Unmerged={UNMERGED_CAPACITY})...")
     
     engine = MultiLoRAEngine(
         model_id=MODEL_ID,

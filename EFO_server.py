@@ -218,7 +218,10 @@ def exact_csv_forecasting(time_step: int):
     global predicted_demand
     predicted_demand.clear()
     
-    START_OFFSET = 86400 * 2
+    # 確保這裡的 OFFSET 與 test_simulation.py 一致
+    START_OFFSET = 86400 * 2 
+    
+    # 計算當前 Time Step 對應的 "歸零後" 時間範圍
     start_sec = time_step * SP1_INTERVAL_SECONDS
     end_sec = (time_step + 1) * SP1_INTERVAL_SECONDS
     
@@ -233,9 +236,15 @@ def exact_csv_forecasting(time_step: int):
         df = pd.read_csv(SIMULATION_DATA_CSV_PATH)
         df["arrival_sec"] = df["arrive_timestamp"].astype(float)
         
-        if df["arrival_sec"].min() >= START_OFFSET:
-            df["arrival_sec"] -= START_OFFSET
+        # === [修正] 強制對齊邏輯 ===
+        # 1. 先過濾掉 START_OFFSET 之前的舊資料 (模擬器不跑這些，EFO 也不該看這些)
+        df = df[df["arrival_sec"] >= START_OFFSET].copy()
         
+        # 2. 強制平移時間軸，將 START_OFFSET 視為 0
+        df["arrival_sec"] -= START_OFFSET
+        # ==========================
+        
+        # 3. 根據 Step 選取對應區間的資料
         df = df[(df["arrival_sec"] >= start_sec) & (df["arrival_sec"] < end_sec)]
         
         target_clusters = list(active_clusters.keys())
@@ -243,27 +252,33 @@ def exact_csv_forecasting(time_step: int):
 
         for _, row in df.iterrows():
             cluster = str(row["cluster"]).strip()
-            lora_id_val = int(float(row["lora_id"]))
-            lora_id = f"LoRA_{lora_id_val}"
+            # 相容整數與字串格式的 LoRA ID
+            try:
+                lora_id_val = int(float(row["lora_id"]))
+                lora_id = f"LoRA_{lora_id_val}"
+            except:
+                lora_id = str(row["lora_id"])
             
+            # 統計需求 (相容 LoRA_X 格式與純數字格式)
             if lora_id in predicted_demand[cluster]:
                 predicted_demand[cluster][lora_id] += 1.0
-            elif str(lora_id_val) in predicted_demand[cluster]:
+            elif str(lora_id_val) in predicted_demand[cluster]: # fallback
                 predicted_demand[cluster][str(lora_id_val)] += 1.0
 
         for cluster in target_clusters:
             count = sum(predicted_demand[cluster].values())
-            logger.info(f"📈 [Pandas Forecast] {cluster} 步進 {time_step}: 預計有 {int(count)} 個請求")
+            logger.info(f"📈 [Pandas Forecast] {cluster} (Step {time_step}, Time {start_sec}-{end_sec}s): 預計有 {int(count)} 個請求")
 
     except Exception as e:
         logger.error(f"❌ Pandas 處理 CSV 發生錯誤: {e}")
+
 
 # ============================================================
 # SP1: Provisioning Algorithm
 # ============================================================
 async def run_sp1_provisioning_and_wait():
     if not global_lora_metadata or not active_clusters: return
-    logger.info("⚙️ Running SP1 Adaptive CSG-Swap Provisioning (With Semantic Similarity)...")
+    logger.info("⚙️ Running SP1 Adaptive CSG-Swap Provisioning (With Semantic Similarity & Global Rescue)...")
 
     p95_delays = network_simulator.get_p95_info()
     
@@ -279,7 +294,7 @@ async def run_sp1_provisioning_and_wait():
 
     cluster_targets = {}
 
-    # [新增] 輔助函式：檢查 stored_set 中是否已包含 lora_id 的替代品
+    # [輔助函式] 檢查 stored_set 中是否已包含 lora_id 的替代品
     def has_substitute(l_id, stored_set):
         meta = global_lora_metadata.get(l_id, {})
         subs = meta.get("substitutes", [])
@@ -288,7 +303,9 @@ async def run_sp1_provisioning_and_wait():
                 return True
         return False
 
-    # 1. 計算所有活躍 Cluster 的最優 LoRA 配置
+    # =========================================================================
+    # Phase 1: 樂觀的個別 Cluster 配置 (Optimistic Local Provisioning)
+    # =========================================================================
     for cluster_name in active_clusters.keys():
         target_disk = set()
         mandatory_set = set()
@@ -299,7 +316,7 @@ async def run_sp1_provisioning_and_wait():
             if info.get("type") == "global" or (info.get("type") == "local" and info.get("cluster") == cluster_name):
                 valid_loras.append(lora_id)
 
-        # 計算原始 Gains (假設無本地替代品的情況)
+        # 計算原始 Gains (保持樂觀假設)
         gains = {}
         for lora_id in valid_loras:
             is_local = (global_lora_metadata[lora_id].get("type") == "local")
@@ -321,23 +338,18 @@ async def run_sp1_provisioning_and_wait():
 
             gains[lora_id] = max(0.0, best_offload_cost - C_INST)
 
-        # Step 0: Mandatory Sets (Local)
-        # 這些模型是不可協商的，必須存在
+        # Step 0: Mandatory Sets
         for lora_id in valid_loras:
             if global_lora_metadata[lora_id].get("type") == "local":
                 mandatory_set.add(lora_id)
                 target_disk.add(lora_id)
 
         # Step 1: Evaluation and Eviction (Retention)
-        # 評估是否保留現有的模型
         current_disk = set(global_lora_disk_inventory.get(cluster_name, []))
         for lora_id in current_disk:
             if lora_id in mandatory_set or lora_id not in valid_loras:
                 continue
             
-            # [修改] 語意相似度檢查
-            # 如果 target_disk 中已經有替代品 (例如 Local Mandatory 或前面已加入的高分模型)，
-            # 則視為該需求已被滿足 (Gain 歸零)，將其驅逐以節省空間。
             if has_substitute(lora_id, target_disk):
                 continue 
 
@@ -348,7 +360,6 @@ async def run_sp1_provisioning_and_wait():
                 utilities[lora_id] = u_retention
 
         # Step 2: Iterative Expansion with Swap
-        # 評估是否下載新模型
         candidates = []
         for lora_id in valid_loras:
             if lora_id not in target_disk and lora_id not in mandatory_set:
@@ -360,8 +371,6 @@ async def run_sp1_provisioning_and_wait():
         candidates.sort(key=lambda x: x[1], reverse=True)
 
         for lora_id, u_v in candidates:
-            # [修改] 下載前的語意相似度檢查
-            # 若已有替代品，則不下載
             if has_substitute(lora_id, target_disk):
                 continue
 
@@ -381,7 +390,7 @@ async def run_sp1_provisioning_and_wait():
                     target_disk.add(lora_id)
                     utilities[lora_id] = u_v
 
-        # 計算實際產生的新下載 (排除 Local 類型)
+        # 統計新下載
         diff_set = target_disk - current_disk
         real_new_downloads = 0
         for lora_id in diff_set:
@@ -396,6 +405,109 @@ async def run_sp1_provisioning_and_wait():
         global_lora_disk_inventory[cluster_name] = cluster_targets[cluster_name]
         
         logger.info(f"📊 [SP1 Result] {cluster_name}: Target {len(target_disk)}/{CAPACITY} LoRAs (WAN DLs: {real_new_downloads})")
+
+    # =========================================================================
+    # Phase 2: 全域覆蓋保護 (Global Coverage Rescue) - 迭代搜尋版
+    # 邏輯：
+    # 1. 找出全域無人下載的孤兒 LoRA。
+    # 2. 計算全域總需求與救援效益。
+    # 3. 將 Cluster 依據對該 LoRA 的需求量排序 (由大到小)。
+    # 4. 依序嘗試塞入，直到找到一個能容納 (有空間或可替換) 的 Cluster 為止。
+    # =========================================================================
+    
+    # 1. 建立全域已加載集合
+    global_loaded_counts = defaultdict(int)
+    for c_list in cluster_targets.values():
+        for lid in c_list:
+            global_loaded_counts[lid] += 1
+            
+    # 2. 遍歷所有 Global LoRA
+    for lora_id, info in global_lora_metadata.items():
+        if info.get("type") != "global": continue
+        if global_loaded_counts[lora_id] > 0: continue # 已經有人載了
+        
+        # 3. 收集所有 Cluster 對此 LoRA 的需求，並建立候選名單
+        total_demand = 0.0
+        candidates = [] # list of (cluster_name, local_demand)
+        
+        for c_name in active_clusters.keys():
+            d = predicted_demand[c_name].get(lora_id, 0.0)
+            total_demand += d
+            if d > 0:
+                candidates.append((c_name, d))
+        
+        # 如果全域根本沒需求，就不救了
+        if total_demand <= 0: continue
+        
+        # 依需求量由大到小排序候選 Cluster
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        
+        # 4. 成本效益評估 (Rescue Benefit vs Cost)
+        system_benefit = total_demand * C_DROP
+        system_cost = S_LORA * (C_STORE + C_DL)
+        
+        # 只有當 "全域被 Drop 的總損失" 大於 "下載一次的成本" 時才進行救援
+        if system_benefit > system_cost:
+            logger.info(f"🚨 [Global Rescue] Attempting to rescue {lora_id} (Benefit {system_benefit:.2f} > Cost {system_cost:.2f})")
+            
+            # 5. 依序嘗試候選 Cluster
+            deployed = False
+            for c_name, d_local in candidates:
+                target_set = set(cluster_targets[c_name])
+                
+                # Case A: 有空間，直接載入
+                if len(target_set) < CAPACITY:
+                    target_set.add(lora_id)
+                    cluster_targets[c_name] = list(target_set)
+                    global_loaded_counts[lora_id] = 1
+                    async with efo_metrics.lock: efo_metrics.artifact_downloads += 1
+                    logger.info(f"    -> ✅ Rescued to {c_name} (Free space)")
+                    deployed = True
+                    break # 成功部署，跳出 Cluster 迴圈
+                
+                # Case B: 空間已滿，嘗試替換 (Eviction)
+                else:
+                    victim = None
+                    min_victim_util = float('inf')
+                    
+                    # 在該 Cluster 中尋找 "效用最低" 的非強制項目
+                    for existing_id in target_set:
+                        # 保護 Local Mandatory
+                        if global_lora_metadata.get(existing_id, {}).get("type") == "local":
+                            continue
+                            
+                        # 計算犧牲者的 Utility (Local View)
+                        # 這裡的 Utility = 該 Cluster 若失去此模型會損失多少 (假設只能 Drop)
+                        d_victim_local = predicted_demand[c_name].get(existing_id, 0.0)
+                        u_victim = (d_victim_local * C_DROP) - (S_LORA * C_STORE)
+                        
+                        if u_victim < min_victim_util:
+                            min_victim_util = u_victim
+                            victim = existing_id
+                    
+                    # 計算 Rescue 的淨效益 (System View)
+                    # 我們用 "全域救回的效益" 來跟 "局部犧牲的代價" PK
+                    u_rescue = system_benefit - system_cost
+                    
+                    if victim and u_rescue > min_victim_util:
+                        target_set.remove(victim)
+                        target_set.add(lora_id)
+                        cluster_targets[c_name] = list(target_set)
+                        global_loaded_counts[lora_id] = 1
+                        
+                        # 更新被踢掉者的全域計數
+                        if global_loaded_counts[victim] > 0: global_loaded_counts[victim] -= 1
+                        
+                        async with efo_metrics.lock: efo_metrics.artifact_downloads += 1
+                        logger.info(f"    -> ✅ Rescued to {c_name} by swapping out {victim} (Util {min_victim_util:.2f} < Rescue {u_rescue:.2f})")
+                        deployed = True
+                        break # 成功部署，跳出 Cluster 迴圈
+                    else:
+                        logger.info(f"    -> ⚠️ Cannot swap in {c_name} (Rescue {u_rescue:.2f} <= Victim {min_victim_util:.2f})")
+                        # 失敗，繼續嘗試下一個候選 Cluster
+            
+            if not deployed:
+                logger.warning(f"    -> ❌ Failed to rescue {lora_id} in ANY candidate cluster.")
 
     # 更新累計存儲量
     current_total_stored = sum(len(loras) for loras in cluster_targets.values())
@@ -486,7 +598,17 @@ async def trigger_time_edge():
     efo_logging_task = asyncio.create_task(run_efo_metrics_cycle(current_time_step))
     
     exact_csv_forecasting(current_time_step)
+    
+    # 執行 SP1 配置並等待所有節點 Reset 完成
     await run_sp1_provisioning_and_wait()
+    
+    # === [新增] 強制同步全域路由表，避免時間差 ===
+    # 這確保了在我們告訴模擬器 "Time Edge 完成" 之前，
+    # 所有 Control Node 都已經拿到最新的路由表 (知道鄰居有什麼 LoRA)，
+    # 這樣一開始的 Request 才不會因為路由表空白而噴 "No Target"。
+    logger.info("🔄 [Time Edge] Forcing global routing sync before releasing...")
+    await sync_global_routing()
+    # ==========================================
     
     completed_step = current_time_step
     current_time_step += 1

@@ -139,7 +139,7 @@ if __name__ == "__main__":
         target_clusters=["cluster_1", "cluster_2", "cluster_3"], # 可以加入更多 Cluster
         speed_rate=2.0,       # 2倍速 (24小時資料壓縮成12小時)
         start_offset_days=2,  # 從第 2 天開始 (86400*2)
-        duration_hours=12,    # 畫 12 小時
+        duration_hours=8,    # 畫 12 小時
         bin_minutes=5,        # 每 10 分鐘一點
-        output_filename = "request_rate_plot.png"
+        output_filename = "request_rate_plot_speed2.png"
     )

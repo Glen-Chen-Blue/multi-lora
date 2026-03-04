@@ -10,7 +10,7 @@ from config import SP1_INTERVAL_SECONDS
 
 TRACE_CSV = "./information/simulation_data.csv"
 START_OFFSET = 86400 * 2
-RUN_DURATION = 3600 * 12
+RUN_DURATION = 3600 * 8
 TIMEOUT = 120
 
 EFO_URL = "http://localhost:9900"
@@ -149,6 +149,7 @@ async def main():
         print(f"\n{YELLOW}🚀 Triggering initial SP1 /time_edge (Step 0)...{RESET}")
         try:
             resp = await client.post(f"{EFO_URL}/time_edge", timeout=600.0)
+            await asyncio.sleep(3.0)
             print(f"{GREEN}✅ Initial SP1 complete: {resp.json()}{RESET}\n")
         except Exception as e:
             print(f"{RED}❌ Initial SP1 failed: {e}{RESET}")
