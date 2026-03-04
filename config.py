@@ -8,10 +8,11 @@ import os
 # 1. 系統環境與路徑設定 (Paths & Environment)
 # ------------------------------------------------------------
 LORA_PATH = os.environ.get("LORA_PATH", "./testLoRA")
-LORA_METADATA_PATH = os.environ.get("LORA_METADATA", "./information/lora_metadata.json")
+LORA_METADATA_PATH = os.environ.get("LORA_METADATA_PATH", "./information/lora_metadata.json")
 LORA_MAPPING_PATH = os.environ.get("LORA_MAPPING", "./information/lora_mapping.json")
 LORA_HOURLY_COUNTS_PATH = os.environ.get("LORA_HOURLY_COUNTS", "./information/lora_hourly_counts.json")
 SIMULATION_DATA_CSV_PATH = os.environ.get("SIMULATION_DATA_CSV", "./information/simulation_data.csv") # [新增] CSV 檔案路徑
+LOG_PATH = os.environ.get("LOG_PATH", "./logs")
 
 MODEL_ID = os.environ.get("MODEL_ID", "unsloth/Meta-Llama-3.1-8B")
 
@@ -57,7 +58,7 @@ COST_STORE_PER_GB = 0.005     # kappa_store: 1GB 模型本地存放 1 個時隙�
 COST_DOWNLOAD_PER_GB = 3   # kappa_inter: 跨區下載 1GB 模型的頻寬成本
 COST_INST_LOCAL = 0.001      # kappa_inst: 本地處理 1 個 Request 的算力成本
 COST_NET_TRAFFIC = 0.001     # kappa_net: 跨 Cluster 處理 1 個 Request 的流量成本
-COST_DROP_PENALTY = 0.01      # SP1 視角的 Drop 懲罰 (對應 Psi_drop)
+COST_DROP_PENALTY = 0.01*10      # SP1 視角的 Drop 懲罰 (對應 Psi_drop)
 COST_COMPUTE_PER_SEC = 0.001 # [新增] kappa_compute: 每秒的算力成本 (用於預測模型的成本估計)
 
 # 物理容量與限制

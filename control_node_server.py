@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 # 匯入集中管理的設定
 from config import (
-    LORA_PATH,
+    LORA_PATH, LOG_PATH,
     MERGED_CAPACITY, UNMERGED_CAPACITY,
     T_MAX, EPSILON, PSI_DROP,
     SCALE_UP_DROP_THRESHOLD, SCALE_DOWN_SURPLUS_THRESHOLD,
@@ -92,8 +92,8 @@ async def run_metrics_logging_cycle(interval_id: int):
     """
     logger.info(f"📊 [Metrics] Starting logging cycle for Interval {interval_id}")
     
-    os.makedirs("logs", exist_ok=True)
-    log_file = f"logs/control_{CLUSTER_NAME}_metrics.log"
+    os.makedirs(LOG_PATH, exist_ok=True)
+    log_file = f"{LOG_PATH}/control_{CLUSTER_NAME}_metrics.log"
     
     logging_interval = SP1_INTERVAL_SECONDS / 20.0
     

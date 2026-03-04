@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 # 匯入集中管理的設定
 from config import (
-    LORA_PATH, LORA_METADATA_PATH,
+    LORA_PATH, LORA_METADATA_PATH, LOG_PATH,
     LORA_MAPPING_PATH, SIMULATION_DATA_CSV_PATH,
     COST_STORE_PER_GB, COST_DOWNLOAD_PER_GB, COST_INST_LOCAL,
     COST_NET_TRAFFIC, COST_DROP_PENALTY, LORA_SIZE_GB,
@@ -139,8 +139,8 @@ async def run_efo_metrics_cycle(step_id: int):
     對應 Time Edge，紀錄 10 次 Global Metrics (間隔 SP1_INTERVAL / 10)
     """
     logger.info(f"📊 [EFO Metrics] Starting cycle for Time Step {step_id}")
-    os.makedirs("logs", exist_ok=True)
-    log_file = "logs/efo_global_metrics.log"
+    os.makedirs(LOG_PATH, exist_ok=True)
+    log_file = f"{LOG_PATH}/efo_global_metrics.log"
     
     logging_interval = SP1_INTERVAL_SECONDS / 10.0
     
@@ -562,6 +562,7 @@ async def lifespan(app: FastAPI):
     if os.path.exists(LORA_METADATA_PATH):
         with open(LORA_METADATA_PATH, "r", encoding="utf-8") as f:
             global_lora_metadata = json.load(f)
+            logger.info(f"📂 Loaded LoRA metadata for {(global_lora_metadata)} LoRAs.")
             
     if os.path.exists(LORA_MAPPING_PATH):
         with open(LORA_MAPPING_PATH, "r", encoding="utf-8") as f: 

@@ -3,6 +3,7 @@ import httpx
 import pandas as pd
 import json
 import time
+import os
 from datetime import datetime
 
 # 匯入常數以確保區間對齊
@@ -10,25 +11,41 @@ from config import SP1_INTERVAL_SECONDS
 
 TRACE_CSV = "./information/simulation_data.csv"
 START_OFFSET = 86400 * 2
-RUN_DURATION = 3600 * 8
+RUN_DURATION = SP1_INTERVAL_SECONDS * 8
 TIMEOUT = 120
 
-EFO_URL = "http://localhost:9900"
+# ====================
+# ✅ Read from env (set by your .sh)
+# ====================
+EFO_URL = os.getenv("EFO_URL", "http://localhost:9900")
+
+def _load_json_env(name: str, default_json: str):
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return json.loads(default_json)
+    try:
+        return json.loads(raw)
+    except Exception as e:
+        raise ValueError(f"Env var {name} is not valid JSON: {raw!r}, error={e}")
+
+# 只有在這個列表中的 Cluster 請求才會被發送，其餘會被忽略
+TARGET_CLUSTERS = _load_json_env("TARGET_CLUSTERS", '["cluster_1"]')
+
+# cluster -> control node port
+CLUSTER_PORT_MAP = _load_json_env(
+    "CLUSTER_PORT_MAP",
+    '{"cluster_1": 9000, "cluster_2": 9001, "cluster_3": 9002}'
+)
+
+# normalize port type
+CLUSTER_PORT_MAP = {k: int(v) for k, v in CLUSTER_PORT_MAP.items()}
+# ====================
 
 # ===== NEW =====
 # SPEEDUP > 1.0 => replay faster (more req/sec).
 # SPEEDUP = 2.0 means timeline is compressed by 2x.
 SPEEDUP = 1.0
-
-# 只有在這個列表中的 Cluster 請求兩會被發送，其餘會被忽略
-TARGET_CLUSTERS = ["cluster_1"] 
 # ==============
-
-CLUSTER_PORT_MAP = {
-    "cluster_1": 9000,
-    "cluster_2": 9001,
-    "cluster_3": 9002
-}
 
 GREEN = "\033[92m"; CYAN = "\033[96m"
 YELLOW = "\033[93m"; RED = "\033[91m"
@@ -53,13 +70,14 @@ df = df[df["arrival_sec"] <= RUN_DURATION]
 
 # 過濾出目標 Cluster 的請求
 df = df[df["cluster"].isin(TARGET_CLUSTERS)]
-
 df = df.sort_values("arrival_sec").reset_index(drop=True)
 
 TOTAL_REQUESTS = len(df)
 
-print(f"⏱ Replay Duration={RUN_DURATION}s (speedup={SPEEDUP}x, effective duration={RUN_DURATION / SPEEDUP:.2f}s)")
+print(f"✅ Using EFO_URL: {EFO_URL}")
 print(f"🎯 Target Clusters: {TARGET_CLUSTERS}")
+print(f"🧭 Cluster Port Map: {CLUSTER_PORT_MAP}")
+print(f"⏱ Replay Duration={RUN_DURATION}s (speedup={SPEEDUP}x, effective duration={RUN_DURATION / SPEEDUP:.2f}s)")
 print(f"📦 Requests={TOTAL_REQUESTS}")
 
 # ====================
@@ -169,11 +187,10 @@ async def main():
                 sleep_start = time.time()
                 await asyncio.sleep(10.0)
 
-                resp = await client.post(f"{EFO_URL}/time_edge", timeout=600.0)
+                await client.post(f"{EFO_URL}/time_edge", timeout=600.0)
 
                 total_pause = time.time() - sleep_start
                 start_time += total_pause
-
                 current_interval = req_interval
 
             scheduled_offset = arrival_sec / SPEEDUP
