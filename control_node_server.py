@@ -505,17 +505,22 @@ async def scheduler_loop():
                 await asyncio.sleep(0.5)
                 continue
 
+            # MERGE_THRESHOLD: 當 Unmerged 模式接近滿載時 (ex: Cap-2)，切換至 Merge 以獲得更高吞吐量
+            MERGE_THRESHOLD = max(1, UNMERGED_CAPACITY - 1)
+            # UNMERGE_THRESHOLD: 當負載降低到可以安全塞回 Unmerged 模式時 (ex: Cap-2)，切換回 Unmerged 以恢復彈性
+            UNMERGE_THRESHOLD = max(1, UNMERGED_CAPACITY - 2)
+
             # 2. 狀態切換邏輯 (Merge/Unmerge)
             unmerged_count = sum(1 for n in v_nodes if n.mode == "unmerge")
 
             for v in v_nodes:
                 if v.url in switching_nodes: continue 
-                if v.mode == "unmerge" and unmerged_count > 1 and v.running_batch >= 10 and len(v.active_loras) == 1:
+                if v.mode == "unmerge" and unmerged_count > 1 and v.running_batch >= MERGE_THRESHOLD and len(v.active_loras) == 1:
                     aid = next(iter(v.active_loras))
                     if len(request_queues[aid]) > 0:
                         asyncio.create_task(safe_mode_switch(v.url, "/merge", {"adapter_id": aid, "force": False}))
                         v.mode = "switching"; unmerged_count -= 1
-                elif v.mode == "merge" and v.running_batch < 9:
+                elif v.mode == "merge" and v.running_batch < UNMERGE_THRESHOLD:
                     if len(request_queues[v.merged_adapter]) == 0:
                         asyncio.create_task(safe_mode_switch(v.url, "/unmerge", {"force": False}))
                         v.mode = "switching"; unmerged_count += 1
@@ -717,9 +722,10 @@ async def apply_sp1_and_reset(req: UpdateLorasRequest):
     global system_paused, LOCAL_AVAILABLE_LORAS, metrics_logging_task, current_interval_id
     
     logger.info("🛑 [SP1 Sync] Initiating system drain & reset...")
-    system_paused = True 
+    system_paused = True  # 暫停所有調度與新進請求 (scheduler 會等佇列排空)
     
     try:
+        # === 1. 重置 Metrics Logging 任務 ===
         if metrics_logging_task and not metrics_logging_task.done():
             metrics_logging_task.cancel()
             try:
@@ -729,11 +735,15 @@ async def apply_sp1_and_reset(req: UpdateLorasRequest):
         
         current_interval_id += 1
         
+        # === 2. 等待排空 (Drain) ===
+        # 迴圈檢查直到 (1) Control Node 無積壓 (2) 所有 Compute Node 無執行中 Batch
         while True:
+            # A. 確保 Control Node 沒有待分配的排隊任務
             if len(global_request_list) > 0:
                 await asyncio.sleep(0.5)
                 continue
             
+            # B. 確保所有 Compute Node 皆已完成運算
             all_idle = True
             for url, node_data in node_mgr.nodes.items():
                 try:
@@ -745,6 +755,7 @@ async def apply_sp1_and_reset(req: UpdateLorasRequest):
                             all_idle = False
                             break
                 except Exception:
+                    # 若連線失敗，保守起見視為不空閒，或是可選擇略過
                     all_idle = False
                     break
             
@@ -754,23 +765,33 @@ async def apply_sp1_and_reset(req: UpdateLorasRequest):
 
         logger.info("🚰 [SP1 Sync] System completely drained. Resetting compute nodes...")
         
+        # === 3. 對所有 Compute Node 下達重置 (Reset) 指令 ===
+        # [關鍵修改] timeout 延長至 30 秒，因為 Compute Node 執行 full_reset (含 empty_cache) 需耗時數秒
         reset_tasks = []
         for url in node_mgr.nodes.keys():
-            reset_tasks.append(client.post(f"{url}/reset", timeout=5.0))
+            reset_tasks.append(client.post(f"{url}/reset", timeout=30.0))
         
+        # 等待所有節點回應 (確保碎片整理完畢才繼續)
         if reset_tasks:
             results = await asyncio.gather(*reset_tasks, return_exceptions=True)
             for url, res in zip(node_mgr.nodes.keys(), results):
-                if isinstance(res, Exception) or res.status_code != 200:
-                    logger.error(f"❌ [SP1 Sync] Failed to reset node {url}: {res}")
+                if isinstance(res, Exception):
+                    logger.error(f"❌ [SP1 Sync] Reset failed for {url}: {res}")
+                elif res.status_code != 200:
+                    logger.error(f"❌ [SP1 Sync] Reset returned {res.status_code} for {url}")
+                else:
+                    logger.info(f"✅ [SP1 Sync] Node {url} reset confirmed (VRAM cleared).")
             
+        # === 4. 更新本地支援的 LoRA 列表 ===
         LOCAL_AVAILABLE_LORAS = set(req.loras)
         logger.info(f"✅ [SP1 Sync] New configuration applied. LoRAs: {list(LOCAL_AVAILABLE_LORAS)}")
         
+        # === 5. 啟動新一輪的 Logging ===
         metrics_logging_task = asyncio.create_task(run_metrics_logging_cycle(current_interval_id))
         
         return {"status": "success"}
     finally:
+        # === 6. 解除鎖定 ===
         system_paused = False
         logger.info("▶️ [SP1 Sync] System resumed. Ready for next interval.")
 

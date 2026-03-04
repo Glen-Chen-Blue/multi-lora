@@ -21,8 +21,8 @@ MODEL_ID = os.environ.get("MODEL_ID", "unsloth/Meta-Llama-3.1-8B")
 FIXED_INPUT_LEN = 512        # 標準化輸入長度 (Prompt tokens)
 FIXED_OUTPUT_LEN = 256       # 標準化輸出長度 (Generated tokens)
 
-MERGED_CAPACITY = 15         # Merged 模式 (Dedicated) 的最大 Batch Size
-UNMERGED_CAPACITY = 12       # Unmerged 模式 (Shared) 的基礎 Batch Size
+MERGED_CAPACITY = 12         # Merged 模式 (Dedicated) 的最大 Batch Size
+UNMERGED_CAPACITY = 10       # Unmerged 模式 (Shared) 的基礎 Batch Size
 MAX_CPU_LORAS = 30           # Host Memory (CPU RAM) 最多可快取的 LoRA 數量
 
 # ------------------------------------------------------------
@@ -46,7 +46,7 @@ PSI_DROP = 10.0              # 容量耗盡被迫丟棄請求的巨大懲罰權�
 
 HTTP_MAX_CONNECTIONS = 500         # 控制節點與運算節點之間的 HTTP 連線池上限 (應對高併發)
 SCALE_UP_DROP_THRESHOLD = 2        # 觸發擴容的近期 Drop 數量閾值 (調低以加速反應)
-SCALE_DOWN_SURPLUS_THRESHOLD = 12  # 觸發縮容的閒置 Slot 數量閾值 (一台基準容量12 + 緩衝3)
+SCALE_DOWN_SURPLUS_THRESHOLD = 10  # 觸發縮容的閒置 Slot 數量閾值 (一台基準容量12)
 EDGE_SYNC_TIMEOUT = 300.0          # [新增] 等待節點排空與重置的 HTTP 請求逾時限制 (秒)
 
 # ------------------------------------------------------------

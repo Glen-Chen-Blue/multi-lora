@@ -388,6 +388,41 @@ class MultiLoRAEngine:
         if cleaned:
             torch.cuda.empty_cache()
 
+    # [新增] 用於徹底重置
+    def full_reset(self):
+        """
+        徹底重置引擎狀態，清除所有 Adapter 與 VRAM 碎片，僅保留 Base Model。
+        """
+        print("🧹 [Engine] Starting Full Reset sequence...")
+        with self.lock:
+            # 1. 清空所有請求佇列
+            self.request_queue.clear()
+            self.running_queue.clear()
+
+            # 2. 強制 Unmerge (若在 Merged 模式)
+            if self.current_merged_adapter:
+                with self.gpu_lock:
+                    for m in self.model.modules():
+                        if isinstance(m, DynamicLoRALinear):
+                            m.manual_unmerge()
+                self.current_merged_adapter = None
+            
+            # 3. 清空 GPU Slot 邏輯映射 (VRAM 物理 Slot 內容不需歸零，只需標記為空)
+            self.gpu_slots.clear()
+            self.adapter_to_slot.clear()
+            # 重置 LRU 計數器
+            self.slot_lru = OrderedDict((i, 0) for i in range(self.adapter_slots))
+
+            # 4. 清空 CPU 快取與已知列表
+            self.known_adapters.clear()
+            self.cpu_cache.clear()
+
+            # 5. [關鍵] 強制釋放 PyTorch 緩存的 VRAM 碎片
+            # 這會把 "Reserved" 但 "Unallocated" 的記憶體歸還給 OS/Driver
+            torch.cuda.empty_cache()
+            
+            print("✨ [Engine] Full Reset & CUDA Garbage Collection Complete.")
+
     @torch.no_grad()
     def step(self) -> bool:
         # ==========================================
@@ -395,9 +430,21 @@ class MultiLoRAEngine:
         # ==========================================
         with self.lock:
             self._cleanup_unused_adapters()
+            
+            # === [新增] 主動斷開已完成請求的 Tensor 引用 ===
+            for r in self.running_queue:
+                if r["done"]:
+                    r["past_key_values"] = None  # 關鍵：釋放 KV Cache
+                    r["input_ids"] = None
+                    r["tokens_gen"] = None
+                    r["attention_mask"] = None
+            # ===============================================
+
             self.running_queue = [r for r in self.running_queue if not r["done"]]
 
             if not self.running_queue and not self.request_queue:
+                # 閒置時整理碎片
+                torch.cuda.empty_cache()
                 return False
 
             target_group = []

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 PIDS=()
-
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # ===============================
 # 📂 Create log folder
 # ===============================

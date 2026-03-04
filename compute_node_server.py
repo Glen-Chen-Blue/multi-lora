@@ -371,26 +371,26 @@ def unmerge(req: UnmergeRequest):
     return {"status": "unmerged"}
 
 # [新增] 供 Control Node 在 SP1 同步期間呼叫的徹底清理 API
+# [File: compute_node_server.py]
+
 @app.post("/reset")
 def reset_node_state():
-    logger.warning("🚨 [SP1 Sync] NODE RESET TRIGGERED! Clearing VRAM and Memory Cache...")
+    logger.warning("🚨 [SP1 Sync] NODE RESET TRIGGERED! Performing Deep Cleanup...")
     
-    # 1. 清空 VRAM 中運行與排隊的任務
-    with engine.lock:
-        engine.request_queue.clear()
-        engine.running_queue.clear()
-        
-    # 2. 強制恢復為 Unmerged 模式
-    engine.unmerge_all()
+    # 1. 調用 Engine 的深度重置 (含 empty_cache)
+    if engine:
+        engine.full_reset()
     
-    # 3. 清空 Host Memory 內的 LoRA 快取
-    engine.cpu_cache.clear()
-    
-    # 4. 清空 HTTP Stream 追蹤狀態
+    # 2. 清空 HTTP Stream 追蹤狀態
     with stream_lock:
         stream_queues.clear()
         decoding_state.clear()
         
+    # 3. 強制 Python GC (選擇性，雙重保險)
+    import gc
+    gc.collect()
+
+    logger.info("✅ [ComputeNode] Node state reset successfully.")
     return {"status": "node_reset_complete"}
 
 @app.post("/debug/reset")
