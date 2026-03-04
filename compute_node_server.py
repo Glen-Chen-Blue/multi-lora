@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from multilora_system import MultiLoRAEngine
+from _multilora_system import MultiLoRAEngine
 # 匯入集中管理的設定
 from config import MERGED_CAPACITY, MODEL_ID, FIXED_OUTPUT_LEN, UNMERGED_CAPACITY
 
