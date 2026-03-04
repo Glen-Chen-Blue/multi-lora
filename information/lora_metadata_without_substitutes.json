@@ -1,0 +1,832 @@
+{
+  "LoRA_1": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.5,
+      0.4
+    ]
+  },
+  "LoRA_2": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.489,
+      0.49
+    ]
+  },
+  "LoRA_3": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.482,
+      0.464
+    ]
+  },
+  "LoRA_4": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.484,
+      0.485
+    ]
+  },
+  "LoRA_5": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.529,
+      0.339
+    ]
+  },
+  "LoRA_6": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.508,
+      0.267
+    ]
+  },
+  "LoRA_7": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.518,
+      0.553
+    ]
+  },
+  "LoRA_8": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.524,
+      0.636
+    ]
+  },
+  "LoRA_9": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.551,
+      0.198
+    ]
+  },
+  "LoRA_10": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.56,
+      0.265
+    ]
+  },
+  "LoRA_11": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.503,
+      0.716
+    ]
+  },
+  "LoRA_12": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.565,
+      0.654
+    ]
+  },
+  "LoRA_13": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.431,
+      0.65
+    ]
+  },
+  "LoRA_14": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.438,
+      0.251
+    ]
+  },
+  "LoRA_15": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.585,
+      0.768
+    ]
+  },
+  "LoRA_16": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.432,
+      0.339
+    ]
+  },
+  "LoRA_17": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.382,
+      0.402
+    ]
+  },
+  "LoRA_18": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.613,
+      0.674
+    ]
+  },
+  "LoRA_19": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.492,
+      0.784
+    ]
+  },
+  "LoRA_20": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.646,
+      0.185
+    ]
+  },
+  "LoRA_21": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.714,
+      0.186
+    ]
+  },
+  "LoRA_22": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.373,
+      0.196
+    ]
+  },
+  "LoRA_23": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.401,
+      0.12
+    ]
+  },
+  "LoRA_24": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.735,
+      0.252
+    ]
+  },
+  "LoRA_25": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.32,
+      0.137
+    ]
+  },
+  "LoRA_26": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.803,
+      0.198
+    ]
+  },
+  "LoRA_27": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.653,
+      0.811
+    ]
+  },
+  "LoRA_28": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.678,
+      0.734
+    ]
+  },
+  "LoRA_29": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.505,
+      0.848
+    ]
+  },
+  "LoRA_30": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.47,
+      0.117
+    ]
+  },
+  "LoRA_31": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.345,
+      0.039
+    ]
+  },
+  "LoRA_32": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.275,
+      0.031
+    ]
+  },
+  "LoRA_33": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.75,
+      0.253
+    ]
+  },
+  "LoRA_34": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.345,
+      0.291
+    ]
+  },
+  "LoRA_35": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.313,
+      0.409
+    ]
+  },
+  "LoRA_36": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.421,
+      0.826
+    ]
+  },
+  "LoRA_37": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.283,
+      -0.01
+    ]
+  },
+  "LoRA_38": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.244,
+      0.106
+    ]
+  },
+  "LoRA_39": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.376,
+      0.771
+    ]
+  },
+  "LoRA_40": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.651,
+      0.117
+    ]
+  },
+  "LoRA_41": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.706,
+      0.764
+    ]
+  },
+  "LoRA_42": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.256,
+      0.453
+    ]
+  },
+  "LoRA_43": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.818,
+      0.29
+    ]
+  },
+  "LoRA_44": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.724,
+      0.067
+    ]
+  },
+  "LoRA_45": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.359,
+      -0.032
+    ]
+  },
+  "LoRA_46": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.775,
+      0.717
+    ]
+  },
+  "LoRA_47": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.233,
+      0.377
+    ]
+  },
+  "LoRA_48": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.8,
+      0.125
+    ]
+  },
+  "LoRA_49": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.326,
+      0.695
+    ]
+  },
+  "LoRA_50": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.207,
+      0.038
+    ]
+  },
+  "LoRA_51": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.536,
+      0.072
+    ]
+  },
+  "LoRA_52": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.4,
+      0.701
+    ]
+  },
+  "LoRA_53": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.511,
+      0.153
+    ]
+  },
+  "LoRA_54": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.38,
+      0.637
+    ]
+  },
+  "LoRA_55": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.396,
+      0.238
+    ]
+  },
+  "LoRA_56": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.392,
+      0.048
+    ]
+  },
+  "LoRA_57": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.199,
+      0.532
+    ]
+  },
+  "LoRA_58": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.31,
+      0.834
+    ]
+  },
+  "LoRA_59": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.437,
+      0.868
+    ]
+  },
+  "LoRA_60": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.236,
+      0.874
+    ]
+  },
+  "LoRA_61": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.335,
+      0.858
+    ]
+  },
+  "LoRA_62": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.786,
+      0.002
+    ]
+  },
+  "LoRA_63": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.815,
+      0.801
+    ]
+  },
+  "LoRA_64": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.235,
+      0.147
+    ]
+  },
+  "LoRA_65": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.413,
+      0.951
+    ]
+  },
+  "LoRA_66": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.859,
+      0.03
+    ]
+  },
+  "LoRA_67": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.466,
+      0.044
+    ]
+  },
+  "LoRA_68": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.607,
+      0.036
+    ]
+  },
+  "LoRA_69": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.918,
+      0.107
+    ]
+  },
+  "LoRA_70": {
+    "substitutes": [],
+    "type": "global",
+    "pos": [
+      0.172,
+      0.438
+    ]
+  },
+  "LoRA_71": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_1",
+    "pos": [
+      0.3,
+      0.3
+    ]
+  },
+  "LoRA_72": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_1",
+    "pos": [
+      0.225,
+      0.269
+    ]
+  },
+  "LoRA_73": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_1",
+    "pos": [
+      0.135,
+      0.305
+    ]
+  },
+  "LoRA_74": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_1",
+    "pos": [
+      0.156,
+      0.238
+    ]
+  },
+  "LoRA_75": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_1",
+    "pos": [
+      0.111,
+      0.237
+    ]
+  },
+  "LoRA_76": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_1",
+    "pos": [
+      0.289,
+      0.396
+    ]
+  },
+  "LoRA_77": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_1",
+    "pos": [
+      0.355,
+      0.435
+    ]
+  },
+  "LoRA_78": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_1",
+    "pos": [
+      0.197,
+      0.366
+    ]
+  },
+  "LoRA_79": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_1",
+    "pos": [
+      0.441,
+      0.474
+    ]
+  },
+  "LoRA_80": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_1",
+    "pos": [
+      0.291,
+      0.499
+    ]
+  },
+  "LoRA_81": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_2",
+    "pos": [
+      0.7,
+      0.3
+    ]
+  },
+  "LoRA_82": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_2",
+    "pos": [
+      0.635,
+      0.233
+    ]
+  },
+  "LoRA_83": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_2",
+    "pos": [
+      0.71,
+      0.289
+    ]
+  },
+  "LoRA_84": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_2",
+    "pos": [
+      0.573,
+      0.259
+    ]
+  },
+  "LoRA_85": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_2",
+    "pos": [
+      0.689,
+      0.391
+    ]
+  },
+  "LoRA_86": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_2",
+    "pos": [
+      0.779,
+      0.415
+    ]
+  },
+  "LoRA_87": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_2",
+    "pos": [
+      0.62,
+      0.458
+    ]
+  },
+  "LoRA_88": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_2",
+    "pos": [
+      0.563,
+      0.49
+    ]
+  },
+  "LoRA_89": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_2",
+    "pos": [
+      0.649,
+      0.384
+    ]
+  },
+  "LoRA_90": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_2",
+    "pos": [
+      0.511,
+      0.32
+    ]
+  },
+  "LoRA_91": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_3",
+    "pos": [
+      0.3,
+      0.5
+    ]
+  },
+  "LoRA_92": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_3",
+    "pos": [
+      0.354,
+      0.55
+    ]
+  },
+  "LoRA_93": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_3",
+    "pos": [
+      0.266,
+      0.516
+    ]
+  },
+  "LoRA_94": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_3",
+    "pos": [
+      0.329,
+      0.613
+    ]
+  },
+  "LoRA_95": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_3",
+    "pos": [
+      0.307,
+      0.683
+    ]
+  },
+  "LoRA_96": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_3",
+    "pos": [
+      0.277,
+      0.45
+    ]
+  },
+  "LoRA_97": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_3",
+    "pos": [
+      0.202,
+      0.462
+    ]
+  },
+  "LoRA_98": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_3",
+    "pos": [
+      0.291,
+      0.75
+    ]
+  },
+  "LoRA_99": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_3",
+    "pos": [
+      0.389,
+      0.641
+    ]
+  },
+  "LoRA_100": {
+    "substitutes": [],
+    "type": "local",
+    "cluster": "cluster_3",
+    "pos": [
+      0.228,
+      0.706
+    ]
+  }
+}
