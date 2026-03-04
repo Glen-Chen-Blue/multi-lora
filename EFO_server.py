@@ -278,10 +278,11 @@ def exact_csv_forecasting(time_step: int):
 # ============================================================
 async def run_sp1_provisioning_and_wait():
     if not global_lora_metadata or not active_clusters: return
-    logger.info("⚙️ Running SP1 Adaptive CSG-Swap Provisioning (With Semantic Similarity & Global Rescue)...")
+    logger.info("⚙️ Running SP1 Adaptive CSG-Swap (Enhanced Semantic Awareness)...")
 
     p95_delays = network_simulator.get_p95_info()
     
+    # === 參數設定 ===
     C_STORE = COST_STORE_PER_GB
     C_DL = COST_DOWNLOAD_PER_GB
     C_INST = COST_INST_LOCAL
@@ -294,228 +295,270 @@ async def run_sp1_provisioning_and_wait():
 
     cluster_targets = {}
 
-    # [輔助函式] 檢查 stored_set 中是否已包含 lora_id 的替代品
-    def has_substitute(l_id, stored_set):
-        meta = global_lora_metadata.get(l_id, {})
-        subs = meta.get("substitutes", [])
+    # =========================================================================
+    # 0. 建立反向替代關係 (Reverse Mapping)
+    # serves_map[A] = {A, B, C} 表示若下載 A，可以服務 A, B, C 的請求
+    # =========================================================================
+    serves_map = defaultdict(set)
+    valid_loras = [] # 僅考慮與當前 Cluster 相關或 Global 的
+
+    # 初始化：每個 LoRA 至少服務自己
+    for lid in global_lora_metadata.keys():
+        serves_map[lid].add(lid)
+    
+    # 填充替代關係：若 B 的 substitute 是 A (meta[B]['substitutes']包含A)，則 A 服務 B
+    for lid, info in global_lora_metadata.items():
+        subs = info.get("substitutes", [])
+        for parent in subs:
+            # parent (A) 可以服務 lid (B)
+            serves_map[parent].add(lid)
+
+    # 輔助函式：檢查 l_id 是否已被 stored_set 中的某個模型覆蓋
+    def is_covered_by_set(target_id, stored_set):
+        # 1. 直接命中
+        if target_id in stored_set: return True
+        # 2. 語意命中 (stored_set 中有 target_id 的替代品)
+        subs = global_lora_metadata.get(target_id, {}).get("substitutes", [])
         for s in subs:
-            if s in stored_set:
-                return True
+            if s in stored_set: return True
         return False
+
+    # 輔助函式：計算加入 candidate_id 能帶來的「新增」需求滿足量
+    # 邏輯：遍歷 candidate_id 能服務的所有 id，若該 id 目前沒被 stored_set 覆蓋，則計入需求
+    def calculate_marginal_demand(cluster, candidate_id, current_set):
+        total_new_demand = 0.0
+        # 找出 candidate 能服務的所有對象
+        targets = serves_map.get(candidate_id, set())
+        
+        for tid in targets:
+            # 只有當 tid 目前「還沒被滿足」時，才算作 candidate 的貢獻
+            if not is_covered_by_set(tid, current_set):
+                d = predicted_demand[cluster].get(tid, 0.0)
+                total_new_demand += d
+        return total_new_demand
 
     # =========================================================================
     # Phase 1: 樂觀的個別 Cluster 配置 (Optimistic Local Provisioning)
+    # (保持原邏輯，加入 serves_map 的概念優化效益計算)
     # =========================================================================
     for cluster_name in active_clusters.keys():
         target_disk = set()
         mandatory_set = set()
-        utilities = {}
+        utilities = {} # 用於記錄每個已存模型的效益
 
-        valid_loras = []
+        # 篩選有效 LoRA
+        cluster_valid_loras = []
         for lora_id, info in global_lora_metadata.items():
             if info.get("type") == "global" or (info.get("type") == "local" and info.get("cluster") == cluster_name):
-                valid_loras.append(lora_id)
-
-        # 計算原始 Gains (保持樂觀假設)
-        gains = {}
-        for lora_id in valid_loras:
-            is_local = (global_lora_metadata[lora_id].get("type") == "local")
-            if is_local:
-                best_offload_cost = C_DROP
-            else:
-                offload_costs = []
-                for k in active_clusters.keys():
-                    if k == cluster_name: continue
-                    delay_sec = p95_delays.get(cluster_name, {}).get(k, 1000.0) / 1000.0
-                    if delay_sec >= T_MAX:
-                        gamma = float('inf')
-                    else:
-                        gamma = T_MAX / (T_MAX - delay_sec)
-                    offload_costs.append(gamma * C_INST + C_NET)
-                    
-                best_offload_cost = min(offload_costs) if offload_costs else C_DROP
-                best_offload_cost = min(best_offload_cost, C_DROP)
-
-            gains[lora_id] = max(0.0, best_offload_cost - C_INST)
+                cluster_valid_loras.append(lora_id)
 
         # Step 0: Mandatory Sets
-        for lora_id in valid_loras:
+        for lora_id in cluster_valid_loras:
             if global_lora_metadata[lora_id].get("type") == "local":
                 mandatory_set.add(lora_id)
                 target_disk.add(lora_id)
 
         # Step 1: Evaluation and Eviction (Retention)
+        # 對於已存在的，我們計算其「保留價值」
+        # 保留價值 = (它能獨自覆蓋的需求 * Gain) - 存儲成本
         current_disk = set(global_lora_disk_inventory.get(cluster_name, []))
+        
+        # 為了計算方便，Phase 1 簡化處理：
+        # 如果已被替代品覆蓋，則不保留；否則計算其自身的直接需求效益
         for lora_id in current_disk:
-            if lora_id in mandatory_set or lora_id not in valid_loras:
+            if lora_id in mandatory_set or lora_id not in cluster_valid_loras:
                 continue
             
-            if has_substitute(lora_id, target_disk):
-                continue 
+            # 檢查是否被「其他已存在硬碟的」模型覆蓋 (不含自己)
+            temp_set = target_disk.union(current_disk) - {lora_id}
+            if is_covered_by_set(lora_id, temp_set):
+                continue # 已經有人能取代我了，且我不是 Mandatory
+
+            # 計算效益 (這裡簡化，只看直接需求，完整邊際在 Expansion 算)
+            # Gain 估算
+            best_offload_cost = C_DROP # 預設 Drop
+            offload_costs = []
+            for k in active_clusters.keys():
+                if k == cluster_name: continue
+                delay_sec = p95_delays.get(cluster_name, {}).get(k, 1000.0) / 1000.0
+                gamma = T_MAX / (T_MAX - delay_sec) if delay_sec < T_MAX else float('inf')
+                offload_costs.append(gamma * C_INST + C_NET)
+            if offload_costs: best_offload_cost = min(min(offload_costs), C_DROP)
+            gain_per_req = max(0.0, best_offload_cost - C_INST)
 
             lambd = predicted_demand[cluster_name].get(lora_id, 0.0)
-            u_retention = (lambd * gains[lora_id]) - (S_LORA * C_STORE)
+            u_retention = (lambd * gain_per_req) - (S_LORA * C_STORE)
+            
             if u_retention >= 0:
                 target_disk.add(lora_id)
                 utilities[lora_id] = u_retention
 
         # Step 2: Iterative Expansion with Swap
-        candidates = []
-        for lora_id in valid_loras:
-            if lora_id not in target_disk and lora_id not in mandatory_set:
-                lambd = predicted_demand[cluster_name].get(lora_id, 0.0)
-                u_download = (lambd * gains[lora_id]) - (S_LORA * (C_STORE + C_DL))
-                if u_download > 0:
-                    candidates.append((lora_id, u_download))
+        # 找出所有候選者 (不在 target_disk 中)
+        candidates = [l for l in cluster_valid_loras if l not in target_disk]
+        
+        # 由於計算邊際效益會隨 target_disk 改變，這裡採用 Iterative Greedy
+        # 每次選一個邊際效益最高的加入
+        while True:
+            best_cand = None
+            max_u = -float('inf')
 
-        candidates.sort(key=lambda x: x[1], reverse=True)
-
-        for lora_id, u_v in candidates:
-            if has_substitute(lora_id, target_disk):
-                continue
-
-            if len(target_disk) < CAPACITY:
-                target_disk.add(lora_id)
-                utilities[lora_id] = u_v
-            else:
-                swappable_items = [u for u in target_disk if u not in mandatory_set]
-                if not swappable_items: break
+            # 掃描所有候選者，計算當下的邊際效益
+            for cand in candidates:
+                # 計算：若加入 cand，能多處理多少需求 (包含它能取代的)
+                new_demand = calculate_marginal_demand(cluster_name, cand, target_disk)
                 
-                u_min_id = min(swappable_items, key=lambda x: utilities[x])
-                u_min_val = utilities[u_min_id]
+                # Gain 概算 (統一用 C_DROP 當作挽回的效益，簡化計算)
+                # 嚴謹來說應該看被 Rescue 的請求原本是 Drop 還是 Offload，這裡假設能放在本地通常是為了救 Drop 或省 Offload
+                benefit = new_demand * C_DROP 
+                cost = S_LORA * (C_STORE + C_DL) # 新下載成本
+                net_u = benefit - cost
 
-                if (u_v - u_min_val) > EPSILON:
-                    target_disk.remove(u_min_id)
-                    del utilities[u_min_id]
-                    target_disk.add(lora_id)
-                    utilities[lora_id] = u_v
+                if net_u > max_u:
+                    max_u = net_u
+                    best_cand = cand
+            
+            if best_cand is None or max_u <= 0:
+                break # 沒有正效益的候選者了
+
+            # 嘗試加入
+            if len(target_disk) < CAPACITY:
+                target_disk.add(best_cand)
+                utilities[best_cand] = max_u # 記錄當下效益
+                candidates.remove(best_cand)
+            else:
+                # 空間滿，嘗試 Swap
+                # 找出目前 target_disk 中「邊際效益最低」的非強制項目 (Victim)
+                # 重新評估 Victim 的「當前移除損失」
+                victim = None
+                min_loss = float('inf')
+                
+                swappable = [t for t in target_disk if t not in mandatory_set]
+                if not swappable: break
+
+                for t in swappable:
+                    # 如果移除 t，會損失多少需求 (即 t 目前貢獻的邊際需求)
+                    # 模擬移除 t 後的集合
+                    temp_set = target_disk - {t}
+                    loss_demand = calculate_marginal_demand(cluster_name, t, temp_set)
+                    loss_val = (loss_demand * C_DROP) - (S_LORA * C_STORE) # 移除它省下存儲費，但損失 Benefit
+                    if loss_val < min_loss:
+                        min_loss = loss_val
+                        victim = t
+                
+                # 比較：新候選者效益 vs 犧牲者損失 + 門檻
+                if max_u > min_loss + EPSILON:
+                    target_disk.remove(victim)
+                    target_disk.add(best_cand)
+                    utilities[best_cand] = max_u
+                    candidates.remove(best_cand)
+                    candidates.append(victim) # 犧牲者變回候選人
+                    logger.info(f"    🔄 [SP1 Local] Swapped {victim} (Loss {min_loss:.2f}) with {best_cand} (Gain {max_u:.2f}) in {cluster_name}")
+                else:
+                    break # 連效益最高的都換不進去，結束
 
         # 統計新下載
-        diff_set = target_disk - current_disk
-        real_new_downloads = 0
-        for lora_id in diff_set:
-            if global_lora_metadata.get(lora_id, {}).get("type") != "local":
-                real_new_downloads += 1
-                
+        current_disk_static = set(global_lora_disk_inventory.get(cluster_name, []))
+        real_new_downloads = len(target_disk - current_disk_static)
         if real_new_downloads > 0:
-            async with efo_metrics.lock:
-                efo_metrics.artifact_downloads += real_new_downloads
+            async with efo_metrics.lock: efo_metrics.artifact_downloads += real_new_downloads
 
         cluster_targets[cluster_name] = list(target_disk)
-        global_lora_disk_inventory[cluster_name] = cluster_targets[cluster_name]
-        
-        logger.info(f"📊 [SP1 Result] {cluster_name}: Target {len(target_disk)}/{CAPACITY} LoRAs (WAN DLs: {real_new_downloads})")
+        logger.info(f"📊 [SP1 Local] {cluster_name}: Target {len(target_disk)}/{CAPACITY} LoRAs")
+
 
     # =========================================================================
-    # Phase 2: 全域覆蓋保護 (Global Coverage Rescue) - 迭代搜尋版
-    # 邏輯：
-    # 1. 找出全域無人下載的孤兒 LoRA。
-    # 2. 計算全域總需求與救援效益。
-    # 3. 將 Cluster 依據對該 LoRA 的需求量排序 (由大到小)。
-    # 4. 依序嘗試塞入，直到找到一個能容納 (有空間或可替換) 的 Cluster 為止。
+    # Phase 2: 全域語意感知救援 (Global Semantic-Aware Rescue)
+    # 邏輯：檢查所有 Global LoRA，看是否能透過「跨區配置」來解決尚未滿足的需求
     # =========================================================================
     
-    # 1. 建立全域已加載集合
-    global_loaded_counts = defaultdict(int)
-    for c_list in cluster_targets.values():
-        for lid in c_list:
-            global_loaded_counts[lid] += 1
-            
-    # 2. 遍歷所有 Global LoRA
-    for lora_id, info in global_lora_metadata.items():
-        if info.get("type") != "global": continue
-        if global_loaded_counts[lora_id] > 0: continue # 已經有人載了
+    # 建立所有 Global LoRA 的候選名單
+    global_candidates = [l for l, info in global_lora_metadata.items() if info.get("type") == "global"]
+    
+    # 為了避免過度計算，我們採用一輪掃描：
+    # 對每個 Global LoRA，找出它在「哪個 Cluster」能產生最大的「邊際效益」
+    # 如果該效益 > 成本，且能塞入(或置換)，就執行。
+    
+    # 隨機打亂順序以避免偏見，或可依照全域總需求排序
+    global_candidates.sort(key=lambda l: sum([predicted_demand[c].get(l,0) for c in active_clusters]), reverse=True)
+
+    for cand_id in global_candidates:
+        best_cluster = None
+        best_net_utility = -float('inf')
         
-        # 3. 收集所有 Cluster 對此 LoRA 的需求，並建立候選名單
-        total_demand = 0.0
-        candidates = [] # list of (cluster_name, local_demand)
-        
+        # 1. 評估每個 Cluster 放入此模型的潛力
         for c_name in active_clusters.keys():
-            d = predicted_demand[c_name].get(lora_id, 0.0)
-            total_demand += d
-            if d > 0:
-                candidates.append((c_name, d))
-        
-        # 如果全域根本沒需求，就不救了
-        if total_demand <= 0: continue
-        
-        # 依需求量由大到小排序候選 Cluster
-        candidates.sort(key=lambda x: x[1], reverse=True)
-        
-        # 4. 成本效益評估 (Rescue Benefit vs Cost)
-        system_benefit = total_demand * C_DROP
-        system_cost = S_LORA * (C_STORE + C_DL)
-        
-        # 只有當 "全域被 Drop 的總損失" 大於 "下載一次的成本" 時才進行救援
-        if system_benefit > system_cost:
-            logger.info(f"🚨 [Global Rescue] Attempting to rescue {lora_id} (Benefit {system_benefit:.2f} > Cost {system_cost:.2f})")
+            current_set = set(cluster_targets[c_name])
             
-            # 5. 依序嘗試候選 Cluster
+            # 若已經有了(包含被替代品覆蓋)，則邊際效益為 0
+            if is_covered_by_set(cand_id, current_set):
+                continue
+            
+            # 計算加入後的邊際需求滿足量 (New Requests)
+            # 這會考慮 cand_id 本身的需求 + 它能取代的其他未滿足需求
+            marginal_demand = calculate_marginal_demand(c_name, cand_id, current_set)
+            
+            if marginal_demand <= 0: continue
+            
+            # 效益計算
+            benefit = marginal_demand * C_DROP # 救回這些請求
+            cost = S_LORA * (C_STORE + C_DL)   # 下載成本
+            net_u = benefit - cost
+            
+            if net_u > 0 and net_u > best_net_utility:
+                best_net_utility = net_u
+                best_cluster = c_name
+        
+        # 2. 嘗試部署到最佳 Cluster
+        if best_cluster:
+            target_set = set(cluster_targets[best_cluster])
             deployed = False
-            for c_name, d_local in candidates:
-                target_set = set(cluster_targets[c_name])
-                
-                # Case A: 有空間，直接載入
-                if len(target_set) < CAPACITY:
-                    target_set.add(lora_id)
-                    cluster_targets[c_name] = list(target_set)
-                    global_loaded_counts[lora_id] = 1
-                    async with efo_metrics.lock: efo_metrics.artifact_downloads += 1
-                    logger.info(f"    -> ✅ Rescued to {c_name} (Free space)")
-                    deployed = True
-                    break # 成功部署，跳出 Cluster 迴圈
-                
-                # Case B: 空間已滿，嘗試替換 (Eviction)
-                else:
-                    victim = None
-                    min_victim_util = float('inf')
-                    
-                    # 在該 Cluster 中尋找 "效用最低" 的非強制項目
-                    for existing_id in target_set:
-                        # 保護 Local Mandatory
-                        if global_lora_metadata.get(existing_id, {}).get("type") == "local":
-                            continue
-                            
-                        # 計算犧牲者的 Utility (Local View)
-                        # 這裡的 Utility = 該 Cluster 若失去此模型會損失多少 (假設只能 Drop)
-                        d_victim_local = predicted_demand[c_name].get(existing_id, 0.0)
-                        u_victim = (d_victim_local * C_DROP) - (S_LORA * C_STORE)
-                        
-                        if u_victim < min_victim_util:
-                            min_victim_util = u_victim
-                            victim = existing_id
-                    
-                    # 計算 Rescue 的淨效益 (System View)
-                    # 我們用 "全域救回的效益" 來跟 "局部犧牲的代價" PK
-                    u_rescue = system_benefit - system_cost
-                    
-                    if victim and u_rescue > min_victim_util:
-                        target_set.remove(victim)
-                        target_set.add(lora_id)
-                        cluster_targets[c_name] = list(target_set)
-                        global_loaded_counts[lora_id] = 1
-                        
-                        # 更新被踢掉者的全域計數
-                        if global_loaded_counts[victim] > 0: global_loaded_counts[victim] -= 1
-                        
-                        async with efo_metrics.lock: efo_metrics.artifact_downloads += 1
-                        logger.info(f"    -> ✅ Rescued to {c_name} by swapping out {victim} (Util {min_victim_util:.2f} < Rescue {u_rescue:.2f})")
-                        deployed = True
-                        break # 成功部署，跳出 Cluster 迴圈
-                    else:
-                        logger.info(f"    -> ⚠️ Cannot swap in {c_name} (Rescue {u_rescue:.2f} <= Victim {min_victim_util:.2f})")
-                        # 失敗，繼續嘗試下一個候選 Cluster
             
+            # Case A: 有空間
+            if len(target_set) < CAPACITY:
+                target_set.add(cand_id)
+                cluster_targets[best_cluster] = list(target_set)
+                async with efo_metrics.lock: efo_metrics.artifact_downloads += 1
+                logger.info(f"🚨 [Global Rescue] Added {cand_id} to {best_cluster} (New Reqs: {best_net_utility/C_DROP:.1f}, NetU: {best_net_utility:.2f})")
+                deployed = True
+            
+            # Case B: 沒空間，嘗試 Swap
+            else:
+                # 尋找犧牲者：移除後損失最小的
+                victim = None
+                min_victim_loss = float('inf')
+                
+                swappable = [t for t in target_set if global_lora_metadata.get(t,{}).get("type") != "local"]
+                for t in swappable:
+                    # 計算移除 t 的損失 (即 t 貢獻的邊際需求)
+                    temp_set = target_set - {t}
+                    loss_demand = calculate_marginal_demand(best_cluster, t, temp_set)
+                    loss_val = (loss_demand * C_DROP) - (S_LORA * C_STORE)
+                    
+                    if loss_val < min_victim_loss:
+                        min_victim_loss = loss_val
+                        victim = t
+                
+                # 只有當 救援效益 明顯大於 犧牲損失 時才做
+                if best_net_utility > min_victim_loss + EPSILON:
+                    target_set.remove(victim)
+                    target_set.add(cand_id)
+                    cluster_targets[best_cluster] = list(target_set)
+                    async with efo_metrics.lock: efo_metrics.artifact_downloads += 1
+                    logger.info(f"🚨 [Global Rescue] Swapped {victim} (Loss {min_victim_loss:.2f}) with {cand_id} (Gain {best_net_utility:.2f}) in {best_cluster}")
+                    deployed = True
+
             if not deployed:
-                logger.warning(f"    -> ❌ Failed to rescue {lora_id} in ANY candidate cluster.")
+                # 記錄一下，雖有正效益但擠不進去
+                pass
 
     # 更新累計存儲量
     current_total_stored = sum(len(loras) for loras in cluster_targets.values())
     async with efo_metrics.lock:
         efo_metrics.cumulative_stored_loras += current_total_stored
-    logger.info(f"📦 [SP1 Storage] Added {current_total_stored} to cumulative storage count.")
+    logger.info(f"📦 [SP1 Storage] Final Count: {current_total_stored} LoRAs stored across clusters.")
 
-    # 2. 發送並「阻塞等待」所有 Control Node 排空與重置
+    # 3. 發送並「阻塞等待」所有 Control Node 排空與重置
     logger.info("⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...")
     async with httpx.AsyncClient(timeout=EDGE_SYNC_TIMEOUT) as client:
         tasks = []
