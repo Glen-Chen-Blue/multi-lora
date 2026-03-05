@@ -300,7 +300,7 @@ class MultiLoRAEngine:
             # 計算模擬延遲
             if prefill_reqs:
                 # 模擬 Prefill
-                step_sleep_time += (SIM_PREFILL_BASE_TIME * len(prefill_reqs)) / multiplier # 使用 / multiplier 因為原本是 * (1/multiplier) 時間
+                step_sleep_time += (SIM_PREFILL_BASE_TIME * len(prefill_reqs)) * multiplier
                 # 標記為已有 Past KV
                 for r in prefill_reqs:
                     r["past_key_values"] = True # 模擬物件
@@ -310,7 +310,7 @@ class MultiLoRAEngine:
             if decode_reqs:
                 # 模擬 Decode
                 batch_size = len(decode_reqs)
-                step_sleep_time += (SIM_DECODE_BASE_TIME + SIM_DECODE_SLOPE * batch_size) / multiplier
+                step_sleep_time += (SIM_DECODE_BASE_TIME + SIM_DECODE_SLOPE * batch_size) * multiplier
 
         # ==========================================
         # Phase 4: 模擬 GPU 運算 (釋放 self.lock，但持有 gpu_lock)
