@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+ulimit -n 65535
 
 # ---- safety: must be bash ----
 if [[ -z "${BASH_VERSION:-}" ]]; then
@@ -22,7 +23,6 @@ export LOG_PATH="./experinment_3_logs"
 # Metadata
 export LORA_METADATA_PATH="./information/lora_metadata_without_substitutes.json"
 
-export DISPATCH_STRATEGY="random"
 # ==================================================
 # 🌐 Port Configuration
 # ==================================================

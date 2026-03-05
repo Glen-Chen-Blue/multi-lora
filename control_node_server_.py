@@ -43,7 +43,6 @@ CLUSTER_NAME = os.environ.get("CLUSTER_NAME", "cluster_1")
 CLUSTER_ID = CLUSTER_NAME
 EFO_URL = os.environ.get("EFO_URL", "http://127.0.0.1:9100")
 MY_URL = os.environ.get("CONTROL_NODE_URL", "http://127.0.0.1:9000")
-DISPATCH_STRATEGY = os.environ.get("DISPATCH_STRATEGY", "random")  # "random" or "greedy"
 
 limits = httpx.Limits(max_keepalive_connections=200, max_connections=HTTP_MAX_CONNECTIONS)
 client = httpx.AsyncClient(limits=limits, timeout=60.0)
@@ -297,7 +296,6 @@ async def handle_drop(req_data: dict, reason: str):
 # ============================================================
 async def scheduler_loop():
     global global_request_list, system_paused
-    logger.info(f"⏳ Baseline Scheduler loop started. Strategy: {DISPATCH_STRATEGY}")
     
     while True:
         try:
@@ -340,12 +338,7 @@ async def scheduler_loop():
                     # No capacity -> Drop
                     await handle_drop(req, "System Full (No Capacity)")
                 else:
-                    if DISPATCH_STRATEGY == "random":
-                        target_node = random.choice(candidates)
-                    elif DISPATCH_STRATEGY == "greedy":
-                        # Sort by URL ensures deterministic order for Greedy
-                        candidates.sort(key=lambda x: x.url)
-                        target_node = candidates[0]
+                    target_node = random.choice(candidates)
                 
                 if target_node:
                     # Step C: TTFT Constraint Check
@@ -397,7 +390,7 @@ async def lifespan(app: FastAPI):
             if resp.status_code == 200:
                 data = resp.json()
                 LORA_METADATA_TABLE.update(data.get("metadata", {}))
-                logger.info(f"✅ Registered. Strategy: {DISPATCH_STRATEGY}")
+                logger.info(f"✅ Registered.")
                 break
         except Exception: pass
         await asyncio.sleep(2.0)

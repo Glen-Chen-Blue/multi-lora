@@ -7,7 +7,7 @@ import pandas as pd
 try:
     from config import (
         COST_STORE_PER_GB, COST_DOWNLOAD_PER_GB,
-        COST_NET_TRAFFIC, COST_DROP_PENALTY, LORA_SIZE_GB,
+        COST_NET_TRAFFIC, COST_DROP_PENALTY2, LORA_SIZE_GB,
         COST_COMPUTE_PER_SEC
     )
     print("✅ Successfully imported config.py")
@@ -16,7 +16,7 @@ except ImportError:
     COST_STORE_PER_GB = 0.005
     COST_DOWNLOAD_PER_GB = 3.0
     COST_NET_TRAFFIC = 0.001
-    COST_DROP_PENALTY = 0.1
+    COST_DROP_PENALTY2 = 0.1
     LORA_SIZE_GB = 0.1
     COST_COMPUTE_PER_SEC = 0.001
 
@@ -59,7 +59,7 @@ def parse_logs(log_file):
 
                 # Penalty
                 drop_count = totals.get("total_drops", 0)
-                cost_penalty = drop_count * COST_DROP_PENALTY
+                cost_penalty = drop_count * COST_DROP_PENALTY2
 
                 total_cost = (
                     cost_storage

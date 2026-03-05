@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+ulimit -n 65535
 
 # ---- safety: must be bash ----
 if [[ -z "${BASH_VERSION:-}" ]]; then
