@@ -77,9 +77,9 @@ SEQ_LENGTH = 48              # LSTM 歷史觀測序列長度
 # 格式: (cluster_a, cluster_b): (d_prop, mu, sigma)
 # d_prop: 基礎傳輸延遲, mu/sigma: Lognormal 抖動參數
 NETWORK_SIM_PARAMS = {
-    ("cluster_1", "cluster_2"): (20, 2.5, 0.5), # Cloud to Near Edge
-    ("cluster_2", "cluster_3"): (40, 3.5, 0.8), # Edge to Edge
-    ("cluster_1", "cluster_3"): (60, 4.2, 1.2), # Cloud to Remote Edge
+    ("cluster_1", "cluster_2"): (20, 4.0, 0.5),  # Cloud to Near Edge (光纖/5G MEC)
+    ("cluster_2", "cluster_3"): (40, 5.0, 1.0),  # Edge to Edge (跨區 WAN/微波通訊)
+    ("cluster_1", "cluster_3"): (60, 6.0, 1.1),  # Cloud to Remote Edge (受限頻寬/4G IoT邊緣)
 }
 
 
