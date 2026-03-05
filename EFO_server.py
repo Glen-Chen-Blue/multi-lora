@@ -459,7 +459,11 @@ async def run_sp1_provisioning_and_wait():
 
         # 統計新下載
         current_disk_static = set(global_lora_disk_inventory.get(cluster_name, []))
-        real_new_downloads = len(target_disk - current_disk_static)
+        
+        # [修正 1] 過濾掉 Local LoRA，因為 Local 不應該算作「下載成本」
+        new_items = target_disk - current_disk_static
+        real_new_downloads = sum(1 for l in new_items if global_lora_metadata.get(l, {}).get("type") != "local")
+        
         if real_new_downloads > 0:
             async with efo_metrics.lock: efo_metrics.artifact_downloads += real_new_downloads
 
@@ -557,6 +561,11 @@ async def run_sp1_provisioning_and_wait():
     async with efo_metrics.lock:
         efo_metrics.cumulative_stored_loras += current_total_stored
     logger.info(f"📦 [SP1 Storage] Final Count: {current_total_stored} LoRAs stored across clusters.")
+
+    # [修正 2] 將本輪最終部署結果寫回全域變數，供下一個 Time Step 參考
+    global_lora_disk_inventory.clear()
+    for c_name, loras in cluster_targets.items():
+        global_lora_disk_inventory[c_name] = list(loras)
 
     # 3. 發送並「阻塞等待」所有 Control Node 排空與重置
     logger.info("⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...")

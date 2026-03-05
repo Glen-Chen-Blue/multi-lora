@@ -25,6 +25,8 @@ export LOG_PATH="./experiment_single_cluster_2nodes_logs"
 # Metadata (如果你服務端會讀這個 env)
 export LORA_METADATA_PATH="./information/lora_metadata.json"
 
+export SIMULATION="0"
+
 # ==================================================
 # 🌐 Port Configuration
 # ==================================================
