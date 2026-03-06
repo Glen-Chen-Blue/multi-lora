@@ -182,7 +182,10 @@ def generate_cost_plot(log_file_path, output_path):
 if __name__ == "__main__":
     log_file = "./experiment_single_cluster_2nodes_logs/efo_global_metrics.log"
     output_image = "cost_breakdown_1.png"
-    # generate_cost_plot(log_file, output_image)
-    # log_file = "./experinment_2_logs/efo_global_metrics.log"
-    # output_image = "cost_breakdown_2.png"
+    generate_cost_plot(log_file, output_image)
+    log_file = "./experiment_single_cluster_2nodes2_logs/efo_global_metrics.log"
+    output_image = "cost_breakdown_2.png"
+    generate_cost_plot(log_file, output_image)
+    log_file = "./experiment_single_cluster_2nodes3_logs/efo_global_metrics.log"
+    output_image = "cost_breakdown_3.png"
     generate_cost_plot(log_file, output_image)
