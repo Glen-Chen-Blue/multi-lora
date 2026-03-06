@@ -6,7 +6,7 @@ import httpx
 import time
 from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -37,7 +37,8 @@ CLUSTERS_ENV = os.environ.get("CLUSTERS", "{}")
 class EFOMetrics:
     def __init__(self):
         self.lock = asyncio.Lock()
-        self.artifact_downloads = 0  # 累計下載次數 (反映 LRU Cache Miss 的網路成本)
+        # 累計下載次數 (反映 LRU Cache Miss 的網路成本)，改為追蹤個別 Cluster
+        self.artifact_downloads = defaultdict(int)
 
 efo_metrics = EFOMetrics()
 
@@ -126,8 +127,17 @@ async def run_efo_metrics_cycle(step_id: int):
             
             # EFO 的自身指標
             async with efo_metrics.lock:
-                global_snapshot["efo_totals"]["artifact_downloads"] = efo_metrics.artifact_downloads
+                # 統計全域總量
+                global_snapshot["efo_totals"]["artifact_downloads"] = sum(efo_metrics.artifact_downloads.values())
                 global_snapshot["efo_totals"]["total_stored_loras"] = sum(len(c) for c in cluster_lru_caches.values())
+                
+                # 關鍵修復：將 EFO 掌管的下載與儲存狀態，注入回各個 Cluster 的日誌結構中
+                for c_name in active_clusters.keys():
+                    if c_name not in global_snapshot["clusters"]:
+                        global_snapshot["clusters"][c_name] = {}
+                    
+                    global_snapshot["clusters"][c_name]["artifact_downloads"] = efo_metrics.artifact_downloads.get(c_name, 0)
+                    global_snapshot["clusters"][c_name]["total_stored_loras"] = len(cluster_lru_caches.get(c_name, []))
             
             with open(log_file, "a") as f:
                 f.write(json.dumps(global_snapshot) + "\n")
@@ -195,9 +205,9 @@ async def fetch_and_evict_lora(req: LRURequest):
     # 加入快取 (MRU 位置)
     cache[lora_id] = True
     
-    # 增加模擬下載次數 (Artifact Download Cost)
+    # 增加模擬下載次數 (針對觸發的 cluster)
     async with efo_metrics.lock:
-        efo_metrics.artifact_downloads += 1
+        efo_metrics.artifact_downloads[cluster] += 1
         
     # 檢查容量限制，執行 LRU Eviction
     CAPACITY = get_max_capacity()

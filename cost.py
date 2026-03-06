@@ -189,3 +189,6 @@ if __name__ == "__main__":
     log_file = "./experiment_single_cluster_2nodes3_logs/efo_global_metrics.log"
     output_image = "cost_breakdown_3.png"
     generate_cost_plot(log_file, output_image)
+    log_file = "./experiment_single_cluster_2nodes4_logs/efo_global_metrics.log"
+    output_image = "cost_breakdown_4.png"
+    generate_cost_plot(log_file, output_image)

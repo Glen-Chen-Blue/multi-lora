@@ -27,6 +27,8 @@ export LORA_METADATA_PATH="./information/lora_metadata_without_substitutes.json"
 
 export SIMULATION="0"
 
+export DISK_CAPACITY_GB=2.0       # 每個 Cluster 硬碟的 LoRA 儲存容量上限 (GB)
+
 # ==================================================
 # 🌐 Port Configuration
 # ==================================================
