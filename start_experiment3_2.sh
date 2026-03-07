@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+ulimit -n 65535
 
 # ---- safety: must be bash ----
 if [[ -z "${BASH_VERSION:-}" ]]; then
@@ -16,27 +17,21 @@ PIDS=()
 # 📦 Experiment Configuration (export to all services)
 # ==================================================
 
-# (optional) CUDA allocator config
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-
 # Logs
-export LOG_PATH="./experiment_single_cluster_2nodes_logs"
+export LOG_PATH="./experiment_2_logs"
 
-# Metadata (如果你服務端會讀這個 env)
-export LORA_METADATA_PATH="./information/lora_metadata.json"
-
-export SIMULATION="0"
+# Metadata
+export LORA_METADATA_PATH="./information/lora_metadata_without_substitutes.json"
 
 # ==================================================
 # 🌐 Port Configuration
 # ==================================================
 
-BASE_PORT=8000
+BASE_PORT=7000
 
 EFO_PORT=$((BASE_PORT + 900))        # 8900
 CTRL_BASE_PORT=$((BASE_PORT + 100))  # 8100..8102
 COMP_BASE_PORT=$((BASE_PORT + 200))  # 8201..
-
 
 # ==================================================
 # 🌍 Service URLs
@@ -48,11 +43,13 @@ export EFO_URL="http://127.0.0.1:${EFO_PORT}"
 # 🧪 Simulation Configuration
 # ==================================================
 
-export TARGET_CLUSTERS='["cluster_1"]'
+export TARGET_CLUSTERS='["cluster_1","cluster_2","cluster_3"]'
 
 CTRL1_PORT=$((CTRL_BASE_PORT + 0))
+CTRL2_PORT=$((CTRL_BASE_PORT + 1))
+CTRL3_PORT=$((CTRL_BASE_PORT + 2))
 
-export CLUSTER_PORT_MAP="{\"cluster_1\":${CTRL1_PORT}}"
+export CLUSTER_PORT_MAP="{\"cluster_1\":${CTRL1_PORT},\"cluster_2\":${CTRL2_PORT},\"cluster_3\":${CTRL3_PORT}}"
 
 # ==================================================
 # 📂 Prepare log folder
@@ -108,16 +105,21 @@ start() {
   # Kill EFO
   kill_port "$EFO_PORT"
 
-  # Kill Control Node (only 1)
-  kill_port "$CTRL1_PORT"
-
-  # Kill Compute Nodes (2 nodes)
-  for n in 1 2; do
-    COMP_PORT=$((COMP_BASE_PORT + n))  # 8001, 8002
-    kill_port "$COMP_PORT"
+  # Kill Control Nodes
+  for c in 1 2 3; do
+    CTRL_PORT=$((CTRL_BASE_PORT + (c-1)))
+    kill_port "$CTRL_PORT"
   done
 
-  echo "=== Phase 1: Infrastructure Test (Single Cluster, 2 Compute Nodes) ==="
+  # Kill Compute Nodes
+  for c in 1 2 3; do
+    for n in 1 2 3; do
+      COMP_PORT=$((COMP_BASE_PORT + (c-1)*10 + n))
+      kill_port "$COMP_PORT"
+    done
+  done
+
+  echo "=== Phase 1: Infrastructure Test (Dynamic Registration Mode) ==="
 
   # ==================================================
   # Start EFO
@@ -126,7 +128,7 @@ start() {
   echo "🚀 Starting EFO (Port $EFO_PORT)..."
 
   PORT="$EFO_PORT" \
-  CLUSTERS="{\"cluster_1\":\"http://127.0.0.1:${CTRL1_PORT}\"}" \
+  CLUSTERS="{\"cluster_1\":\"http://127.0.0.1:${CTRL1_PORT}\",\"cluster_2\":\"http://127.0.0.1:${CTRL2_PORT}\",\"cluster_3\":\"http://127.0.0.1:${CTRL3_PORT}\"}" \
   uvicorn EFO_server:app --host 0.0.0.0 --port "$EFO_PORT" \
   >> "$LOG_PATH/efo.log" 2>&1 &
 
@@ -135,59 +137,72 @@ start() {
   sleep 5
 
   # ==================================================
-  # Start Control Node (cluster_1)
+  # Start Control Nodes
   # ==================================================
 
   echo "🚀 Starting Control Nodes..."
-  echo "   -> Control Node cluster_1 (Port $CTRL1_PORT)"
 
-  CLUSTER_NAME="cluster_1" \
-  EFO_URL="$EFO_URL" \
-  PORT="$CTRL1_PORT" \
-  CONTROL_NODE_URL="http://127.0.0.1:$CTRL1_PORT" \
-  uvicorn control_node_server:app --host 0.0.0.0 --port "$CTRL1_PORT" \
-  >> "$LOG_PATH/control_1.log" 2>&1 &
+  for c in 1 2 3; do
 
-  PIDS+=($!)
+    CTRL_PORT=$((CTRL_BASE_PORT + (c-1)))
+
+    echo "   -> Control Node cluster_$c (Port $CTRL_PORT)"
+
+    CLUSTER_NAME="cluster_$c" \
+    EFO_URL="$EFO_URL" \
+    PORT="$CTRL_PORT" \
+    CONTROL_NODE_URL="http://127.0.0.1:$CTRL_PORT" \
+    uvicorn control_node_server:app --host 0.0.0.0 --port "$CTRL_PORT" \
+    >> "$LOG_PATH/control_${c}.log" 2>&1 &
+
+    PIDS+=($!)
+
+  done
 
   sleep 2
 
   # ==================================================
-  # Start Compute Nodes (2 nodes)
+  # Start Compute Nodes
   # ==================================================
 
   echo "🚀 Starting Compute Nodes..."
-  echo "   --- Cluster 1 (Connecting to Control Node $CTRL1_PORT) ---"
 
-  for n in 1 2; do
-    COMP_PORT=$((COMP_BASE_PORT + n))   # 8001, 8002
-    NODE_ID="c1-n${n}"
-    GPU_ID=$((n-1))                     # n=1 -> GPU0, n=2 -> GPU1
+  for c in 1 2 3; do
 
-    echo "      -> Compute Node $NODE_ID (Port $COMP_PORT, GPU $GPU_ID)"
+    CTRL_PORT=$((CTRL_BASE_PORT + (c-1)))
 
-    CUDA_VISIBLE_DEVICES="$GPU_ID" \
-    NODE_ID="$NODE_ID" \
-    CONTROL_NODE_URL="http://127.0.0.1:$CTRL1_PORT" \
-    PORT="$COMP_PORT" \
-    uvicorn compute_node_server:app --host 0.0.0.0 --port "$COMP_PORT" \
-    >> "$LOG_PATH/compute_${NODE_ID}.log" 2>&1 &
+    echo "   --- Cluster $c (Connecting to Control Node $CTRL_PORT) ---"
 
-    PIDS+=($!)
+    for n in 1 2 3; do
+
+      COMP_PORT=$((COMP_BASE_PORT + (c-1)*10 + n))
+      NODE_ID="c${c}-n${n}"
+
+      echo "      -> Compute Node $NODE_ID (Port $COMP_PORT)"
+
+      NODE_ID="$NODE_ID" \
+      CONTROL_NODE_URL="http://127.0.0.1:$CTRL_PORT" \
+      PORT="$COMP_PORT" \
+      uvicorn compute_node_server:app --host 0.0.0.0 --port "$COMP_PORT" \
+      >> "$LOG_PATH/compute_${NODE_ID}.log" 2>&1 &
+
+      PIDS+=($!)
+
+    done
   done
 
   echo ""
-  echo "⏳ Waiting 20 seconds for cluster to register with EFO..."
+  echo "⏳ Waiting 20 seconds for all clusters to register with EFO..."
   sleep 20
 
   echo "✅ All services started."
   echo "   EFO:          $EFO_URL"
-  echo "   ControlNodes: $CTRL1_PORT"
+  echo "   ControlNodes: $CTRL1_PORT, $CTRL2_PORT, $CTRL3_PORT"
   echo "   Logs:         $LOG_PATH/"
   echo ""
 
   # ==================================================
-  # 🧪 Run Simulation (仿照 experiment1/2)
+  # 🧪 Run Simulation
   # ==================================================
 
   echo "🧪 Running test_simulation.py..."

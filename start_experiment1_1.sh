@@ -20,20 +20,18 @@ PIDS=()
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # Logs
-export LOG_PATH="./experiment_single_cluster_2nodes4_logs"
+export LOG_PATH="./experiment_single_cluster_2nodes1_logs"
 
 # Metadata (如果你服務端會讀這個 env)
-export LORA_METADATA_PATH="./information/lora_metadata_without_substitutes.json"
+export LORA_METADATA_PATH="./information/lora_metadata.json"
 
 export SIMULATION="0"
-
-export DISK_CAPACITY_GB=2.0       # 每個 Cluster 硬碟的 LoRA 儲存容量上限 (GB)
 
 # ==================================================
 # 🌐 Port Configuration
 # ==================================================
 
-BASE_PORT=6000
+BASE_PORT=8000
 
 EFO_PORT=$((BASE_PORT + 900))        # 8900
 CTRL_BASE_PORT=$((BASE_PORT + 100))  # 8100..8102
@@ -129,7 +127,7 @@ start() {
 
   PORT="$EFO_PORT" \
   CLUSTERS="{\"cluster_1\":\"http://127.0.0.1:${CTRL1_PORT}\"}" \
-  uvicorn EFO_server_lru:app --host 0.0.0.0 --port "$EFO_PORT" \
+  uvicorn EFO_server:app --host 0.0.0.0 --port "$EFO_PORT" \
   >> "$LOG_PATH/efo.log" 2>&1 &
 
   PIDS+=($!)
@@ -147,7 +145,7 @@ start() {
   EFO_URL="$EFO_URL" \
   PORT="$CTRL1_PORT" \
   CONTROL_NODE_URL="http://127.0.0.1:$CTRL1_PORT" \
-  uvicorn control_node_server_lru:app --host 0.0.0.0 --port "$CTRL1_PORT" \
+  uvicorn control_node_server:app --host 0.0.0.0 --port "$CTRL1_PORT" \
   >> "$LOG_PATH/control_1.log" 2>&1 &
 
   PIDS+=($!)

@@ -245,7 +245,7 @@ async def handle_drop(req_data: dict, reason: str):
 # ============================================================
 async def dlora_batching_controller():
     """
-    全知視角的微觀排程遙控器，精準實作 dLoRA 論文的遲滯雙門檻機制
+    全知視角的微觀排程遙控器，精準實作 dLoRA 論文的遲滯雙門檻機制 (已修復死鎖)
     """
     logger.info("🎮 [dLoRA Controller] Dynamic Batching Remote Controller Started.")
     while True:
@@ -255,8 +255,16 @@ async def dlora_batching_controller():
                 metrics = node_mgr.nodes[url].get("metrics")
                 if not metrics: continue
                 
+                current_mode = metrics.get("mode")
+                merged_adapter = metrics.get("lora_state", {}).get("merged_adapter")
                 req_set = metrics.get("request_set", [])
-                if not req_set: continue
+                
+                # 修復 1: 當佇列空了，如果還在 Merge 模式，必須主動退回 Unmerge，釋放 GPU 鎖定
+                if not req_set: 
+                    if current_mode == "merge":
+                        asyncio.create_task(client.post(f"{url}/unmerge", json={"force": True}))
+                        logger.info(f"🔄 [dLoRA] Node {url} -> UNMERGE (Queue empty, releasing lock)")
+                    continue
                 
                 # 計算當前 Queue 中的 LoRA 佔比
                 counts = defaultdict(int)
@@ -266,20 +274,22 @@ async def dlora_batching_controller():
                 l_max = max(counts, key=counts.get)
                 ratio = counts[l_max] / len(req_set)
                 
-                current_mode = metrics.get("mode")
-                merged_adapter = metrics.get("lora_state", {}).get("merged_adapter")
-                
+                # 修復 2: Exit Merge Mode 邏輯強化
+                if current_mode == "merge":
+                    # 如果當前 Merge 的模型，在佇列中已經連一個都沒有了，或者比例太低，必須強制退出！
+                    merged_count = counts.get(merged_adapter, 0)
+                    merged_ratio = merged_count / len(req_set)
+                    
+                    if merged_ratio < DLORA_MERGE_LEFT_THRESHOLD:
+                        asyncio.create_task(client.post(f"{url}/unmerge", json={"force": True}))
+                        logger.info(f"🔄 [dLoRA] Node {url} -> UNMERGE (Target '{merged_adapter}' ratio={merged_ratio:.2f} < {DLORA_MERGE_LEFT_THRESHOLD})")
+                        continue # 退出後等下一個週期再決定是否要 Merge 別的
+
                 # [Condition 1] Enter Merge Mode (Threshold = 1.0)
                 if ratio >= DLORA_MERGE_RIGHT_THRESHOLD:
                     if current_mode != "merge" or merged_adapter != l_max:
                         asyncio.create_task(client.post(f"{url}/merge", json={"adapter_id": l_max, "force": True}))
                         logger.info(f"🔄 [dLoRA] Node {url} -> MERGE ({l_max}, ratio={ratio:.2f} >= {DLORA_MERGE_RIGHT_THRESHOLD})")
-                
-                # [Condition 2] Exit Merge Mode (Threshold = 0.555)
-                elif ratio < DLORA_MERGE_LEFT_THRESHOLD:
-                    if current_mode == "merge":
-                        asyncio.create_task(client.post(f"{url}/unmerge", json={"force": True}))
-                        logger.info(f"🔄 [dLoRA] Node {url} -> UNMERGE (ratio={ratio:.2f} < {DLORA_MERGE_LEFT_THRESHOLD})")
                         
         except Exception as e:
             logger.error(f"Batching controller error: {e}")

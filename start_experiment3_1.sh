@@ -18,7 +18,7 @@ PIDS=()
 # ==================================================
 
 # Logs
-export LOG_PATH="./experinment_1_logs"
+export LOG_PATH="./experiment_1_logs"
 
 # Metadata
 export LORA_METADATA_PATH="./information/lora_metadata.json"
