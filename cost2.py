@@ -256,6 +256,7 @@ if __name__ == "__main__":
         "./experiment_single_cluster_2nodes3_logs/efo_global_metrics.log",
         "./experiment_single_cluster_2nodes4_logs/efo_global_metrics.log",
         "./experiment_single_cluster_2nodes5_logs/efo_global_metrics.log",
+        "./experiment_single_cluster_2nodes6_logs/efo_global_metrics.log"
     ]
 
     labels = [
@@ -264,6 +265,7 @@ if __name__ == "__main__":
         "Experiment 3 (SP1+Random)",
         "Experiment 4 (LRU+Random)",
         "Experiment 5 (Dlora)",
+        "Experiment 6 (Slora)"
     ]
 
     plot_multiple_total_costs_with_simulation_bg(

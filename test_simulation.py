@@ -7,10 +7,9 @@ import os
 from datetime import datetime
 
 # 匯入常數以確保區間對齊
-from config import SP1_INTERVAL_SECONDS
+from config import SP1_INTERVAL_SECONDS, START_OFFSET
 
 TRACE_CSV = "./information/simulation_data.csv"
-START_OFFSET = 86400 * 2
 RUN_DURATION = SP1_INTERVAL_SECONDS * 8
 TIMEOUT = 120
 

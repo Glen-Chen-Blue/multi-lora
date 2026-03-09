@@ -328,44 +328,35 @@ async def scheduler_loop():
             for req in pending_requests:
                 aid = req["adapter_id"]
                 
-                # Step A: Filter Candidates (Capacity Check)
-                candidates = [n for n in v_nodes if n.get_free_slots(aid) > 0]
-                
-                target_node = None
-                
-                # Step B: Apply Strategy
-                if not candidates:
-                    # No capacity -> Drop
-                    await handle_drop(req, "System Full (No Capacity)")
-                else:
-                    target_node = random.choice(candidates)
-                
-                if target_node:
-                    # Step C: TTFT Constraint Check
-                    # 計算等待時間
-                    wait_time = time.time() - req["arrival_time"]
-                    
-                    # 預測執行時間 (傳入單一節點)
-                    exec_time = predict_cluster_ttft([target_node], aid, 0)
-                    
-                    total_ttft = wait_time + exec_time
-                    
-                    if total_ttft > T_MAX:
-                        # TTFT Violation -> Drop
-                        await handle_drop(req, f"SLO Violation (Pred: {total_ttft:.2f}s > {T_MAX}s)")
-                    else:
-                        # Step D: Dispatch
-                        # 立即更新 Virtual Node 狀態，讓下一個請求能看到減少後的 Slot
-                        target_node.commit_request(aid)
+                # Step A: 找出所有「有空位」且「不會違反 SLO」的節點
+                valid_candidates = []
+                for n in v_nodes:
+                    if n.get_free_slots(aid) > 0:
+                        wait_time = time.time() - req["arrival_time"]
+                        exec_time = predict_cluster_ttft([n], aid, 0)
+                        total_ttft = wait_time + exec_time
                         
-                        # 啟動非同步發送任務
-                        asyncio.create_task(dispatch_task(target_node.url, req, target_node))
+                        if total_ttft <= T_MAX:
+                            valid_candidates.append(n)
+
+                target_node = None
+
+                # Step B: Apply Strategy (僅針對合法的節點)
+                if not valid_candidates:
+                    # 找不到任何既有容量、又能滿足 TTFT 的節點 -> Drop
+                    await handle_drop(req, f"System Full or SLO Violation (No valid nodes for T_MAX={T_MAX}s)")
+                else:
+                    target_node = random.choice(valid_candidates)
                 
-                # Step E: Cleanup Queue
-                # 無論 Drop 或 Dispatch，都從佇列移除
+                # Step C: Dispatch
+                if target_node:
+                    # 確定派發
+                    target_node.commit_request(aid)
+                    asyncio.create_task(dispatch_task(target_node.url, req, target_node))
+                
+                # Step D: Cleanup Queue
                 if req in request_queues[aid]:
                     request_queues[aid].remove(req)
-                # 從 global list 移除 (這是比較慢的 O(N)，但在 Baseline 負載下可接受)
                 global_request_list = [r for r in global_request_list if r["request_id"] != req["request_id"]]
         
         except Exception as e:

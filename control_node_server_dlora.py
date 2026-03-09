@@ -29,7 +29,7 @@ from config import (
 # dLoRA Baseline 特有設定
 # ============================================================
 # 模擬從網路下載一個 LoRA 到本地硬碟的延遲時間 (秒)
-SIM_DOWNLOAD_DELAY = 3.0  
+SIM_DOWNLOAD_DELAY = 2.0  
 
 # dLoRA 動態批次切換門檻 (論文數值)
 DLORA_MERGE_RIGHT_THRESHOLD = 1.0    # 進入 Merge 模式：需要單一模型佔比達 100%

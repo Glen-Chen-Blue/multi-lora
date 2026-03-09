@@ -26,11 +26,14 @@ from config import (
     SP1_INTERVAL_SECONDS
 )
 
+# 🟢 新增：從環境變數讀取排程策略，預設為 random (對應 LRU Baseline)
+DISPATCH_STRATEGY = os.environ.get("DISPATCH_STRATEGY", "random").lower()
+
 # ============================================================
 # LRU Baseline 特有設定
 # ============================================================
 # 模擬從網路下載一個 LoRA 到本地硬碟的延遲時間 (秒)
-SIM_DOWNLOAD_DELAY = 3.0  
+SIM_DOWNLOAD_DELAY = 2.0  
 
 # ============================================================
 # Config & Logging
@@ -327,34 +330,54 @@ async def scheduler_loop():
                     ))
                 # ===================================================
                 
-                # Step A: Filter Candidates
-                candidates = [n for n in v_nodes if n.get_free_slots(aid) > 0]
-                
+                # Step A: 找出所有「有空位」且「不會違反 SLO」的節點
+                valid_candidates = []
+                for n in v_nodes:
+                    if n.get_free_slots(aid) > 0:
+                        wait_time = time.time() - req["arrival_time"]
+                        exec_time = predict_cluster_ttft([n], aid, 0)
+                        
+                        # ⚡ 將下載延遲加上去，計算總 TTFT
+                        total_ttft = wait_time + download_penalty + exec_time
+                        
+                        if total_ttft <= T_MAX:
+                            valid_candidates.append(n)
+
                 target_node = None
                 
-                # Step B: Apply Strategy (Random Baseline)
-                if not candidates:
-                    await handle_drop(req, "System Full (No Capacity)")
+                # Step B: Apply Strategy (Random or Greedy Baseline)
+                if not valid_candidates:
+                    await handle_drop(req, f"System Full or SLO Violation (No valid nodes for T_MAX={T_MAX}s)")
                 else:
-                    target_node = random.choice(candidates)
-                
-                if target_node:
-                    # Step C: TTFT Constraint Check
-                    wait_time = time.time() - req["arrival_time"]
-                    exec_time = predict_cluster_ttft([target_node], aid, 0)
+                    if DISPATCH_STRATEGY == "random":
+                        target_node = random.choice(valid_candidates)
                     
-                    # ⚡ 將下載延遲加上去，計算總 TTFT
-                    total_ttft = wait_time + download_penalty + exec_time
+                    elif DISPATCH_STRATEGY == "greedy":
+                        def get_node_id(n):
+                            try:
+                                return int(n.url.split(":")[-1].replace("/", ""))
+                            except:
+                                return str(n.url)
+                        
+                        # Greedy 核心: 先挑 Cache Hit
+                        cache_hits = [n for n in valid_candidates if aid in n.active_loras or aid in n.loaded_adapters]
+                        
+                        if cache_hits:
+                            # Cache Hit 優先挑選 ID 最小的 (First-Fit 集中)
+                            target_node = min(cache_hits, key=get_node_id)
+                        else:
+                            # Cache Miss 也挑選 ID 最小的，避免喚醒後面的閒置節點
+                            target_node = min(valid_candidates, key=get_node_id)
                     
-                    if total_ttft > T_MAX:
-                        # 若 Cache Miss 加上下載時間超過 SLO，直接 Drop 並記錄
-                        await handle_drop(req, f"SLO Violation (Pred: {total_ttft:.2f}s > {T_MAX}s)")
                     else:
-                        # Step D: Dispatch
-                        target_node.commit_request(aid)
-                        asyncio.create_task(dispatch_task(target_node.url, req, target_node))
+                        target_node = random.choice(valid_candidates)
                 
-                # Step E: Cleanup Queue
+                # Step C: Dispatch
+                if target_node:
+                    target_node.commit_request(aid)
+                    asyncio.create_task(dispatch_task(target_node.url, req, target_node))
+                
+                # Step D: Cleanup Queue
                 if req in request_queues[aid]:
                     request_queues[aid].remove(req)
                 global_request_list = [r for r in global_request_list if r["request_id"] != req["request_id"]]

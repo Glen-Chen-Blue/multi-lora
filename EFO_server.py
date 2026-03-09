@@ -22,7 +22,7 @@ from config import (
     COST_NET_TRAFFIC, COST_DROP_PENALTY, LORA_SIZE_GB,
     DISK_CAPACITY_GB, T_MAX_SLO, SWAP_EPSILON,
     NETWORK_SIM_PARAMS, SP2_INTERVAL_SECONDS, EDGE_SYNC_TIMEOUT,
-    SP1_INTERVAL_SECONDS
+    SP1_INTERVAL_SECONDS, START_OFFSET
 )
 
 # ============================================================
@@ -218,8 +218,6 @@ def exact_csv_forecasting(time_step: int):
     global predicted_demand
     predicted_demand.clear()
     
-    # 確保這裡的 OFFSET 與 test_simulation.py 一致
-    START_OFFSET = 86400 * 2 
     
     # 計算當前 Time Step 對應的 "歸零後" 時間範圍
     start_sec = time_step * SP1_INTERVAL_SECONDS
