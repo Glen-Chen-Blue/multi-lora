@@ -34,6 +34,7 @@ SIM_DOWNLOAD_DELAY = 3.0
 # dLoRA 動態批次切換門檻 (論文數值)
 DLORA_MERGE_RIGHT_THRESHOLD = 1.0    # 進入 Merge 模式：需要單一模型佔比達 100%
 DLORA_MERGE_LEFT_THRESHOLD = 0.555   # 退出 Merge 模式：該模型佔比低於 55.5% 才退回 Unmerged 共享
+MIN_MERGE_REQUESTS = 4
 
 # ============================================================
 # Config & Logging
@@ -258,12 +259,11 @@ async def dlora_batching_controller():
                 current_mode = metrics.get("mode")
                 merged_adapter = metrics.get("lora_state", {}).get("merged_adapter")
                 req_set = metrics.get("request_set", [])
-                
-                # 修復 1: 當佇列空了，如果還在 Merge 模式，必須主動退回 Unmerge，釋放 GPU 鎖定
-                if not req_set: 
+                total_reqs = len(req_set)
+                if total_reqs < MIN_MERGE_REQUESTS:
                     if current_mode == "merge":
                         asyncio.create_task(client.post(f"{url}/unmerge", json={"force": True}))
-                        logger.info(f"🔄 [dLoRA] Node {url} -> UNMERGE (Queue empty, releasing lock)")
+                        logger.info(f"🔄 [dLoRA] Node {url} -> UNMERGE (Low load: {total_reqs} reqs < {MIN_MERGE_REQUESTS})")
                     continue
                 
                 # 計算當前 Queue 中的 LoRA 佔比

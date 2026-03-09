@@ -19,7 +19,7 @@ export LOG_PATH="./experiment_4_logs"
 # Random/LRU 不考慮語意替代，所以套用 without_substitutes
 export LORA_METADATA_PATH="./information/lora_metadata_without_substitutes.json"
 
-export DISK_CAPACITY_GB=2.0       # 每個 Cluster 硬碟的 LoRA 儲存容量上限 (GB)
+export DISK_CAPACITY_GB=2.5       # 每個 Cluster 硬碟的 LoRA 儲存容量上限 (GB)
 
 # ==================================================
 # 🌐 Port Configuration
