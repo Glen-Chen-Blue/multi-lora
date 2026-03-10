@@ -137,9 +137,9 @@ if __name__ == "__main__":
     plot_simulation_requests(
         csv_path="./simulation_data.csv",
         target_clusters=["cluster_1", "cluster_2", "cluster_3"], # 可以加入更多 Cluster
-        speed_rate=2.0,       # 2倍速 (24小時資料壓縮成12小時)
-        start_offset_days=2,  # 從第 2 天開始 (86400*2)
-        duration_hours=8,    # 畫 12 小時
+        speed_rate=1.0,       # 1倍速 (24小時資料壓縮成24小時)
+        start_offset_days=0,  # 從第 0 天開始 (86400*0)
+        duration_hours=96,    # 畫 96 小時
         bin_minutes=5,        # 每 10 分鐘一點
-        output_filename = "request_rate_plot_speed2.png"
+        output_filename = "request_rate_plot_speed1_.png"
     )

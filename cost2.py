@@ -62,6 +62,9 @@ def parse_logs(log_file):
                 )
 
                 total_requests = totals.get("total_requests", completed_count + drop_count)
+                
+                # 計算單筆 request 的平均成本 (避免除以零)
+                cost_per_request = total_cost / total_requests if total_requests > 0 else 0.0
 
                 data.append(
                     {
@@ -72,6 +75,7 @@ def parse_logs(log_file):
                         "cost_network": cost_network,
                         "cost_penalty": cost_penalty,
                         "total_cost": total_cost,
+                        "cost_per_request": cost_per_request,
                         "drops": drop_count,
                         "completed": completed_count,
                         "total_requests": total_requests,
@@ -208,7 +212,7 @@ def plot_multiple_total_costs_with_simulation_bg(
             label="Request Rate"
         )
 
-    # 再畫 cost 曲線
+    # 再畫 cost_per_request 曲線
     for log_file, label in zip(log_files, labels):
         df = parse_logs(log_file)
 
@@ -216,18 +220,23 @@ def plot_multiple_total_costs_with_simulation_bg(
             print(f"⚠️ No data for {log_file}")
             continue
 
+        # 這裡改繪製 cost_per_request
         ax1.plot(
             df["time"],
-            df["total_cost"],
+            df["cost_per_request"],
             linewidth=2.5,
             label=label
         )
 
-        print(f"{label} Final Cost: {df['total_cost'].iloc[-1]:.4f}")
+        print(f"{label} Final Cost per Request: {df['cost_per_request'].iloc[-1]:.4f}")
 
-    ax1.set_title("Total System Cost Comparison with Request Rate Background", fontsize=16)
+    # 更新圖表標題與 Y 軸標籤
+    ax1.set_title("Cost per Request Comparison with Request Rate Background", fontsize=16)
     ax1.set_xlabel("Simulation Time (seconds)", fontsize=12)
-    ax1.set_ylabel("Total Cost (Credit)", fontsize=12)
+    ax1.set_ylabel("Total Cost / Total Request (Credit/req)", fontsize=12)
+    
+    # Set log scale for cost/request y-axis
+    ax1.set_yscale("log")
 
     ax2.set_ylabel("Request Rate (req/s)", fontsize=12, color="gray")
     ax2.tick_params(axis="y", colors="gray")
@@ -251,12 +260,12 @@ def plot_multiple_total_costs_with_simulation_bg(
 
 if __name__ == "__main__":
     log_files = [
-        "./experiment_single_cluster_2nodes1_logs/efo_global_metrics.log",
-        "./experiment_single_cluster_2nodes2_logs/efo_global_metrics.log",
-        "./experiment_single_cluster_2nodes3_logs/efo_global_metrics.log",
-        "./experiment_single_cluster_2nodes4_logs/efo_global_metrics.log",
-        "./experiment_single_cluster_2nodes5_logs/efo_global_metrics.log",
-        "./experiment_single_cluster_2nodes6_logs/efo_global_metrics.log"
+        "./record_1/experiment_single_cluster_2nodes1_logs/efo_global_metrics.log",
+        "./record_1/experiment_single_cluster_2nodes2_logs/efo_global_metrics.log",
+        "./record_1/experiment_single_cluster_2nodes3_logs/efo_global_metrics.log",
+        "./record_1/experiment_single_cluster_2nodes4_logs/efo_global_metrics.log",
+        "./record_1/experiment_single_cluster_2nodes5_logs/efo_global_metrics.log",
+        "./record_1/experiment_single_cluster_2nodes6_logs/efo_global_metrics.log"
     ]
 
     labels = [
@@ -271,7 +280,7 @@ if __name__ == "__main__":
     plot_multiple_total_costs_with_simulation_bg(
         log_files=log_files,
         labels=labels,
-        output_path="cost_comparison.png",
+        output_path="cost_per_request_comparison.png",  # 更改輸出檔名以避免覆寫原檔
         csv_path="./information/simulation_data.csv",
         target_clusters=["cluster_1"],
         speed_rate=1.0,

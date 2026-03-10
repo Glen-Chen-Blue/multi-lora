@@ -16,7 +16,7 @@ LOG_PATH = os.environ.get("LOG_PATH", "./logs")
 
 MODEL_ID = os.environ.get("MODEL_ID", "unsloth/Meta-Llama-3.1-8B")
 
-START_OFFSET = 86400 * 2  # 模擬開始前的時間偏移 (秒)，預設為 2 天
+START_OFFSET = int(os.environ.get("START_TIME", 86400 * 2))
 
 # ------------------------------------------------------------
 # 2. 系統容量與長度限制 (Capacity & Token Limits)
