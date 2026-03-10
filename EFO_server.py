@@ -66,6 +66,9 @@ system_start_event: asyncio.Event = None
 # [新增] 全域 Log 任務管理
 efo_logging_task: Optional[asyncio.Task] = None
 
+# [新增] 全域模擬器資料庫，避免每次迴圈重新載入引發 SegFault
+global_simulation_df: Optional[pd.DataFrame] = None
+
 # ============================================================
 # Network Simulator (Shifted Lognormal & P95)
 # ============================================================
@@ -156,7 +159,6 @@ async def run_efo_metrics_cycle(step_id: int):
                 "efo_totals": {
                     "total_inference_time": 0.0,
                     "total_drops": 0,
-                    # [修改] 只保留這兩種 Drop
                     "total_drop_local_congestion": 0,
                     "total_drop_no_target": 0,
                     
@@ -215,9 +217,8 @@ async def run_efo_metrics_cycle(step_id: int):
 # SP1: CSV Forecasting (Interval Scanning)
 # ============================================================
 def exact_csv_forecasting(time_step: int):
-    global predicted_demand
+    global predicted_demand, global_simulation_df
     predicted_demand.clear()
-    
     
     # 計算當前 Time Step 對應的 "歸零後" 時間範圍
     start_sec = time_step * SP1_INTERVAL_SECONDS
@@ -226,24 +227,13 @@ def exact_csv_forecasting(time_step: int):
     for cluster_name in active_clusters.keys():
         predicted_demand[cluster_name] = {lora_id: 0.0 for lora_id in global_lora_metadata.keys()}
 
-    if not os.path.exists(SIMULATION_DATA_CSV_PATH):
-        logger.error(f"❌ 找不到 CSV 檔案: {SIMULATION_DATA_CSV_PATH}")
+    if global_simulation_df is None:
+        logger.error(f"❌ 記憶體中找不到 CSV 軌跡資料，請確認檔案路徑: {SIMULATION_DATA_CSV_PATH}")
         return
 
     try:
-        df = pd.read_csv(SIMULATION_DATA_CSV_PATH)
-        df["arrival_sec"] = df["arrive_timestamp"].astype(float)
-        
-        # === [修正] 強制對齊邏輯 ===
-        # 1. 先過濾掉 START_OFFSET 之前的舊資料 (模擬器不跑這些，EFO 也不該看這些)
-        df = df[df["arrival_sec"] >= START_OFFSET].copy()
-        
-        # 2. 強制平移時間軸，將 START_OFFSET 視為 0
-        df["arrival_sec"] -= START_OFFSET
-        # ==========================
-        
-        # 3. 根據 Step 選取對應區間的資料
-        df = df[(df["arrival_sec"] >= start_sec) & (df["arrival_sec"] < end_sec)]
+        # 直接從預先載入好且轉換過時間軸的 DataFrame 中提取
+        df = global_simulation_df[(global_simulation_df["arrival_sec"] >= start_sec) & (global_simulation_df["arrival_sec"] < end_sec)]
         
         target_clusters = list(active_clusters.keys())
         df = df[df["cluster"].isin(target_clusters)]
@@ -268,7 +258,7 @@ def exact_csv_forecasting(time_step: int):
             logger.info(f"📈 [Pandas Forecast] {cluster} (Step {time_step}, Time {start_sec}-{end_sec}s): 預計有 {int(count)} 個請求")
 
     except Exception as e:
-        logger.error(f"❌ Pandas 處理 CSV 發生錯誤: {e}")
+        logger.error(f"❌ Pandas 處理 Dataframe 發生錯誤: {e}")
 
 
 # ============================================================
@@ -602,7 +592,7 @@ class RegisterClusterRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global global_lora_metadata, configured_clusters, azure_mapping, system_start_event
+    global global_lora_metadata, configured_clusters, azure_mapping, system_start_event, global_simulation_df
     system_start_event = asyncio.Event()
 
     try:
@@ -617,6 +607,23 @@ async def lifespan(app: FastAPI):
     if os.path.exists(LORA_MAPPING_PATH):
         with open(LORA_MAPPING_PATH, "r", encoding="utf-8") as f: 
             azure_mapping = json.load(f)
+
+    # [核心修復] 伺服器啟動時，一次性將 CSV 讀進記憶體並做前處理
+    if os.path.exists(SIMULATION_DATA_CSV_PATH):
+        logger.info(f"📂 Loading simulation CSV: {SIMULATION_DATA_CSV_PATH} into memory...")
+        try:
+            df = pd.read_csv(SIMULATION_DATA_CSV_PATH)
+            df["arrival_sec"] = df["arrive_timestamp"].astype(float)
+            # 過濾掉 START_OFFSET 之前的舊資料
+            df = df[df["arrival_sec"] >= START_OFFSET].copy()
+            # 強制平移時間軸
+            df["arrival_sec"] -= START_OFFSET
+            global_simulation_df = df
+            logger.info(f"✅ Simulation CSV loaded successfully! Total records: {len(global_simulation_df)}")
+        except Exception as e:
+            logger.error(f"❌ Failed to load simulation CSV: {e}")
+    else:
+        logger.warning(f"⚠️ Simulation CSV not found at {SIMULATION_DATA_CSV_PATH}")
 
     asyncio.create_task(sp2_routing_loop())
     yield
