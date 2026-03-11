@@ -735,16 +735,9 @@ async def apply_sp1_and_reset(req: UpdateLorasRequest):
         
         current_interval_id += 1
         
-        # === 2. 等待排空 (Drain) (加入超時機制防呆) ===
-        wait_start_time = time.time()
-        max_wait_time = 120.0  # 最多等待 120 秒排空
-        
+        # === 2. 等待排空 (Drain) ===
+        # 迴圈檢查直到 (1) Control Node 無積壓 (2) 所有 Compute Node 無執行中 Batch
         while True:
-            # 防死鎖機制：若超過最大等待時間，直接強制繼續執行
-            if time.time() - wait_start_time > max_wait_time:
-                logger.warning("⚠️ [SP1 Sync] System drain timed out (120s). Forcing reset anyway.")
-                break
-                
             # A. 確保 Control Node 沒有待分配的排隊任務
             if len(global_request_list) > 0:
                 await asyncio.sleep(0.5)
@@ -753,8 +746,6 @@ async def apply_sp1_and_reset(req: UpdateLorasRequest):
             # B. 確保所有 Compute Node 皆已完成運算
             all_idle = True
             for url, node_data in node_mgr.nodes.items():
-                if node_data.get("status") != "active": 
-                    continue # 不管非活躍節點
                 try:
                     resp = await client.get(f"{url}/metrics", timeout=2.0)
                     if resp.status_code == 200:
@@ -764,16 +755,18 @@ async def apply_sp1_and_reset(req: UpdateLorasRequest):
                             all_idle = False
                             break
                 except Exception:
-                    # [修正] 若連線失敗 (節點已死掉或未回應)，忽略它，不要卡死迴圈
-                    pass
+                    # 若連線失敗，保守起見視為不空閒，或是可選擇略過
+                    all_idle = False
+                    break
             
             if all_idle:
                 break
             await asyncio.sleep(0.5)
 
-        logger.info("🚰 [SP1 Sync] System drain condition met. Resetting compute nodes...")
+        logger.info("🚰 [SP1 Sync] System completely drained. Resetting compute nodes...")
         
         # === 3. 對所有 Compute Node 下達重置 (Reset) 指令 ===
+        # [關鍵修改] timeout 延長至 30 秒，因為 Compute Node 執行 full_reset (含 empty_cache) 需耗時數秒
         reset_tasks = []
         for url in node_mgr.nodes.keys():
             reset_tasks.append(client.post(f"{url}/reset", timeout=30.0))

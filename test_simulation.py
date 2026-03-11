@@ -46,12 +46,13 @@ CLUSTER_PORT_MAP = {k: int(v) for k, v in CLUSTER_PORT_MAP.items()}
 SPEEDUP = 1.0
 # ==============
 
-GREEN = "\033[92m"; CYAN = "\033[96m"
-YELLOW = "\033[93m"; RED = "\033[91m"
-RESET = "\033[0m"
-
+# 統計資料
 stats = {"sent": 0, "finished": 0, "dropped": 0, "errors": 0}
 ttft_records = []
+
+# 取得當前時間字串的輔助函數
+def get_ts():
+    return datetime.now().strftime('%H:%M:%S')
 
 # ====================
 # Load Trace
@@ -59,7 +60,7 @@ ttft_records = []
 if SPEEDUP <= 0:
     raise ValueError("SPEEDUP must be > 0")
 
-print("📥 Loading CSV trace...")
+print("[INFO] 📥 Loading CSV trace...")
 df = pd.read_csv(TRACE_CSV)
 
 df["arrival_sec"] = df["arrive_timestamp"].astype(float)
@@ -72,12 +73,15 @@ df = df[df["cluster"].isin(TARGET_CLUSTERS)]
 df = df.sort_values("arrival_sec").reset_index(drop=True)
 
 TOTAL_REQUESTS = len(df)
+PAD_LEN = len(str(TOTAL_REQUESTS)) # 動態計算請求編號對齊寬度
 
-print(f"✅ Using EFO_URL: {EFO_URL}")
-print(f"🎯 Target Clusters: {TARGET_CLUSTERS}")
-print(f"🧭 Cluster Port Map: {CLUSTER_PORT_MAP}")
-print(f"⏱ Replay Duration={RUN_DURATION}s (speedup={SPEEDUP}x, effective duration={RUN_DURATION / SPEEDUP:.2f}s)")
-print(f"📦 Requests={TOTAL_REQUESTS}")
+print("-" * 65)
+print(f"[INFO] ✅ Using EFO_URL      : {EFO_URL}")
+print(f"[INFO] 🎯 Target Clusters    : {TARGET_CLUSTERS}")
+print(f"[INFO] 🧭 Cluster Port Map   : {CLUSTER_PORT_MAP}")
+print(f"[INFO] ⏱  Replay Duration    : {RUN_DURATION}s (speedup={SPEEDUP}x, effective={RUN_DURATION / SPEEDUP:.2f}s)")
+print(f"[INFO] 📦 Requests Count     : {TOTAL_REQUESTS}")
+print("-" * 65)
 
 # ====================
 async def simulate_trace_req(client, row, idx):
@@ -94,7 +98,12 @@ async def simulate_trace_req(client, row, idx):
     }
 
     stats["sent"] += 1
-    print(f"{CYAN}[{datetime.now().strftime('%H:%M:%S')}] #{idx}/{TOTAL_REQUESTS} SENDING -> {adapter}@{cluster}{RESET}")
+    
+    # 格式化輸出字串
+    req_str = f"{idx:>{PAD_LEN}}/{TOTAL_REQUESTS}"
+    adapter_str = f"{adapter:^8}"
+    
+    print(f"[{get_ts()}] [SEND] Req:{req_str} | Target:{adapter_str} @ {cluster}")
 
     start = time.time()
     ttft = 0
@@ -141,35 +150,38 @@ async def simulate_trace_req(client, row, idx):
                     tokens.append(content)
 
         elapsed = time.time() - start
+        ts = get_ts()
 
         if is_dropped:
             stats["dropped"] += 1
-            print(f"{RED}[{datetime.now().strftime('%H:%M:%S')}] #{idx} DROPPED <- {adapter} (Reason:{reason}){RESET}")
+            print(f"[{ts}] [DROP] Req:{req_str} | Target:{adapter_str} | Reason: {reason}")
         else:
             stats["finished"] += 1
             final_ttft = ttft if ttft > 0 else elapsed
             ttft_records.append(final_ttft)
-            print(f"{GREEN}[{datetime.now().strftime('%H:%M:%S')}] #{idx} DONE <- {adapter} (Time:{elapsed:.2f}s TTFT:{final_ttft:.2f}s Tokens:{len(tokens)}){RESET}")
+            print(f"[{ts}] [DONE] Req:{req_str} | Target:{adapter_str} | Time: {elapsed:>6.2f}s | TTFT: {final_ttft:>5.2f}s | Tokens: {len(tokens)}")
 
     except Exception as e:
         stats["errors"] += 1
-        print(f"{RED}[ERROR] #{idx} Failed:{repr(e)}{RESET}")
+        print(f"[{get_ts()}] [FAIL] Req:{req_str} | Target:{adapter_str} | Exception: {repr(e)}")
 
 # ====================
 async def main():
     limits = httpx.Limits(max_connections=300, max_keepalive_connections=300)
 
     async with httpx.AsyncClient(limits=limits) as client:
-        print(f"{YELLOW}=== Trace Replay Pressure Simulator ==={RESET}")
+        print("=" * 65)
+        print("=== Trace Replay Pressure Simulator ===")
+        print("=" * 65)
 
         # 1. 初始觸發 SP1 (第 0 區間)
-        print(f"\n{YELLOW}🚀 Triggering initial SP1 /time_edge (Step 0)...{RESET}")
+        print(f"\n[{get_ts()}] [SYS ] 🚀 Triggering initial SP1 /time_edge (Step 0)...")
         try:
             resp = await client.post(f"{EFO_URL}/time_edge", timeout=600.0)
             await asyncio.sleep(3.0)
-            print(f"{GREEN}✅ Initial SP1 complete: {resp.json()}{RESET}\n")
+            print(f"[{get_ts()}] [SYS ] ✅ Initial SP1 complete: {resp.json()}\n")
         except Exception as e:
-            print(f"{RED}❌ Initial SP1 failed: {e}{RESET}")
+            print(f"[{get_ts()}] [SYS ] ❌ Initial SP1 failed: {e}")
             return
 
         start_time = time.time()
@@ -182,7 +194,7 @@ async def main():
 
             # 2. 跨越時間區間，暫停並觸發新的 SP1
             if req_interval > current_interval:
-                print("waiting...")
+                print(f"[{get_ts()}] [SYS ] ⏳ Reached Interval {req_interval}. Pausing to trigger /time_edge...")
                 sleep_start = time.time()
                 await asyncio.sleep(10.0)
 
@@ -191,6 +203,7 @@ async def main():
                 total_pause = time.time() - sleep_start
                 start_time += total_pause
                 current_interval = req_interval
+                print(f"[{get_ts()}] [SYS ] ▶️ Resuming simulation for Interval {req_interval}.")
 
             scheduled_offset = arrival_sec / SPEEDUP
             send_time = start_time + scheduled_offset
@@ -202,16 +215,19 @@ async def main():
             task = asyncio.create_task(simulate_trace_req(client, row, i + 1))
             tasks.append(task)
 
-        print(f"\n{YELLOW}=== Waiting for remaining tasks ==={RESET}")
+        print(f"\n[{get_ts()}] [SYS ] === Waiting for remaining tasks to complete ===")
         await asyncio.gather(*tasks)
 
-    print(f"\n=== Summary: Sent {stats['sent']} / Fin {stats['finished']} / Drop {stats['dropped']} / Err {stats['errors']} ===")
+    print("\n" + "=" * 65)
+    print(f"=== SUMMARY: Sent: {stats['sent']} | Finished: {stats['finished']} | Dropped: {stats['dropped']} | Errors: {stats['errors']} ===")
+    print("=" * 65)
 
     if ttft_records:
         avg = sum(ttft_records) / len(ttft_records)
         p95 = sorted(ttft_records)[int(len(ttft_records) * 0.95)]
-        print(f"{CYAN}Average TTFT:{avg:.4f}s{RESET}")
-        print(f"{CYAN}P95 TTFT:{p95:.4f}s{RESET}")
+        print(f"[STAT] Average TTFT : {avg:.4f} s")
+        print(f"[STAT] P95 TTFT     : {p95:.4f} s")
+    print("-" * 65 + "\n")
 
 if __name__ == "__main__":
     asyncio.run(main())

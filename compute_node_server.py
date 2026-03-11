@@ -47,6 +47,9 @@ stream_queues: Dict[str, Queue] = {}
 decoding_state: Dict[str, int] = {}
 stream_lock = threading.Lock()
 
+# [新增] 用於保護 Engine 核心操作的鎖，防止 Segmentation Fault
+engine_step_lock = threading.Lock()
+
 last_config_version: int = -1
 config_lock = threading.Lock()
 
@@ -142,9 +145,10 @@ def engine_loop_thread():
         engine_wakeup.wait(timeout=1.0)
         if shutdown_event.is_set(): break
         try:
-            # 加入精確計時器，計算 Effective Inference Time
-            start_time = time.time()
-            did_work = engine.step()
+            # [修正] 加上互斥鎖，避免與 /reset 同時執行而引發 SegFault
+            with engine_step_lock:
+                start_time = time.time()
+                did_work = engine.step()
             
             # 若 engine.step() 有真正在推進推論（Batch 中有任務）
             if did_work:
@@ -321,8 +325,10 @@ def add_request(req: AddRequest):
         decoding_state[rid] = 0
     
     try:
-        engine.add_request(req.prompt, req.adapter_id, rid, req.max_new_tokens)
-        engine_wakeup.set()
+        # [修正] 操作 engine 也稍微防護
+        with engine_step_lock:
+            engine.add_request(req.prompt, req.adapter_id, rid, req.max_new_tokens)
+            engine_wakeup.set()
     except KeyError as e:
         with stream_lock:
             stream_queues.pop(rid, None)
@@ -362,7 +368,8 @@ def add_request(req: AddRequest):
 def merge(req: MergeRequest):
     if current_status != "active": return {"status": "error", "reason": "Not active"}
     try:
-        engine.merge_adapter(req.adapter_id, force=req.force)
+        with engine_step_lock:
+            engine.merge_adapter(req.adapter_id, force=req.force)
         return {"status": "merged", "adapter": req.adapter_id}
     except Exception as e:
         raise HTTPException(400, f"Merge failed: {e}")
@@ -370,26 +377,27 @@ def merge(req: MergeRequest):
 @app.post("/unmerge")
 def unmerge(req: UnmergeRequest):
     if current_status != "active": return {"status": "error", "reason": "Not active"}
-    engine.unmerge_all()
+    with engine_step_lock:
+        engine.unmerge_all()
     return {"status": "unmerged"}
-
-# [新增] 供 Control Node 在 SP1 同步期間呼叫的徹底清理 API
-# [File: compute_node_server.py]
 
 @app.post("/reset")
 def reset_node_state():
     logger.warning("🚨 [SP1 Sync] NODE RESET TRIGGERED! Performing Deep Cleanup...")
     
-    # 1. 調用 Engine 的深度重置 (含 empty_cache)
-    if engine:
-        engine.full_reset()
+    # [修正] 套用鎖定，確保徹底隔絕背景推論的存取
+    with engine_step_lock:
+        if engine:
+            engine.full_reset()
     
-    # 2. 清空 HTTP Stream 追蹤狀態
     with stream_lock:
+        for rid, q in stream_queues.items():
+            # 通知正在等待的 event_generator 結束連線
+            q.put({"type": "error", "message": "Node reset during SP1 Sync"})
+            q.put(None)
         stream_queues.clear()
         decoding_state.clear()
         
-    # 3. 強制 Python GC (選擇性，雙重保險)
     import gc
     gc.collect()
 
@@ -398,7 +406,6 @@ def reset_node_state():
 
 @app.post("/debug/reset")
 def debug_reset():
-    # 保留原有的 Debug API，或者指向新的 reset 邏輯
     return reset_node_state()
 
 if __name__ == "__main__":
