@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # 設定模擬開始前的時間偏移 (此處設定為 2 天，可依需求修改)
-export START_OFFSET=$((86400))
+export START_OFFSET=$((86400*2))
 
 echo "🚀 開始自動連續執行實驗 (Experiment 1_1 ~ 1_6)..."
 echo "🕒 已經設定 START_OFFSET = $START_OFFSET"
@@ -38,7 +38,7 @@ for i in {2..6}; do
   echo "✅ $script_file 執行完成！"
   
   # 暫停 5 秒鐘讓系統資源 (Port, VRAM 等) 有充裕時間完全釋放
-  sleep 5
+  sleep 15
 done
 
 echo "🎉 所有實驗 (1_1 ~ 1_6) 皆已順利執行完畢！"

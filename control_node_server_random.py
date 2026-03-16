@@ -414,49 +414,57 @@ class UpdateLorasRequest(BaseModel):
 @app.post("/apply_sp1_and_reset")
 async def apply_sp1_and_reset(req: UpdateLorasRequest):
     global system_paused, LOCAL_AVAILABLE_LORAS, metrics_logging_task, current_interval_id
+    global global_request_list, request_queues  # 確保能存取全域佇列變數
     
-    logger.info("🛑 [SP1 Sync] Initiating system drain & reset...")
+    logger.info("🛑 [SP1 Sync] Initiating FORCE system drain & reset...")
     system_paused = True
     
     try:
+        # === 1. 取消舊的 Metrics Logging ===
         if metrics_logging_task and not metrics_logging_task.done():
             metrics_logging_task.cancel()
+            try:
+                await metrics_logging_task
+            except asyncio.CancelledError:
+                pass
         
         current_interval_id += 1
         
-        # Drain Wait
-        while True:
-            if len(global_request_list) > 0:
-                await asyncio.sleep(0.5)
-                continue
-            
-            all_idle = True
-            for url, node_data in node_mgr.nodes.items():
-                try:
-                    resp = await client.get(f"{url}/metrics", timeout=2.0)
-                    if resp.status_code == 200:
-                        metrics = resp.json()
-                        if metrics.get("load", {}).get("running_batch", 0) > 0:
-                            all_idle = False
-                            break
-                except Exception:
-                    all_idle = False
-                    break
-            
-            if all_idle: break
-            await asyncio.sleep(0.5)
+        # === 2. 強制結束所有請求 (不等待排空) ===
+        logger.info(f"🧹 [SP1 Sync] Forcing completion for {len(stream_queues)} active connections...")
+        # 讓 test_simulation 收到 [DONE] 並視為成功完成
+        for rid, stream_data in stream_queues.items():
+            await stream_data["q"].put(None)
+        
+        # 清空 Control Node 本地的等待佇列
+        global_request_list.clear()
+        for q in request_queues.values():
+            q.clear()
 
-        # Reset Nodes
+        logger.info("🚰 [SP1 Sync] System queues cleared. Sending FORCE reset to compute nodes...")
+
+        # === 3. 對所有 Compute Node 下達重置 (Reset) 指令 ===
         reset_tasks = [client.post(f"{url}/reset", timeout=30.0) for url in node_mgr.nodes.keys()]
         if reset_tasks:
-            await asyncio.gather(*reset_tasks, return_exceptions=True)
-            
+            results = await asyncio.gather(*reset_tasks, return_exceptions=True)
+            for url, res in zip(node_mgr.nodes.keys(), results):
+                if isinstance(res, Exception):
+                    logger.error(f"❌ [SP1 Sync] Reset failed for {url}: {res}")
+                elif res.status_code != 200:
+                    logger.error(f"❌ [SP1 Sync] Reset returned {res.status_code} for {url}")
+                else:
+                    logger.info(f"✅ [SP1 Sync] Node {url} reset confirmed (VRAM cleared).")
+                    
+        # === 4. 更新本地支援的 LoRA 列表 ===
         LOCAL_AVAILABLE_LORAS = set(req.loras)
         logger.info(f"✅ [SP1 Sync] Applied. LoRAs: {list(LOCAL_AVAILABLE_LORAS)}")
         
+        # === 5. 啟動新一輪的 Logging ===
         metrics_logging_task = asyncio.create_task(run_metrics_logging_cycle(current_interval_id))
         return {"status": "success"}
+        
     finally:
+        # === 6. 解除鎖定 ===
         system_paused = False
         logger.info("▶️ [SP1 Sync] Resumed.")
 

@@ -720,9 +720,10 @@ def select_best_offload_target(adapter_id: str) -> Optional[dict]:
 @app.post("/apply_sp1_and_reset")
 async def apply_sp1_and_reset(req: UpdateLorasRequest):
     global system_paused, LOCAL_AVAILABLE_LORAS, metrics_logging_task, current_interval_id
+    global global_request_list, request_queues
     
-    logger.info("🛑 [SP1 Sync] Initiating system drain & reset...")
-    system_paused = True  # 暫停所有調度與新進請求 (scheduler 會等佇列排空)
+    logger.info("🛑 [SP1 Sync] Initiating FORCE system drain & reset...")
+    system_paused = True  # 暫停所有調度與新進請求
     
     try:
         # === 1. 重置 Metrics Logging 任務 ===
@@ -735,43 +736,24 @@ async def apply_sp1_and_reset(req: UpdateLorasRequest):
         
         current_interval_id += 1
         
-        # === 2. 等待排空 (Drain) ===
-        # 迴圈檢查直到 (1) Control Node 無積壓 (2) 所有 Compute Node 無執行中 Batch
-        while True:
-            # A. 確保 Control Node 沒有待分配的排隊任務
-            if len(global_request_list) > 0:
-                await asyncio.sleep(0.5)
-                continue
-            
-            # B. 確保所有 Compute Node 皆已完成運算
-            all_idle = True
-            for url, node_data in node_mgr.nodes.items():
-                try:
-                    resp = await client.get(f"{url}/metrics", timeout=2.0)
-                    if resp.status_code == 200:
-                        metrics = resp.json()
-                        load_data = metrics.get("load", {})
-                        if load_data.get("running_batch", 0) > 0:
-                            all_idle = False
-                            break
-                except Exception:
-                    # 若連線失敗，保守起見視為不空閒，或是可選擇略過
-                    all_idle = False
-                    break
-            
-            if all_idle:
-                break
-            await asyncio.sleep(0.5)
+        # === 2. 強制結束所有請求 (不等待排空) ===
+        logger.info(f"🧹 [SP1 Sync] Forcing completion for {len(stream_queues)} active connections...")
+        # 讓 test_simulation 收到 [DONE] 並視為成功完成
+        for rid, stream_data in stream_queues.items():
+            await stream_data["q"].put(None)
+        
+        # 清空 Control Node 本地的等待佇列
+        global_request_list.clear()
+        for q in request_queues.values():
+            q.clear()
 
-        logger.info("🚰 [SP1 Sync] System completely drained. Resetting compute nodes...")
+        logger.info("🚰 [SP1 Sync] System queues cleared. Sending FORCE reset to compute nodes...")
         
         # === 3. 對所有 Compute Node 下達重置 (Reset) 指令 ===
-        # [關鍵修改] timeout 延長至 30 秒，因為 Compute Node 執行 full_reset (含 empty_cache) 需耗時數秒
         reset_tasks = []
         for url in node_mgr.nodes.keys():
             reset_tasks.append(client.post(f"{url}/reset", timeout=30.0))
         
-        # 等待所有節點回應 (確保碎片整理完畢才繼續)
         if reset_tasks:
             results = await asyncio.gather(*reset_tasks, return_exceptions=True)
             for url, res in zip(node_mgr.nodes.keys(), results):

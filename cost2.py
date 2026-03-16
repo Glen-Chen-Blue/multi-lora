@@ -260,6 +260,12 @@ def plot_multiple_total_costs_with_simulation_bg(
 
 if __name__ == "__main__":
     log_files = [
+        # "./record_1/experiment_single_cluster_2nodes1_logs/efo_global_metrics.log",
+        # "./record_1/experiment_single_cluster_2nodes2_logs/efo_global_metrics.log",
+        # "./record_1/experiment_single_cluster_2nodes3_logs/efo_global_metrics.log",
+        # "./record_1/experiment_single_cluster_2nodes4_logs/efo_global_metrics.log",
+        # "./record_1/experiment_single_cluster_2nodes5_logs/efo_global_metrics.log",
+        # "./record_1/experiment_single_cluster_2nodes6_logs/efo_global_metrics.log"
         "./record_1/experiment_single_cluster_2nodes1_logs/efo_global_metrics.log",
         "./record_1/experiment_single_cluster_2nodes2_logs/efo_global_metrics.log",
         "./record_1/experiment_single_cluster_2nodes3_logs/efo_global_metrics.log",
@@ -280,11 +286,11 @@ if __name__ == "__main__":
     plot_multiple_total_costs_with_simulation_bg(
         log_files=log_files,
         labels=labels,
-        output_path="cost_per_request_comparison.png",  # 更改輸出檔名以避免覆寫原檔
+        output_path="cost_per_request_comparison2.png",  # 更改輸出檔名以避免覆寫原檔
         csv_path="./information/simulation_data.csv",
         target_clusters=["cluster_1"],
         speed_rate=1.0,
-        start_offset_days=2,
+        start_offset_days=1,
         duration_hours=8,
         bin_minutes=5,
     )

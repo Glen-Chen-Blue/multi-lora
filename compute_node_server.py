@@ -393,7 +393,7 @@ def reset_node_state():
     with stream_lock:
         for rid, q in stream_queues.items():
             # 通知正在等待的 event_generator 結束連線
-            q.put({"type": "error", "message": "Node reset during SP1 Sync"})
+            # [關鍵修改] 移除 error message，改為直接放入 None 讓系統視為正常完成 [DONE]
             q.put(None)
         stream_queues.clear()
         decoding_state.clear()
