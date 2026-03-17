@@ -24,7 +24,7 @@ from config import (
     NETWORK_SIM_PARAMS, SP2_INTERVAL_SECONDS, EDGE_SYNC_TIMEOUT,
     SP1_INTERVAL_SECONDS, START_OFFSET
 )
-
+print(START_OFFSET)
 # ============================================================
 # Config & Logging
 # ============================================================
@@ -39,13 +39,20 @@ logging.getLogger("uvicorn.access").addFilter(MetricsAccessFilter())
 CLUSTERS_ENV = os.environ.get("CLUSTERS", "{}")
 
 # ============================================================
-# 📊 EFO Global Metrics State (Modified)
+# 📊 EFO Global Metrics State (Modified with Lazy Lock)
 # ============================================================
 class EFOMetrics:
     def __init__(self):
-        self.lock = asyncio.Lock()
+        # 延遲初始化 Lock，避免在 import 階段與 uvloop 衝突
+        self._lock = None  
         self.artifact_downloads = 0  # 累計下載次數
         self.cumulative_stored_loras = 0  # [新增] 累計 Stored LoRA 數量 (SP1解一次加一次)
+        
+    @property
+    def lock(self) -> asyncio.Lock:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
 efo_metrics = EFOMetrics()
 
@@ -68,6 +75,9 @@ efo_logging_task: Optional[asyncio.Task] = None
 
 # [新增] 全域模擬器資料庫，避免每次迴圈重新載入引發 SegFault
 global_simulation_df: Optional[pd.DataFrame] = None
+
+# [新增] 全域 HTTP Client，避免 cancel() 造成連線池強制釋放引發的底層 SegFault
+global_http_client: Optional[httpx.AsyncClient] = None
 
 # ============================================================
 # Network Simulator (Shifted Lognormal & P95)
@@ -107,32 +117,31 @@ network_simulator = NetworkSimulator()
 # SP2: Global Routing Broadcast (Short interval)
 # ============================================================
 async def sync_global_routing():
-    if not active_clusters: return
+    if not active_clusters or not global_http_client: return
     p95_delays = network_simulator.get_p95_info()
     routing_table = {}
 
-    async with httpx.AsyncClient(timeout=5.0) as client:
-        for cluster_name, url in active_clusters.items():
-            try:
-                resp = await client.get(f"{url}/offload_status")
-                if resp.status_code == 200:
-                    data = resp.json()
-                    routing_table[cluster_name] = {
-                        "ip": url,
-                        "budget": data.get("budget", 0),
-                        "lora_status": data.get("lora_status", {"merged": [], "loaded": [], "unloaded": []}),
-                        "delay": p95_delays.get(cluster_name, {})
-                    }
-            except Exception as e:
-                pass
+    for cluster_name, url in active_clusters.items():
+        try:
+            resp = await global_http_client.get(f"{url}/offload_status")
+            if resp.status_code == 200:
+                data = resp.json()
+                routing_table[cluster_name] = {
+                    "ip": url,
+                    "budget": data.get("budget", 0),
+                    "lora_status": data.get("lora_status", {"merged": [], "loaded": [], "unloaded": []}),
+                    "delay": p95_delays.get(cluster_name, {})
+                }
+        except Exception as e:
+            pass
 
-        if not routing_table: return
+    if not routing_table: return
 
-        for cluster_name, url in active_clusters.items():
-            try:
-                await client.post(f"{url}/update_global_routing", json={"routing_table": routing_table})
-            except Exception as e:
-                pass
+    for cluster_name, url in active_clusters.items():
+        try:
+            await global_http_client.post(f"{url}/update_global_routing", json={"routing_table": routing_table})
+        except Exception as e:
+            pass
 
 # ============================================================
 # 📊 Global Metrics Logging Cycle (Modified)
@@ -171,33 +180,32 @@ async def run_efo_metrics_cycle(step_id: int):
             }
             
             # 拉取各 Cluster Metrics
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                for cluster_name, url in active_clusters.items():
-                    try:
-                        resp = await client.get(f"{url}/cluster_metrics")
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            global_snapshot["clusters"][cluster_name] = data
-                            
-                            # 讀取並加總 Metrics
-                            d_local = data.get("drop_local_congestion", 0)
-                            d_no_tgt = data.get("drop_no_target", 0)
-                            
-                            # 相容舊版欄位 (Optional)
-                            if "drop_slo" in data: d_local += data["drop_slo"]
-                            if "drop_queue" in data and d_no_tgt == 0: d_no_tgt += data["drop_queue"]
+            for cluster_name, url in active_clusters.items():
+                try:
+                    resp = await global_http_client.get(f"{url}/cluster_metrics")
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        global_snapshot["clusters"][cluster_name] = data
+                        
+                        # 讀取並加總 Metrics
+                        d_local = data.get("drop_local_congestion", 0)
+                        d_no_tgt = data.get("drop_no_target", 0)
+                        
+                        # 相容舊版欄位 (Optional)
+                        if "drop_slo" in data: d_local += data["drop_slo"]
+                        if "drop_queue" in data and d_no_tgt == 0: d_no_tgt += data["drop_queue"]
 
-                            global_snapshot["efo_totals"]["total_inference_time"] += data.get("total_effective_inference_time", 0.0)
-                            
-                            global_snapshot["efo_totals"]["total_drop_local_congestion"] += d_local
-                            global_snapshot["efo_totals"]["total_drop_no_target"] += d_no_tgt
-                            global_snapshot["efo_totals"]["total_drops"] += (d_local + d_no_tgt)
+                        global_snapshot["efo_totals"]["total_inference_time"] += data.get("total_effective_inference_time", 0.0)
+                        
+                        global_snapshot["efo_totals"]["total_drop_local_congestion"] += d_local
+                        global_snapshot["efo_totals"]["total_drop_no_target"] += d_no_tgt
+                        global_snapshot["efo_totals"]["total_drops"] += (d_local + d_no_tgt)
 
-                            global_snapshot["efo_totals"]["total_offloads"] += data.get("offload_out", 0)
-                            global_snapshot["efo_totals"]["total_local_completed"] += data.get("local_completed", 0)
-                            global_snapshot["efo_totals"]["total_offload_completed"] += data.get("offload_in_completed", 0)
-                    except Exception as e:
-                        logger.error(f"❌ Failed to fetch metrics from {cluster_name}: {e}")
+                        global_snapshot["efo_totals"]["total_offloads"] += data.get("offload_out", 0)
+                        global_snapshot["efo_totals"]["total_local_completed"] += data.get("local_completed", 0)
+                        global_snapshot["efo_totals"]["total_offload_completed"] += data.get("offload_in_completed", 0)
+                except Exception as e:
+                    logger.error(f"❌ Failed to fetch metrics from {cluster_name}: {e}")
             
             # 加入 EFO 自身的累積指標
             async with efo_metrics.lock:
@@ -557,12 +565,12 @@ async def run_sp1_provisioning_and_wait():
 
     # 3. 發送並「阻塞等待」所有 Control Node 排空與重置
     logger.info("⏳ Dispatching SP1 to Control Nodes and WAITING for system drain & reset...")
-    async with httpx.AsyncClient(timeout=EDGE_SYNC_TIMEOUT) as client:
+    if global_http_client:
         tasks = []
         for cluster_name, target_loras in cluster_targets.items():
             url = active_clusters[cluster_name]
             payload = {"loras": target_loras}
-            tasks.append(client.post(f"{url}/apply_sp1_and_reset", json=payload))
+            tasks.append(global_http_client.post(f"{url}/apply_sp1_and_reset", json=payload, timeout=EDGE_SYNC_TIMEOUT))
         
         if tasks:
             results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -593,7 +601,13 @@ class RegisterClusterRequest(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global global_lora_metadata, configured_clusters, azure_mapping, system_start_event, global_simulation_df
+    global global_http_client
+    
     system_start_event = asyncio.Event()
+
+    # 初始化一個全局的 HTTP Client，設定較大的連接池以防止過度分配資源
+    limits = httpx.Limits(max_connections=100, max_keepalive_connections=100)
+    global_http_client = httpx.AsyncClient(limits=limits, timeout=10.0)
 
     try:
         configured_clusters = json.loads(CLUSTERS_ENV)
@@ -626,7 +640,12 @@ async def lifespan(app: FastAPI):
         logger.warning(f"⚠️ Simulation CSV not found at {SIMULATION_DATA_CSV_PATH}")
 
     asyncio.create_task(sp2_routing_loop())
+    
     yield
+    
+    # 系統關閉時安全釋放 HTTP Client
+    if global_http_client:
+        await global_http_client.aclose()
         
 app = FastAPI(title="Edge Federation Orchestrator (EFO)", lifespan=lifespan)
 
@@ -676,6 +695,12 @@ async def trigger_time_edge():
         "completed_step": completed_step,
         "next_step": current_time_step
     }
+
+# In-process tick simulation class export (network-free mode).
+try:
+    from simulation_runtime import EFOCoordinatorSim as EFOGameClass
+except Exception:
+    EFOGameClass = None
 
 if __name__ == "__main__":
     import uvicorn
