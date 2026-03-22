@@ -19753,3 +19753,105 @@
 [13:37:52] [DONE] Req: 9854/25380 | Target:LoRA_42  | Time:   9.42s | TTFT:  0.86s | Tokens: 255
 [13:37:52] [DONE] Req: 9850/25380 | Target: LoRA_6  | Time:   9.42s | TTFT:  0.86s | Tokens: 255
 [13:37:52] [DONE] Req: 9851/25380 | Target:LoRA_64  | Time:   9.42s | TTFT:  0.86s | Tokens: 255
+[13:37:52] [DONE] Req: 9852/25380 | Target:LoRA_25  | Time:   9.42s | TTFT:  0.86s | Tokens: 255
+[13:37:52] [DONE] Req: 9848/25380 | Target:LoRA_55  | Time:   9.42s | TTFT:  0.86s | Tokens: 255
+[13:37:59] [DONE] Req: 9855/25380 | Target:LoRA_73  | Time:  16.49s | TTFT:  9.54s | Tokens: 255
+[13:38:04] [DONE] Req: 9853/25380 | Target:LoRA_74  | Time:  21.78s | TTFT: 14.92s | Tokens: 242
+[13:38:09] [SEND] Req: 9857/25380 | Target:LoRA_37  @ cluster_1
+[13:38:16] [DONE] Req: 9857/25380 | Target:LoRA_37  | Time:   6.92s | TTFT:  0.29s | Tokens: 255
+[13:38:42] [SEND] Req: 9858/25380 | Target:LoRA_55  @ cluster_1
+[13:38:42] [SEND] Req: 9859/25380 | Target:LoRA_80  @ cluster_1
+[13:38:42] [SEND] Req: 9860/25380 | Target:LoRA_75  @ cluster_1
+[13:38:46] [SEND] Req: 9861/25380 | Target:LoRA_64  @ cluster_1
+[13:38:51] [DONE] Req: 9858/25380 | Target:LoRA_55  | Time:   8.21s | TTFT:  0.19s | Tokens: 255
+[13:38:51] [DONE] Req: 9860/25380 | Target:LoRA_75  | Time:   8.21s | TTFT:  0.36s | Tokens: 255
+[13:38:51] [DONE] Req: 9859/25380 | Target:LoRA_80  | Time:   8.21s | TTFT:  0.36s | Tokens: 255
+[13:38:55] [DONE] Req: 9861/25380 | Target:LoRA_64  | Time:   8.92s | TTFT:  1.66s | Tokens: 221
+[13:39:42] [SEND] Req: 9862/25380 | Target:LoRA_64  @ cluster_1
+[13:39:42] [SEND] Req: 9863/25380 | Target:LoRA_55  @ cluster_1
+[13:39:44] [SEND] Req: 9864/25380 | Target:LoRA_17  @ cluster_1
+[13:39:50] [DONE] Req: 9862/25380 | Target:LoRA_64  | Time:   7.76s | TTFT:  0.25s | Tokens: 255
+[13:39:54] [DONE] Req: 9863/25380 | Target:LoRA_55  | Time:  11.48s | TTFT:  3.87s | Tokens: 256
+[13:39:54] [DONE] Req: 9864/25380 | Target:LoRA_17  | Time:  10.23s | TTFT:  2.61s | Tokens: 256
+[13:40:33] [SEND] Req: 9865/25380 | Target:LoRA_14  @ cluster_1
+[13:40:40] [DONE] Req: 9865/25380 | Target:LoRA_14  | Time:   7.20s | TTFT:  0.52s | Tokens: 255
+[13:40:42] [SEND] Req: 9866/25380 | Target:LoRA_64  @ cluster_1
+[13:40:42] [SEND] Req: 9867/25380 | Target:LoRA_55  @ cluster_1
+[13:40:50] [DONE] Req: 9867/25380 | Target:LoRA_55  | Time:   7.67s | TTFT:  0.48s | Tokens: 255
+[13:40:50] [DONE] Req: 9866/25380 | Target:LoRA_64  | Time:   7.68s | TTFT:  0.48s | Tokens: 255
+[13:41:18] [SEND] Req: 9868/25380 | Target:LoRA_14  @ cluster_1
+[13:41:25] [DONE] Req: 9868/25380 | Target:LoRA_14  | Time:   7.23s | TTFT:  0.60s | Tokens: 255
+[13:41:42] [SEND] Req: 9869/25380 | Target:LoRA_80  @ cluster_1
+[13:41:42] [SEND] Req: 9870/25380 | Target:LoRA_75  @ cluster_1
+[13:41:42] [SEND] Req: 9871/25380 | Target:LoRA_64  @ cluster_1
+[13:41:42] [SEND] Req: 9872/25380 | Target:LoRA_55  @ cluster_1
+[13:41:44] [SEND] Req: 9873/25380 | Target:LoRA_17  @ cluster_1
+[13:41:51] [DONE] Req: 9870/25380 | Target:LoRA_75  | Time:   9.12s | TTFT:  0.20s | Tokens: 255
+[13:41:52] [DONE] Req: 9872/25380 | Target:LoRA_55  | Time:   9.38s | TTFT:  0.63s | Tokens: 196
+[13:41:52] [DONE] Req: 9869/25380 | Target:LoRA_80  | Time:   9.38s | TTFT:  0.63s | Tokens: 196
+[13:41:52] [DONE] Req: 9871/25380 | Target:LoRA_64  | Time:   9.38s | TTFT:  0.63s | Tokens: 196
+[13:41:52] [DONE] Req: 9873/25380 | Target:LoRA_17  | Time:   8.73s | TTFT:  0.22s | Tokens: 256
+[13:41:54] [SEND] Req: 9874/25380 | Target:LoRA_14  @ cluster_1
+[13:42:01] [DONE] Req: 9874/25380 | Target:LoRA_14  | Time:   6.98s | TTFT:  0.36s | Tokens: 255
+[13:42:42] [SEND] Req: 9875/25380 | Target:LoRA_55  @ cluster_1
+[13:42:42] [SEND] Req: 9876/25380 | Target:LoRA_70  @ cluster_1
+[13:42:42] [SEND] Req: 9877/25380 | Target:LoRA_74  @ cluster_1
+[13:42:42] [SEND] Req: 9878/25380 | Target:LoRA_73  @ cluster_1
+[13:42:42] [SEND] Req: 9879/25380 | Target:LoRA_42  @ cluster_1
+[13:42:42] [SEND] Req: 9880/25380 | Target:LoRA_25  @ cluster_1
+[13:42:42] [SEND] Req: 9881/25380 | Target:LoRA_64  @ cluster_1
+[13:42:52] [DONE] Req: 9880/25380 | Target:LoRA_25  | Time:   9.23s | TTFT:  0.73s | Tokens: 255
+[13:42:52] [DONE] Req: 9875/25380 | Target:LoRA_55  | Time:   9.23s | TTFT:  0.73s | Tokens: 255
+[13:42:52] [DONE] Req: 9879/25380 | Target:LoRA_42  | Time:   9.23s | TTFT:  0.73s | Tokens: 255
+[13:42:52] [DONE] Req: 9877/25380 | Target:LoRA_74  | Time:   9.23s | TTFT:  0.73s | Tokens: 255
+[13:42:52] [DONE] Req: 9876/25380 | Target:LoRA_70  | Time:   9.23s | TTFT:  0.73s | Tokens: 255
+[13:42:52] [DONE] Req: 9878/25380 | Target:LoRA_73  | Time:   9.23s | TTFT:  0.73s | Tokens: 255
+[13:42:58] [DONE] Req: 9881/25380 | Target:LoRA_64  | Time:  16.09s | TTFT:  9.42s | Tokens: 255
+[13:43:42] [SEND] Req: 9882/25380 | Target:LoRA_55  @ cluster_1
+[13:43:44] [SEND] Req: 9883/25380 | Target:LoRA_17  @ cluster_1
+[13:43:45] [SEND] Req: 9884/25380 | Target:LoRA_64  @ cluster_1
+[13:43:50] [DONE] Req: 9882/25380 | Target:LoRA_55  | Time:   7.90s | TTFT:  0.53s | Tokens: 255
+[13:43:54] [DONE] Req: 9883/25380 | Target:LoRA_17  | Time:  10.54s | TTFT:  3.02s | Tokens: 256
+[13:43:54] [DONE] Req: 9884/25380 | Target:LoRA_64  | Time:   8.75s | TTFT:  1.23s | Tokens: 256
+[13:44:03] [SEND] Req: 9885/25380 | Target:LoRA_14  @ cluster_1
+[13:44:10] [DONE] Req: 9885/25380 | Target:LoRA_14  | Time:   7.10s | TTFT:  0.48s | Tokens: 255
+[13:44:42] [SEND] Req: 9886/25380 | Target:LoRA_64  @ cluster_1
+[13:44:42] [SEND] Req: 9887/25380 | Target:LoRA_80  @ cluster_1
+[13:44:42] [SEND] Req: 9888/25380 | Target:LoRA_75  @ cluster_1
+[13:44:42] [SEND] Req: 9889/25380 | Target:LoRA_55  @ cluster_1
+[13:44:51] [DONE] Req: 9886/25380 | Target:LoRA_64  | Time:   8.36s | TTFT:  0.51s | Tokens: 254
+[13:44:51] [DONE] Req: 9887/25380 | Target:LoRA_80  | Time:   8.36s | TTFT:  0.50s | Tokens: 254
+[13:44:51] [DONE] Req: 9889/25380 | Target:LoRA_55  | Time:   8.36s | TTFT:  0.50s | Tokens: 254
+[13:44:51] [DONE] Req: 9888/25380 | Target:LoRA_75  | Time:   8.36s | TTFT:  0.50s | Tokens: 254
+[13:45:15] [SEND] Req: 9890/25380 | Target:LoRA_14  @ cluster_1
+[13:45:22] [DONE] Req: 9890/25380 | Target:LoRA_14  | Time:   7.05s | TTFT:  0.41s | Tokens: 255
+[13:45:42] [SEND] Req: 9891/25380 | Target:LoRA_55  @ cluster_1
+[13:45:42] [SEND] Req: 9892/25380 | Target:LoRA_64  @ cluster_1
+[13:45:44] [SEND] Req: 9893/25380 | Target:LoRA_17  @ cluster_1
+[13:45:50] [DONE] Req: 9891/25380 | Target:LoRA_55  | Time:   8.05s | TTFT:  0.43s | Tokens: 255
+[13:45:53] [DONE] Req: 9893/25380 | Target:LoRA_17  | Time:   9.26s | TTFT:  1.60s | Tokens: 240
+[13:45:53] [DONE] Req: 9892/25380 | Target:LoRA_64  | Time:  10.45s | TTFT:  2.78s | Tokens: 240
+[13:46:42] [SYS ] ⏳ Reached Interval 3. Pausing to trigger /time_edge...
+[13:46:42] [SEND] Req: 9894/25380 | Target:LoRA_55  @ cluster_1
+[13:46:42] [SEND] Req: 9895/25380 | Target:LoRA_64  @ cluster_1
+[13:46:49] [DONE] Req: 9895/25380 | Target:LoRA_64  | Time:   6.84s | TTFT:  0.19s | Tokens: 255
+[13:46:52] [DONE] Req: 9894/25380 | Target:LoRA_55  | Time:  10.01s | TTFT:  6.94s | Tokens: 118
+[13:46:53] [SYS ] ▶️ Resuming simulation for Interval 3.
+[13:47:53] [SEND] Req: 9896/25380 | Target:LoRA_70  @ cluster_1
+[13:47:53] [SEND] Req: 9897/25380 | Target:LoRA_55  @ cluster_1
+[13:47:53] [SEND] Req: 9898/25380 | Target:LoRA_64  @ cluster_1
+[13:47:53] [SEND] Req: 9899/25380 | Target:LoRA_73  @ cluster_1
+[13:47:53] [SEND] Req: 9900/25380 | Target:LoRA_25  @ cluster_1
+[13:47:53] [SEND] Req: 9901/25380 | Target:LoRA_42  @ cluster_1
+[13:47:53] [SEND] Req: 9902/25380 | Target:LoRA_74  @ cluster_1
+[13:47:53] [SEND] Req: 9903/25380 | Target: LoRA_6  @ cluster_1
+[13:47:53] [SEND] Req: 9904/25380 | Target:LoRA_80  @ cluster_1
+[13:47:53] [SEND] Req: 9905/25380 | Target:LoRA_50  @ cluster_1
+[13:47:54] [SEND] Req: 9906/25380 | Target:LoRA_75  @ cluster_1
+[13:47:54] [SEND] Req: 9907/25380 | Target:LoRA_17  @ cluster_1
+[13:48:02] [DONE] Req: 9897/25380 | Target:LoRA_55  | Time:   9.55s | TTFT:  0.54s | Tokens: 255
+[13:48:04] [DONE] Req: 9906/25380 | Target:LoRA_75  | Time:  10.58s | TTFT:  1.58s | Tokens: 116
+[13:48:04] [DONE] Req: 9898/25380 | Target:LoRA_64  | Time:  11.50s | TTFT:  2.50s | Tokens: 116
+[13:48:04] [DONE] Req: 9907/25380 | Target:LoRA_17  | Time:  10.42s | TTFT:  1.42s | Tokens: 116
+[13:48:04] [DONE] Req: 9905/25380 | Target:LoRA_50  | Time:  11.32s | TTFT:  2.32s | Tokens: 116
+[13:48:07] [SEND] Req: 9908/25380 | Target:LoRA_21  @ cluster_1
