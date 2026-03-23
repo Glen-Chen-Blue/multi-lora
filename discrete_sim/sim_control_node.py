@@ -61,6 +61,10 @@ class SimControlNodeBase:
         self.local_available_loras: Set[str] = set()
         self.pending_queue: List[SimRequest] = []
         self.system_paused: bool = False
+        
+        # [任務 C & D] Global Routing 相關狀態
+        self.global_routing_table: Dict[str, Any] = {}
+        self.offload_callback: Optional[Callable] = None
 
         # Metrics (cumulative, matching cluster_metrics format)
         self.local_completed: int = 0
@@ -95,12 +99,16 @@ class SimControlNodeBase:
 
     def _on_request_finish(self, req: SimRequest):
         """Record completion."""
-        self.local_completed += 1
+        # [任務 A] 區分本地完成與跨叢集卸載支援完成
+        if req.is_delegated:
+            self.offload_in_completed += 1
+        else:
+            self.local_completed += 1
 
     def _handle_drop(self, req: SimRequest, reason: str):
         req.is_dropped = True
         req.drop_reason = reason
-        if "No Node" in reason or "System Full" in reason:
+        if "No Node" in reason or "System Full" in reason or "No Targets" in reason:
             self.drop_no_target += 1
         else:
             self.drop_local_congestion += 1
@@ -108,15 +116,12 @@ class SimControlNodeBase:
     def apply_sp1_reset(self, new_loras: List[str]):
         """SP1 reset: clear queues, reset engines, update lora list."""
         self.system_paused = True
-        # Force-finish pending
         for req in self.pending_queue:
             self._handle_drop(req, "SP1 Reset")
         self.pending_queue.clear()
-        # Reset all compute nodes
         for node in self.compute_nodes:
             node.full_reset()
         self.local_available_loras = set(new_loras)
-        # Update known adapters on all nodes
         for node in self.compute_nodes:
             node.update_known_adapters(new_loras)
         self.system_paused = False
@@ -152,6 +157,77 @@ class SimControlNodeBase:
             states.append(VirtualNodeState(node, m))
         return states
 
+    # [任務 C] 生成真實的叢集狀態供 EFO 廣播使用
+    def get_offload_status(self) -> dict:
+        v_nodes = self._get_virtual_node_states()
+        total_pending = len(self.pending_queue)
+        
+        total_free = sum(
+            max(0, n.capacity_merged - n.running_batch) if n.mode == "merge"
+            else max(0, n.capacity_unmerged - n.running_batch - len(n.active_loras))
+            for n in v_nodes
+        )
+        
+        budget = max(0, total_free - total_pending)
+        # 如果壓力已經過大，直接回報 Budget 0
+        if hasattr(self, 'Z_debt') and getattr(self, 'Z_debt') >= PSI_DROP * 0.9:
+            budget = 0
+            
+        merged, loaded = set(), set()
+        for n in v_nodes:
+            if n.mode == "merge" and n.merged_adapter:
+                merged.add(n.merged_adapter)
+            elif n.mode == "unmerge":
+                loaded.update(n.loaded_adapters)
+                
+        unloaded = self.local_available_loras - merged - loaded
+        return {
+            "budget": budget,
+            "lora_status": {
+                "merged": list(merged),
+                "loaded": list(loaded),
+                "unloaded": list(unloaded)
+            }
+        }
+
+    def receive_routing_table(self, table: dict):
+        self.global_routing_table = table
+
+    # [任務 D] 實作跨叢集卸載目標的評估邏輯
+    def _select_best_offload_target(self, adapter_id: str) -> Optional[str]:
+        best_target = None
+        best_score = float('inf')
+        
+        meta = self.lora_metadata.get(adapter_id, {})
+        valid_aids = [adapter_id] + meta.get("substitutes", [])
+        
+        for cluster_name, info in self.global_routing_table.items():
+            if cluster_name == self.cluster_id: continue
+            if info.get("budget", 0) <= 0: continue
+            
+            lora_status = info.get("lora_status", {})
+            merged = set(lora_status.get("merged", []))
+            loaded = set(lora_status.get("loaded", []))
+            unloaded = set(lora_status.get("unloaded", []))
+            
+            status_penalty = float('inf')
+            if any(aid in merged for aid in valid_aids): status_penalty = 0.0
+            elif any(aid in loaded for aid in valid_aids): status_penalty = 0.5
+            elif any(aid in unloaded for aid in valid_aids): status_penalty = 1.0
+            
+            if status_penalty == float('inf'): continue
+            
+            # 從延遲矩陣中取得對方的延遲
+            delay_ms = info.get("delay", {}).get(self.cluster_id, 0.0)
+            delay_sec = delay_ms / 1000.0
+            
+            score = status_penalty + delay_sec
+            if score < best_score:
+                best_score = score
+                best_target = cluster_name
+                
+        return best_target
+
 
 class SimControlNodeSP2(SimControlNodeBase):
     """Full Lyapunov-based control node (control_node_server.py)."""
@@ -161,8 +237,6 @@ class SimControlNodeSP2(SimControlNodeBase):
         self.Z_debt = 0.0
         self.switching_nodes: Set[str] = set()
         self.recent_drops: Deque = deque()
-        self.global_routing_table: Dict[str, Any] = {}
-        self.offload_callback: Optional[Callable] = None  # set by EFO for cross-cluster offload
         # Auto-scaling
         self._autoscale_handle = clock.schedule_periodic(1000, self._autoscale_tick)
         self._last_scale_time_ms = 0
@@ -179,7 +253,6 @@ class SimControlNodeSP2(SimControlNodeBase):
             self._handle_drop(req, "Sovereignty Violation")
             return False
 
-        # Store original_aid for semantic substitution
         req.original_adapter_id = req.adapter_id
         self.pending_queue.append(req)
         return True
@@ -325,20 +398,29 @@ class SimControlNodeSP2(SimControlNodeBase):
                     v.commit_request(aid)
                     v.node.submit_request(req)
                     self.pending_queue.remove(req)
+                    
+                    # [任務 B] 成功派發本地請求，壓力下降
+                    if not req.is_delegated:
+                        self.Z_debt = max(0.0, self.Z_debt - EPSILON)
+                        
                     dispatched_any = True
                     break
                 else:
-                    # Try offload
-                    if self.offload_callback:
-                        offloaded = self.offload_callback(req)
-                        if offloaded:
-                            self.offload_out += 1
-                            self.pending_queue.remove(req)
-                            dispatched_any = True
-                            break
-                    # Drop
-                    self._handle_drop(req, "System Full or SLO Violation")
-                    self.Z_debt += PSI_DROP
+                    # [任務 D] 無法負載，嘗試跨叢集卸載
+                    if not req.is_delegated and self.offload_callback:
+                        target_cluster = self._select_best_offload_target(target_aid)
+                        if target_cluster:
+                            offloaded = self.offload_callback(req, tgt=target_cluster)
+                            if offloaded:
+                                self.offload_out += 1
+                                self.pending_queue.remove(req)
+                                dispatched_any = True
+                                break
+                    
+                    # Offload 也失敗，確定 Drop
+                    self._handle_drop(req, "System Full or SLO Violation (No Targets)")
+                    if not req.is_delegated:
+                        self.Z_debt += PSI_DROP
                     self.recent_drops.append(self._clock.now())
                     self.pending_queue.remove(req)
                     dispatched_any = True
@@ -348,7 +430,6 @@ class SimControlNodeSP2(SimControlNodeBase):
         if self.system_paused:
             return
         now = self._clock.now()
-        # Clean old drops
         while self.recent_drops and now - self.recent_drops[0] > 6000:
             self.recent_drops.popleft()
         recent_count = len(self.recent_drops)
@@ -369,24 +450,24 @@ class SimControlNodeSP2(SimControlNodeBase):
         if len(active_nodes) > 1:
             v_nodes = self._get_virtual_node_states()
             total_pending = len(self.pending_queue)
-            total_free = sum(v.get_free_slots("") for v in v_nodes)  # rough estimate
+            total_free = sum(v.get_free_slots("") for v in v_nodes) 
             if (total_free - total_pending) >= SCALE_DOWN_SURPLUS_THRESHOLD:
                 self._surplus_duration_ms += 1000
             else:
                 self._surplus_duration_ms = 0
             if self._surplus_duration_ms >= 6000 and now - self._last_scale_time_ms > 6000:
-                # Drain the least important node
                 best = min(active_nodes, key=lambda n: n.engine.get_running_count())
                 best.drain()
                 self._last_scale_time_ms = now
                 self._surplus_duration_ms = 0
 
-    def receive_routing_table(self, table: dict):
-        self.global_routing_table = table
-
 
 class SimControlNodeRandom(SimControlNodeBase):
     """Random dispatch, SLO-based drop."""
+    def __init__(self, cluster_id, clock, compute_nodes, lora_metadata, rng_seed=42):
+        super().__init__(cluster_id, clock, compute_nodes, lora_metadata, rng_seed)
+        for node in self.compute_nodes:
+            node.activate()
 
     def admit_request(self, req: SimRequest) -> bool:
         if self.system_paused:
@@ -411,7 +492,6 @@ class SimControlNodeRandom(SimControlNodeBase):
         for req in list(self.pending_queue):
             aid = req.adapter_id
             valid = [v for v in v_nodes if v.get_free_slots(aid) > 0]
-            # Check TTFT
             valid_ttft = []
             for v in valid:
                 wait_ms = self._clock.now() - req.arrival_time_ms
@@ -425,7 +505,16 @@ class SimControlNodeRandom(SimControlNodeBase):
                 target.commit_request(aid)
                 target.node.submit_request(req)
             else:
-                self._handle_drop(req, f"System Full or SLO Violation (No valid nodes for T_MAX={T_MAX}s)")
+                # 替 Random 也補上 Offload 能力
+                offloaded = False
+                if not req.is_delegated and self.offload_callback:
+                    target_cluster = self._select_best_offload_target(aid)
+                    if target_cluster and self.offload_callback(req, tgt=target_cluster):
+                        self.offload_out += 1
+                        offloaded = True
+                
+                if not offloaded:
+                    self._handle_drop(req, f"System Full or SLO Violation (No Targets for T_MAX={T_MAX}s)")
             self.pending_queue.remove(req)
 
     def _predict_ttft_simple(self, node: VirtualNodeState, target_lora: str) -> float:
@@ -449,7 +538,9 @@ class SimControlNodeLRU(SimControlNodeBase):
                  dispatch_strategy="random", efo_ref=None, rng_seed=42):
         super().__init__(cluster_id, clock, compute_nodes, lora_metadata, rng_seed)
         self.dispatch_strategy = dispatch_strategy
-        self.efo_ref = efo_ref  # reference to EFO for LRU cache operations
+        self.efo_ref = efo_ref
+        for node in self.compute_nodes:
+            node.activate()
 
     def admit_request(self, req: SimRequest) -> bool:
         if self.system_paused:
@@ -475,7 +566,6 @@ class SimControlNodeLRU(SimControlNodeBase):
             aid = req.adapter_id
             download_penalty = 0.0
 
-            # LRU cache check
             if aid not in self.local_available_loras:
                 if self.efo_ref:
                     result = self.efo_ref.fetch_and_evict_lora(self.cluster_id, aid)
@@ -483,15 +573,13 @@ class SimControlNodeLRU(SimControlNodeBase):
                         self.local_available_loras = set(result.get("current_cache", []))
                         download_penalty = self.SIM_DOWNLOAD_DELAY
                     else:
-                        self.local_available_loras = set(result.get("current_cache",
-                                                                     list(self.local_available_loras)))
+                        self.local_available_loras = set(result.get("current_cache", list(self.local_available_loras)))
                 else:
                     self.local_available_loras.add(aid)
             else:
                 if self.efo_ref:
                     self.efo_ref.access_lora(self.cluster_id, aid)
 
-            # Find valid nodes
             valid = []
             for v in v_nodes:
                 if v.get_free_slots(aid) > 0:
@@ -503,9 +591,16 @@ class SimControlNodeLRU(SimControlNodeBase):
 
             target = None
             if not valid:
-                self._handle_drop(req, f"System Full or SLO Violation (No valid nodes for T_MAX={T_MAX}s)")
+                offloaded = False
+                if not req.is_delegated and self.offload_callback:
+                    target_cluster = self._select_best_offload_target(aid)
+                    if target_cluster and self.offload_callback(req, tgt=target_cluster):
+                        self.offload_out += 1
+                        offloaded = True
+                
+                if not offloaded:
+                    self._handle_drop(req, f"System Full or SLO Violation (No Targets for T_MAX={T_MAX}s)")
             elif self.dispatch_strategy == "greedy":
-                # Greedy: prefer cache hit, then lowest node index
                 cache_hits = [v for v in valid if aid in v.active_loras or aid in v.loaded_adapters]
                 if cache_hits:
                     target = cache_hits[0]
@@ -531,7 +626,6 @@ class SimControlNodeLRU(SimControlNodeBase):
         return SCHEDULER_OVERHEAD + load_delay + decode_wait + prefill
 
     def apply_sp1_reset(self, new_loras):
-        # LRU mode ignores SP1 reset (per original: "Ignored in LRU mode")
         pass
 
 
@@ -546,8 +640,9 @@ class SimControlNodeDLoRA(SimControlNodeBase):
     def __init__(self, cluster_id, clock, compute_nodes, lora_metadata, efo_ref=None, rng_seed=42):
         super().__init__(cluster_id, clock, compute_nodes, lora_metadata, rng_seed)
         self.efo_ref = efo_ref
-        # dLoRA batching controller runs every 500ms alongside scheduler
         self._dlora_handle = clock.schedule_periodic(500, self._dlora_batching_tick)
+        for node in self.compute_nodes:
+            node.activate()
 
     def admit_request(self, req: SimRequest) -> bool:
         if self.system_paused:
@@ -563,10 +658,8 @@ class SimControlNodeDLoRA(SimControlNodeBase):
         return True
 
     def _dlora_batching_tick(self):
-        """dLoRA dynamic merge/unmerge based on queue composition."""
         for node in self.compute_nodes:
-            if node.status != NodeStatus.ACTIVE:
-                continue
+            if node.status != NodeStatus.ACTIVE: continue
             m = node.get_metrics()
             mode = m.get("mode", "unmerge")
             merged_adapter = m.get("lora_state", {}).get("merged_adapter")
@@ -574,13 +667,11 @@ class SimControlNodeDLoRA(SimControlNodeBase):
             total = len(req_set)
 
             if total < self.MIN_MERGE_REQUESTS:
-                if mode == "merge":
-                    node.unmerge_all()
+                if mode == "merge": node.unmerge_all()
                 continue
 
             counts = defaultdict(int)
-            for r in req_set:
-                counts[r["adapter_id"]] += 1
+            for r in req_set: counts[r["adapter_id"]] += 1
             l_max = max(counts, key=counts.get)
             ratio = counts[l_max] / total
 
@@ -613,15 +704,13 @@ class SimControlNodeDLoRA(SimControlNodeBase):
                         self.local_available_loras = set(result.get("current_cache", []))
                         download_penalty = self.SIM_DOWNLOAD_DELAY
                     else:
-                        self.local_available_loras = set(result.get("current_cache",
-                                                                     list(self.local_available_loras)))
+                        self.local_available_loras = set(result.get("current_cache", list(self.local_available_loras)))
                 else:
                     self.local_available_loras.add(aid)
             else:
                 if self.efo_ref:
                     self.efo_ref.access_lora(self.cluster_id, aid)
 
-            # Greedy: pick node with minimum expected pending time
             best_node = None
             min_time = float('inf')
             for v in v_nodes:
@@ -631,7 +720,15 @@ class SimControlNodeDLoRA(SimControlNodeBase):
                     best_node = v
 
             if not best_node:
-                self._handle_drop(req, "System Full (No Nodes Available)")
+                offloaded = False
+                if not req.is_delegated and self.offload_callback:
+                    target_cluster = self._select_best_offload_target(aid)
+                    if target_cluster and self.offload_callback(req, tgt=target_cluster):
+                        self.offload_out += 1
+                        offloaded = True
+                        
+                if not offloaded:
+                    self._handle_drop(req, "System Full (No Targets)")
             else:
                 wait_s = (self._clock.now() - req.arrival_time_ms) / 1000.0
                 total = wait_s + download_penalty + min_time
@@ -650,5 +747,4 @@ class SimControlNodeDLoRA(SimControlNodeBase):
         return queue_len * avg_per_req + load_delay
 
     def apply_sp1_reset(self, new_loras):
-        # dLoRA ignores SP1 reset
         pass

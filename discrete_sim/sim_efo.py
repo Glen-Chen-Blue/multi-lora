@@ -61,17 +61,29 @@ class SimEFOBase:
         raise NotImplementedError
 
     def _sp2_tick(self):
-        """SP2 routing broadcast - gather status from all control nodes."""
-        # For single-process sim, routing is direct reference - no network needed
-        # But we still update routing tables for offload logic
+        """SP2 routing broadcast - gather REAL status from all control nodes."""
         routing_table = {}
+        # 取得網路 P95 延遲矩陣
+        p95_delays = self.network.get_p95_info(list(self.control_nodes.keys()))
+
+        # 1. 蒐集每個叢集的真實狀態
         for name, cn in self.control_nodes.items():
+            if hasattr(cn, 'get_offload_status'):
+                status = cn.get_offload_status()
+                budget = status.get("budget", 0)
+                lora_status = status.get("lora_status", {"merged": [], "loaded": [], "unloaded": []})
+            else:
+                budget = 0
+                lora_status = {"merged": [], "loaded": [], "unloaded": []}
+
             routing_table[name] = {
                 "ip": name,
-                "budget": 0,
-                "lora_status": {"merged": [], "loaded": [], "unloaded": []},
-                "delay": self.network.get_p95_info(list(self.control_nodes.keys())).get(name, {})
+                "budget": budget,
+                "lora_status": lora_status,
+                "delay": p95_delays.get(name, {})
             }
+
+        # 2. 廣播更新後的路由表給所有叢集
         for name, cn in self.control_nodes.items():
             if hasattr(cn, 'receive_routing_table'):
                 cn.receive_routing_table(routing_table)

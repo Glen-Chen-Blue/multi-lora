@@ -46,6 +46,7 @@ class Simulation:
         self.all_requests: List[SimRequest] = []
         self.finished_requests: List[SimRequest] = []
         self.dropped_requests: List[SimRequest] = []
+        self._in_transit = []  # [新增] Track offloaded requests in flight
 
         # Load metadata
         metadata_path = os.path.join(config.metadata_dir, self.exp_def.metadata_file)
@@ -98,11 +99,6 @@ class Simulation:
         ctrl_type = self.exp_def.control_type
 
         # We'll create EFO first for LRU/dLoRA variants that need efo_ref
-        # But for SP1/SP2/Random, control nodes don't need efo_ref
-        # So we do a two-pass: create control nodes, then create EFO, then link
-
-        efo_ref_placeholder = None  # will be set after EFO creation for LRU/dLoRA
-
         for cluster_name, nodes in self.all_compute_nodes.items():
             seed = hash(cluster_name) & 0xFFFFFFFF
             if ctrl_type == "sp2":
@@ -134,10 +130,29 @@ class Simulation:
         else:
             raise ValueError(f"Unknown EFO type: {efo_type}")
 
-        # Link efo_ref for LRU/dLoRA control nodes
+        # Link efo_ref for LRU/dLoRA control nodes and setup Offload Callback
         for cn in self.control_nodes.values():
             if hasattr(cn, 'efo_ref'):
                 cn.efo_ref = self.efo
+            
+            # [新增] 綁定 Offload 回呼函數，允許跨叢集拋轉
+            # (預設 target_cluster=None 是為了相容尚未修改的 sim_control_node)
+            cn.offload_callback = lambda req, tgt=None, src=cn.cluster_id: self._handle_offload(req, src, tgt)
+
+    def _handle_offload(self, req: SimRequest, source_cluster: str, target_cluster: str = None) -> bool:
+        """[新增] Global offload handler. Simulates network transmission to target cluster."""
+        if target_cluster is None or target_cluster not in self.control_nodes:
+            return False
+            
+        delay_ms = self.network.get_delay_ms(source_cluster, target_cluster)
+        delivery_time = self.clock.now() + int(delay_ms)
+        
+        req.is_delegated = True
+        req.assigned_cluster = target_cluster
+        
+        # 標記進入網路傳輸佇列
+        self._in_transit.append((delivery_time, req, target_cluster))
+        return True
 
     def _on_request_finish(self, req: SimRequest):
         """Called when a request finishes (via compute node callback chain)."""
@@ -145,14 +160,16 @@ class Simulation:
         self.finished_requests.append(req)
         if req.ttft_s is not None:
             self.ttft_records.append(req.ttft_s)
-        # Print DONE
-        ts = _format_sim_time(self.clock.now())
-        idx = req._sim_idx
-        req_str = f"{idx:>{self.PAD_LEN}}/{self.TOTAL_REQUESTS}"
-        adapter_str = f"{req.original_adapter_id:^8}"
-        elapsed = req.total_time_s or 0.0
-        ttft = req.ttft_s or elapsed
-        print(f"[{ts}] [DONE] Req:{req_str} | Target:{adapter_str} | Time: {elapsed:>6.2f}s | TTFT: {ttft:>5.2f}s | Tokens: {req.tokens_generated}")
+            
+        # [修改] 關閉單筆完成的輸出，避免洗頻
+        # ts = _format_sim_time(self.clock.now())
+        # idx = getattr(req, '_sim_idx', '?')
+        # req_str = f"{idx:>{self.PAD_LEN}}/{self.TOTAL_REQUESTS}"
+        # adapter_str = f"{req.original_adapter_id:^8}"
+        # elapsed = req.total_time_s or 0.0
+        # ttft = req.ttft_s or elapsed
+        # del_str = "[O]" if req.is_delegated else "[L]"
+        # print(f"[{ts}] [DONE] Req:{req_str} {del_str} | Target:{adapter_str} | Time: {elapsed:>6.2f}s | TTFT: {ttft:>5.2f}s | Tokens: {req.tokens_generated}")
 
     def _on_request_first_token(self, req: SimRequest):
         """Called on first token."""
@@ -163,15 +180,32 @@ class Simulation:
         duration_ms = self.config.duration_hours * 3600 * 1000
         sp1_interval_ms = SP1_INTERVAL_SECONDS * 1000
 
-        # Wire callbacks
+        # [修復] Wire callbacks (Chain them so Control Node also gets notified)
         for cn in self.control_nodes.values():
             for node in cn.compute_nodes:
-                node.on_request_finish = self._on_request_finish
-                node.on_request_first_token = self._on_request_first_token
+                orig_finish_cb = node.on_request_finish
+                orig_first_token_cb = node.on_request_first_token
+
+                def make_finish_cb(orig_cb):
+                    def chained_cb(req):
+                        if orig_cb:
+                            orig_cb(req)
+                        self._on_request_finish(req)
+                    return chained_cb
+
+                def make_first_token_cb(orig_cb):
+                    def chained_cb(req):
+                        if orig_cb:
+                            orig_cb(req)
+                        self._on_request_first_token(req)
+                    return chained_cb
+
+                node.on_request_finish = make_finish_cb(orig_finish_cb)
+                node.on_request_first_token = make_first_token_cb(orig_first_token_cb)
 
         target_clusters = self.config.get_target_clusters()
 
-        # Print header (matching test_simulation.py)
+        # Print header
         print("=" * 65)
         print("=== Trace Replay Pressure Simulator (Discrete) ===")
         print("=" * 65)
@@ -194,11 +228,32 @@ class Simulation:
 
         # Main loop
         for t in range(1, duration_ms + 1):
-            # 1. Advance clock (fires periodic callbacks)
+            # 1. Advance clock
             self.clock.advance(1)
-
-            # 2. Check SP1 interval boundary
-            # (requests trigger time_edge when crossing interval)
+            
+            # [新增] 2. 處理在途的跨叢集 Offload 請求 (模擬網路延遲抵達)
+            if self._in_transit:
+                delivered = []
+                for item in self._in_transit:
+                    delivery_time, req, target_cluster = item
+                    if t >= delivery_time:
+                        cn = self.control_nodes.get(target_cluster)
+                        if cn:
+                            admitted = cn.admit_request(req)
+                            if not admitted or req.is_dropped:
+                                self.stats["dropped"] += 1
+                                self.dropped_requests.append(req)
+                                # [修改] 關閉單筆丟棄的輸出
+                                # ts_str = _format_sim_time(t)
+                                # reason = req.drop_reason or "Unknown"
+                                # idx = getattr(req, '_sim_idx', '?')
+                                # req_str = f"{idx:>{self.PAD_LEN}}/{self.TOTAL_REQUESTS}"
+                                # print(f"[{ts_str}] [DROP] Req:{req_str} | Target:{req.adapter_id:^8} | Reason: {reason} (Offload Failed)")
+                        delivered.append(item)
+                
+                # 移除已送達的請求
+                if delivered:
+                    self._in_transit = [x for x in self._in_transit if x not in delivered]
 
             # 3. Inject requests from trace
             events = self.trace.get_requests_at(t)
@@ -224,17 +279,19 @@ class Simulation:
                 arrival_sec = t / 1000.0
                 req_interval = int(arrival_sec // SP1_INTERVAL_SECONDS)
                 if req_interval > current_interval:
+                    # 這是系統重要訊息，保留不砍
+                    print() # 換行避免跟進度條衝到
                     ts_str = _format_sim_time(t)
                     print(f"[{ts_str}] [SYS ] Reached Interval {req_interval}. Triggering /time_edge...")
                     self.efo.trigger_time_edge()
                     current_interval = req_interval
                     print(f"[{ts_str}] [SYS ] Resuming simulation for Interval {req_interval}.")
 
-                # Print SEND
-                ts_str = _format_sim_time(t)
-                req_str = f"{self._request_idx:>{self.PAD_LEN}}/{self.TOTAL_REQUESTS}"
-                adapter_str = f"{adapter_id:^8}"
-                print(f"[{ts_str}] [SEND] Req:{req_str} | Target:{adapter_str} @ {cluster}")
+                # [修改] 關閉單筆送出的輸出
+                # ts_str = _format_sim_time(t)
+                # req_str = f"{self._request_idx:>{self.PAD_LEN}}/{self.TOTAL_REQUESTS}"
+                # adapter_str = f"{adapter_id:^8}"
+                # print(f"[{ts_str}] [SEND] Req:{req_str} | Target:{adapter_str} @ {cluster}")
 
                 # Admit to control node
                 cn = self.control_nodes[cluster]
@@ -242,9 +299,10 @@ class Simulation:
                 if not admitted or req.is_dropped:
                     self.stats["dropped"] += 1
                     self.dropped_requests.append(req)
-                    ts_str = _format_sim_time(t)
-                    reason = req.drop_reason or "Unknown"
-                    print(f"[{ts_str}] [DROP] Req:{req_str} | Target:{adapter_str} | Reason: {reason}")
+                    # [修改] 關閉單筆丟棄的輸出
+                    # ts_str = _format_sim_time(t)
+                    # reason = req.drop_reason or "Unknown"
+                    # print(f"[{ts_str}] [DROP] Req:{req_str} | Target:{adapter_str} | Reason: {reason}")
 
             # 4. Step all compute nodes
             for cluster_nodes in self.all_compute_nodes.values():
@@ -253,7 +311,6 @@ class Simulation:
 
             # 5. Check for newly dropped requests from scheduler
             for cn in self.control_nodes.values():
-                # Check pending queue for requests that were dropped by scheduler
                 pass  # drops are handled inline in scheduler_tick
 
             # 6. Progress (every 10 sim-seconds)
@@ -274,7 +331,7 @@ class Simulation:
         # Close logger
         self.sim_logger.close()
 
-        # Print summary (matching test_simulation.py)
+        # Print summary
         print("\n\n" + "=" * 65)
         print(f"=== SUMMARY: Sent: {self.stats['sent']} | Finished: {self.stats['finished']} | Dropped: {self.stats['dropped']} | Errors: {self.stats['errors']} ===")
         print("=" * 65)

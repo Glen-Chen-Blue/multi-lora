@@ -14,7 +14,13 @@ class SimComputeNode:
     def __init__(self, node_id: str, cluster_id: str, clock: SimClock):
         self.node_id = node_id
         self.cluster_id = cluster_id
-        self.status: NodeStatus = NodeStatus.ACTIVE
+        
+        # [任務 A] 設定正確的初始狀態：只有叢集的第一個節點 (n1) 預設為 ACTIVE
+        if self.node_id.endswith("-n1"):
+            self.status: NodeStatus = NodeStatus.ACTIVE
+        else:
+            self.status: NodeStatus = NodeStatus.STANDBY
+            
         self.engine = SimMultiLoRAEngine(node_id, clock)
         self._clock = clock
         self.cumulative_inference_time_ms: int = 0
@@ -84,7 +90,11 @@ class SimComputeNode:
     def full_reset(self):
         """Full reset of engine state."""
         self.engine.full_reset()
-        self.status = NodeStatus.ACTIVE
+        # [任務 A 修復] SP1 重置時也要恢復正確的初始狀態
+        if self.node_id.endswith("-n1"):
+            self.status = NodeStatus.ACTIVE
+        else:
+            self.status = NodeStatus.STANDBY
 
     def update_known_adapters(self, adapters: List[str]):
         self.engine.update_known_adapters(adapters)
