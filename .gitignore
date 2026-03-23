@@ -4,3 +4,4 @@ __pycache__/
 data/
 information/simulation_data.csv
 *logs/
+result/
