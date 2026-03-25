@@ -5,3 +5,5 @@ data/
 information/simulation_data.csv
 *logs/
 result/
+discrete_sim/__pycache__/
+discrete_sim/results/

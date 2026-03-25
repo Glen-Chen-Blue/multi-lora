@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # 設定模擬開始前的時間偏移 (此處設定為 3 天，可依需求修改)
-export START_TIME=$((86400*4))
+export START_TIME=$((86400*5))
 
 echo "🚀 開始自動連續執行實驗 (Experiment 1_1 ~ 1_6)..."
 echo "🕒 已經設定 START_OFFSET = $START_TIME"

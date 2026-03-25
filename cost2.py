@@ -267,7 +267,7 @@ if __name__ == "__main__":
         "experiment_single_cluster_2nodes5_logs/efo_global_metrics.log",
         "experiment_single_cluster_2nodes6_logs/efo_global_metrics.log"
     ]
-    folder_name = "./record_day_1/"
+    folder_name = "./"
 
     log_files = [folder_name + f for f in log_files]
 
@@ -288,7 +288,7 @@ if __name__ == "__main__":
         csv_path="./information/simulation_data.csv",
         target_clusters=["cluster_1"],
         speed_rate=1.0,
-        start_offset_days=3,
+        start_offset_days=4,
         duration_hours=8,
         bin_minutes=5,
     )
