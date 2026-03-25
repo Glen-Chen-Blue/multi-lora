@@ -8,7 +8,7 @@ from cost2 import parse_logs, build_request_rate_from_simulation_csv
 def plot_averaged_costs(
     folders,
     start_offsets,
-    labels,
+    experiments,
     output_path,
     csv_path="./information/simulation_data.csv",
     target_clusters=None,
@@ -19,11 +19,10 @@ def plot_averaged_costs(
     fig, ax1 = plt.subplots(figsize=(12, 8))
     ax2 = ax1.twinx()
 
-    # 定義統一的時間分桶 (例如每 5 分鐘 = 300 秒)
     BIN_SECONDS = bin_minutes * 60
     max_time_sec = duration_hours * 3600
     bins = np.arange(0, max_time_sec + BIN_SECONDS, BIN_SECONDS)
-    bin_labels = bins[:-1] + BIN_SECONDS / 2  # 取區間中心點作為 X 軸
+    bin_labels = bins[:-1] + BIN_SECONDS / 2  
 
     # ==========================================
     # 1. 處理並平均背景的 Request Rate
@@ -55,39 +54,32 @@ def plot_averaged_costs(
         )
 
     # ==========================================
-    # 2. 處理並平均 6 種 Baseline 的 Cost (修復對齊問題)
+    # 2. 處理並平均指定的 Baseline Cost
     # ==========================================
-    for i, label in enumerate(labels, start=1):
+    # 這裡改成遍歷傳入的 experiments 字典 (key 是 id, value 是 label名稱)
+    for exp_id, label in experiments.items():
         exp_dfs = []
         for folder in folders:
-            log_file = os.path.join(folder, f"experiment_single_cluster_2nodes{i}_logs", "efo_global_metrics.log")
+            # 使用 exp_id 來正確找到對應的資料夾
+            log_file = os.path.join(folder, f"experiment_single_cluster_2nodes{exp_id}_logs", "efo_global_metrics.log")
             df = parse_logs(log_file)
             
             if not df.empty:
-                # 把每筆 log 歸類到對應的時間桶子裡
                 df['time_bin'] = pd.cut(df['time'], bins=bins, labels=bin_labels, include_lowest=True)
-                
-                # 算出「這一天」在每個桶子內的平均 Cost
                 day_binned = df.groupby('time_bin', observed=False)['cost_per_request'].mean().reset_index()
-                
-                # 向前填充 (ffill)：如果某個 5 分鐘內完全沒有 log，就延續上一個桶子的 Cost 狀態
                 day_binned['cost_per_request'] = day_binned['cost_per_request'].ffill()
-                
                 exp_dfs.append(day_binned)
         
         if not exp_dfs:
-            print(f"⚠️ No data found for {label}")
+            print(f"⚠️ No data found for {label} (Experiment {exp_id})")
             continue
             
-        # 將 4 天的 Binned 數據合併，再算一次跨天數的平均
         merged_exp = pd.concat(exp_dfs)
         avg_exp = merged_exp.groupby('time_bin', observed=False)['cost_per_request'].mean().reset_index()
         
-        # 移除空值並轉回數值型態以便繪圖
         avg_exp = avg_exp.dropna(subset=['cost_per_request'])
         avg_exp['time_bin'] = avg_exp['time_bin'].astype(float)
 
-        # 畫出平滑的平均曲線
         ax1.plot(
             avg_exp['time_bin'],
             avg_exp['cost_per_request'],
@@ -119,7 +111,7 @@ def plot_averaged_costs(
     plt.savefig(output_path, dpi=300)
     plt.close()
     
-    print(f"\n🎉 成功！合併平均後的平滑圖表已儲存至：{output_path}")
+    print(f"\n🎉 成功！合併平均後的圖表已儲存至：{output_path}")
 
 if __name__ == "__main__":
     folders_to_average = [
@@ -130,20 +122,22 @@ if __name__ == "__main__":
     ]
     start_offsets = [1, 2, 3, 4]  
     
-    labels = [
-        "Experiment 1 (SP1+SP2)",
-        "Experiment 2 (SP1+SP2 w/o semantic)",
-        "Experiment 3 (SP1+Random)",
-        "Experiment 4 (LRU+Random)",
-        "Experiment 5 (Dlora)",
-        "Experiment 6 (Slora)"
-    ]
+    # 這裡使用字典 (Dictionary) 來精確對應 Experiment ID 與 Label
+    # 直接把 ID=4 (LRU+Random) 拿掉即可
+    experiments_to_plot = {
+        1: "Experiment 1 (SP1+SP2)",
+        2: "Experiment 2 (SP1+SP2 w/o semantic)",
+        3: "Experiment 3 (SP1+Random)",
+        # 4: "Experiment 4 (LRU+Random)",  <-- 拿掉了
+        5: "Experiment 5 (Dlora)",
+        6: "Experiment 6 (Slora)"
+    }
 
     plot_averaged_costs(
         folders=folders_to_average,
         start_offsets=start_offsets,
-        labels=labels,
-        output_path="cost_per_request_avg_day1_to_4.png",
+        experiments=experiments_to_plot,
+        output_path="cost_per_request_avg_day1_to_4_without_exp4.png",
         csv_path="./information/simulation_data.csv",
         target_clusters=["cluster_1"],
         speed_rate=1.0,

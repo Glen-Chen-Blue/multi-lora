@@ -45,7 +45,7 @@ def parse_logs(log_file):
 
                 drop_count = totals.get("total_drops", 0)
                 cost_penalty = drop_count * COST_DROP_PENALTY2 * (
-                    1.2 if log_file == "./experiment_single_cluster_2nodes2_logs/efo_global_metrics.log" else 1
+                    1 if log_file == "./experiment_single_cluster_2nodes2_logs/efo_global_metrics.log" else 1
                 )
 
                 total_cost = (
