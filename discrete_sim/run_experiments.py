@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
-"""CLI entry point for discrete multi-lora simulation experiments."""
+"""CLI entry point for discrete multi-lora simulation experiments.
+(Multiprocessing Accelerated & Silent Output Version)
+"""
 
 import argparse
 import json
 import os
 import sys
-import subprocess
+import concurrent.futures
+import contextlib
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from .sim_types import SimulationConfig, EXPERIMENT_CONFIGS
-from .simulation import Simulation
+from discrete_sim.sim_types import SimulationConfig, EXPERIMENT_CONFIGS
+from discrete_sim.simulation import Simulation
 
 
 def run_single(args, experiment_id: int):
+    """執行單一實驗的核心函式，並屏蔽繁雜的輸出"""
     topology = json.loads(args.topology)
 
     config = SimulationConfig(
@@ -28,16 +32,21 @@ def run_single(args, experiment_id: int):
         metadata_dir=args.metadata_dir,
     )
 
-    print(f"\n{'='*65}")
-    print(f"  Running Experiment {experiment_id}")
     exp = EXPERIMENT_CONFIGS[experiment_id]
-    print(f"  EFO: {exp.efo_type} | Control: {exp.control_type}")
-    print(f"  Metadata: {exp.metadata_file}")
-    print(f"  Disk: {exp.disk_capacity_gb} GB | Dispatch: {exp.dispatch_strategy}")
-    print(f"{'='*65}\n")
+    
+    # 僅印出開始提示，保持畫面乾淨
+    print(f"[START] Experiment {experiment_id} | EFO: {exp.efo_type} | Control: {exp.control_type} | Disk: {exp.disk_capacity_gb} GB")
 
     sim = Simulation(config)
-    sim.run()
+    
+    # 【核心加速修改】：將 simulation 內部的所有 print 導向黑洞，避免 I/O 拖慢速度
+    with open(os.devnull, 'w') as fnull:
+        with contextlib.redirect_stdout(fnull):
+            sim.run()
+            
+    # 印出完成提示
+    print(f"[DONE ] Experiment {experiment_id} completed successfully.")
+    return experiment_id
 
 
 def run_plot(args):
@@ -80,13 +89,13 @@ def run_plot(args):
         duration_hours=args.duration_hours,
         bin_minutes=5,
     )
-    print(f"Chart saved to {args.output_dir}/cost_per_request{start_days}.png")
+    print(f"Chart saved to {os.path.join(args.output_dir, f'cost_per_request{start_days}.png')}")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Discrete Multi-LoRA Simulation")
     parser.add_argument("--experiment", type=int, choices=range(1, 7), help="Experiment ID (1-6)")
-    parser.add_argument("--all", action="store_true", help="Run all 6 experiments")
+    parser.add_argument("--all", action="store_true", help="Run all 6 experiments concurrently")
     parser.add_argument("--plot", action="store_true", help="Generate cost2.py chart from results")
     parser.add_argument("--topology", default='{"cluster_1": 2}', help='JSON topology: {"cluster_name": num_compute_nodes}')
     parser.add_argument("--start-offset", type=int, default=172800, help="CSV trace start offset in seconds")
@@ -102,10 +111,24 @@ def main():
     if args.plot:
         run_plot(args)
     elif args.all:
-        for i in range(1, 7):
-            run_single(args, i)
-        print("\nAll experiments complete!")
-        run_plot(args)
+        print("=" * 65)
+        print("🚀 Starting Parallel Experiments 1 to 6")
+        print("=" * 65)
+        
+        # 使用 ProcessPoolExecutor 讓 6 個實驗同時平行執行
+        with concurrent.futures.ProcessPoolExecutor(max_workers=6) as executor:
+            futures = [executor.submit(run_single, args, i) for i in range(1, 7)]
+            
+            # 等待所有平行任務完成
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    print(f"[Error] Experiment execution failed: {e}")
+                    
+        print("\n🎉 All 6 experiments completed in parallel!")
+        run_plot(args)  # 跑完自動畫圖
+        
     elif args.experiment:
         run_single(args, args.experiment)
     else:
