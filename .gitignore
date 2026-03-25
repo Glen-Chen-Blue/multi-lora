@@ -7,3 +7,4 @@ information/simulation_data.csv
 result/
 discrete_sim/__pycache__/
 discrete_sim/results/
+*.log
