@@ -114,16 +114,18 @@ class SimControlNodeBase:
             self.drop_local_congestion += 1
 
     def apply_sp1_reset(self, new_loras: List[str]):
-        """SP1 reset: clear queues, reset engines, update lora list."""
+        """SP1 reset for Random: clear queues and update loras WITHOUT sleeping nodes."""
         self.system_paused = True
         for req in self.pending_queue:
             self._handle_drop(req, "SP1 Reset")
         self.pending_queue.clear()
+        
+        # 只重置引擎狀態，不要呼叫 full_reset() 以免節點進入 STANDBY
         for node in self.compute_nodes:
-            node.full_reset()
-        self.local_available_loras = set(new_loras)
-        for node in self.compute_nodes:
+            node.engine.full_reset() 
             node.update_known_adapters(new_loras)
+            
+        self.local_available_loras = set(new_loras)
         self.system_paused = False
 
     def get_cluster_metrics(self) -> dict:
@@ -491,6 +493,23 @@ class SimControlNodeRandom(SimControlNodeBase):
 
         for req in list(self.pending_queue):
             aid = req.adapter_id
+            
+            # 🛠️ 修復 2: 必須先確認 SP1 有把這個 LoRA 載入硬碟
+            if aid not in self.local_available_loras:
+                offloaded = False
+                if not req.is_delegated and self.offload_callback:
+                    target_cluster = self._select_best_offload_target(aid)
+                    if target_cluster and self.offload_callback(req, tgt=target_cluster):
+                        self.offload_out += 1
+                        offloaded = True
+                
+                if not offloaded:
+                    self._handle_drop(req, "Disk Cache Miss (Not provisioned by SP1)")
+                
+                self.pending_queue.remove(req)
+                continue
+
+            # 原本的 Random 邏輯
             valid = [v for v in v_nodes if v.get_free_slots(aid) > 0]
             valid_ttft = []
             for v in valid:
@@ -505,7 +524,6 @@ class SimControlNodeRandom(SimControlNodeBase):
                 target.commit_request(aid)
                 target.node.submit_request(req)
             else:
-                # 替 Random 也補上 Offload 能力
                 offloaded = False
                 if not req.is_delegated and self.offload_callback:
                     target_cluster = self._select_best_offload_target(aid)

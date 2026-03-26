@@ -30,7 +30,7 @@ NUM_CLUSTERS = 3                     # Control Node 數量
 COMPUTE_NODES_PER_CLUSTER = 5        # 每個 Cluster 的 Compute Node 數量
 
 # 設定你這次要跑的 RPS 區間 (例如之前跑過 1~20，這次可以放 21~30)
-RPS_LIST = [i for i in range(1, 11)] 
+RPS_LIST = [i for i in range(1, 31)] 
 ZIPF_S_PARAMETER = 1.2               # Zipf 分佈傾斜度
 
 LORA_MAPPING_PATH = os.path.join(PROJECT_ROOT, "information", "lora_mapping.json")
@@ -43,9 +43,9 @@ BASELINE_STRATEGIES = [
     (1, "Experiment 1 (SP1+SP2)"),
     (2, "Experiment 2 (SP1+SP2 w/o semantic)"),
     (3, "Experiment 3 (SP1+Random)"),
-    (4, "Experiment 4 (LRU+Random)"),
-    (5, "Experiment 5 (Dlora)"),
-    (6, "Experiment 6 (Slora)")
+    # (4, "Experiment 4 (LRU+Random)"),
+    (4, "Experiment 4 (Dlora)"),
+    (5, "Experiment 5 (Slora)")
 ]
 # ==========================================
 
@@ -141,7 +141,7 @@ def main():
     results_data = []
 
     # 使用 ProcessPoolExecutor 進行多進程加速 (24核狂飆)
-    with concurrent.futures.ProcessPoolExecutor(max_workers=30) as executor:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=24) as executor:
         # submit 所有任務並等待完成
         futures = [executor.submit(run_single_task, task_args) for task_args in tasks]
         
