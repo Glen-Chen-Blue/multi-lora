@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# === 載入 conda 環境 ===
+if [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
+  source "$HOME/miniconda3/etc/profile.d/conda.sh"
+elif [ -f "$HOME/anaconda3/etc/profile.d/conda.sh" ]; then
+  source "$HOME/anaconda3/etc/profile.d/conda.sh"
+else
+  echo "❌ 找不到 conda.sh，請確認 conda 安裝路徑" >&2
+  exit 1
+fi
+
+conda activate myenv
+echo "✅ Using python: $(which python)"
+echo "✅ Using uvicorn: $(which uvicorn)"
+python --version
+
 # === 接收傳入的參數 ===
 CTRL_APP=${1:-"control_node_server:app"}
 export LORA_METADATA_PATH=${2:-"./information/lora_metadata.json"}
