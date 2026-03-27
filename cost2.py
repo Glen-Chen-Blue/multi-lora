@@ -44,7 +44,7 @@ def parse_logs(log_file):
                 cost_network = offload_count * COST_NET_TRAFFIC
 
                 drop_count = totals.get("total_drops", 0) 
-                cost_penalty = drop_count * COST_DROP_PENALTY 
+                cost_penalty = drop_count * COST_DROP_PENALTY
 
                 total_cost = (
                     cost_storage
