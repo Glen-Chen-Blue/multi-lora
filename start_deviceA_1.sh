@@ -43,18 +43,31 @@ echo "🧹 Clearing old processes..."
 pkill -f "uvicorn.*--port $EFO_PORT" || true
 pkill -f "uvicorn.*--port $CTRL1_PORT" || true
 
-# --- 1. 喚醒 Device B 執行腳本 ---
-echo "📡 透過 Tunnel 啟動 Device B 服務..."
-# 假設專案路徑在兩台機器上一模一樣 (用 $PWD)
-ssh -S "$SSH_SOCKET" "$REMOTE_USER@$REMOTE_HOST" "cd $PWD && nohup ./start_deviceB.sh \"$CTRL_APP\" \"$LORA_METADATA_PATH\" \"$DISK_CAPACITY_GB\" \"$DISPATCH_STRATEGY\" > deviceB_nohup.log 2>&1 &"
+# # --- 1. 喚醒 Device B 執行腳本 ---
+# echo "📡 透過 Tunnel 啟動 Device B 服務..."
+# # 假設專案路徑在兩台機器上一模一樣 (用 $PWD)
+# ssh -S "$SSH_SOCKET" "$REMOTE_USER@$REMOTE_HOST" "cd $PWD && nohup ./start_deviceB.sh \"$CTRL_APP\" \"$LORA_METADATA_PATH\" \"$DISK_CAPACITY_GB\" \"$DISPATCH_STRATEGY\" > deviceB_nohup.log 2>&1 &"
 
-# --- 2. 啟動 Device A 服務 ---
+# # --- 2. 啟動 Device A 服務 ---
+# echo "🚀 Starting EFO (Port $EFO_PORT)..."
+# PORT="$EFO_PORT" \
+# CLUSTERS="{\"cluster_1\":\"http://127.0.0.1:${CTRL1_PORT}\", \"cluster_2\":\"http://127.0.0.1:${CTRL2_PORT}\"}" \
+# uvicorn "$EFO_APP" --host 0.0.0.0 --port "$EFO_PORT" >> "$LOG_PATH/efo.log" 2>&1 &
+# PIDS+=($!)
+# sleep 5
+
 echo "🚀 Starting EFO (Port $EFO_PORT)..."
 PORT="$EFO_PORT" \
 CLUSTERS="{\"cluster_1\":\"http://127.0.0.1:${CTRL1_PORT}\", \"cluster_2\":\"http://127.0.0.1:${CTRL2_PORT}\"}" \
 uvicorn "$EFO_APP" --host 0.0.0.0 --port "$EFO_PORT" >> "$LOG_PATH/efo.log" 2>&1 &
 PIDS+=($!)
 sleep 5
+
+echo "📡 透過 Tunnel 啟動 Device B 服務..."
+ssh -n -S "$SSH_SOCKET" -p 6666 "$REMOTE_USER@$REMOTE_HOST" \
+  "cd \"$PWD\" && nohup ./start_deviceB.sh \"$CTRL_APP\" \"$LORA_METADATA_PATH\" \"$DISK_CAPACITY_GB\" \"$DISPATCH_STRATEGY\" > deviceB_nohup.log 2>&1 < /dev/null &"
+sleep 5
+
 
 echo "🚀 Starting Control Node cluster_1..."
 CLUSTER_NAME="cluster_1" \

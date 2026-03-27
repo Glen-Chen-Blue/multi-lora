@@ -51,6 +51,15 @@ pkill -f "uvicorn.*--port $CTRL2_PORT" || true
 pkill -f "uvicorn.*--port $COMP_PORT" || true
 rm -f "$LOG_PATH"/*.log || true
 
+
+EFO_PORT=$((BASE_PORT + 900))
+
+echo "⏳ Waiting for EFO at $EFO_URL ..."
+until curl -s "$EFO_URL" >/dev/null 2>&1 || (echo > /dev/tcp/127.0.0.1/$EFO_PORT) >/dev/null 2>&1; do
+  sleep 1
+done
+echo "✅ EFO is reachable."
+
 # --- 1. 啟動 Control Node 2 ---
 echo "🚀 Starting Control Node 2 ($CTRL_APP)..."
 CLUSTER_NAME="cluster_2" \
