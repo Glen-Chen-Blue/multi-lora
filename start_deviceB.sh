@@ -67,7 +67,7 @@ EFO_URL="$EFO_URL" \
 PORT="$CTRL2_PORT" \
 CONTROL_NODE_URL="http://127.0.0.1:$CTRL2_PORT" \
 uvicorn "$CTRL_APP" --host 0.0.0.0 --port "$CTRL2_PORT" \
->> "$LOG_PATH/control_2.log" 2>&1 &
+> "$LOG_PATH/control_2.log" 2>&1 &
 PIDS+=($!)
 sleep 2
 
@@ -78,7 +78,7 @@ NODE_ID="c2-n1" \
 CONTROL_NODE_URL="http://127.0.0.1:$CTRL2_PORT" \
 PORT="$COMP_PORT" \
 uvicorn compute_node_server:app --host 0.0.0.0 --port "$COMP_PORT" \
->> "$LOG_PATH/compute_c2-n1.log" 2>&1 &
+> "$LOG_PATH/compute_c2-n1.log" 2>&1 &
 PIDS+=($!)
 
 echo "✅ Device B started. Waiting for requests..."
