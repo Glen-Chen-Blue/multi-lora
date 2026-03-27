@@ -7,7 +7,7 @@ export START_TIME=$((86400*5))
 echo "🚀 開始自動連續執行實驗 (Experiment 1_1 ~ 1_6)..."
 echo "🕒 已經設定 START_OFFSET = $START_TIME"
 
-for i in {1..6}; do
+for i in {2..6}; do
   script_file="start_experiment1_${i}.sh"
   
   echo ""

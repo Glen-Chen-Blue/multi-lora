@@ -129,8 +129,8 @@ if __name__ == "__main__":
         2: "Experiment 2 (SP1+SP2 w/o semantic)",
         3: "Experiment 3 (SP1+Random)",
         # 4: "Experiment 4 (LRU+Random)",  <-- 拿掉了
-        5: "Experiment 5 (Dlora)",
-        6: "Experiment 6 (Slora)"
+        5: "Experiment 4 (Dlora)",
+        6: "Experiment 5 (Slora)"
     }
 
     plot_averaged_costs(
