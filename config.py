@@ -66,7 +66,7 @@ COST_COMPUTE_PER_SEC = 0.001 # [新增] kappa_compute: 每秒的算力成本 (�
 
 # 物理容量與限制
 LORA_SIZE_GB = 0.1           # S_lora: 單一 LoRA Adapter 的檔案大小估算 (GB)
-DISK_CAPACITY_GB = float(os.environ.get("DISK_CAPACITY_GB", 5))  # 磁碟容量限制 (GB)
+DISK_CAPACITY_GB = float(os.environ.get("DISK_CAPACITY_GB") or 5)
 T_MAX_SLO = 6.0              # EFO 全域視角的 SLO 承諾最大端到端延遲 (秒)
 SWAP_EPSILON = 0           # 演算法微調常數：新模型多帶來的淨效用必須大於此門檻才允許替換 (防震盪)
 
