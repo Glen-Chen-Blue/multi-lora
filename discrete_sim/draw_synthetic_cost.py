@@ -44,7 +44,7 @@ def main():
         plt.plot(
             subset['Global_RPS'], 
             subset['Average_Cost'], 
-            marker=markers[idx % len(markers)], 
+            # marker=markers[idx % len(markers)], 
             linewidth=2, 
             markersize=8,
             label=strategy

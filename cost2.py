@@ -6,7 +6,7 @@ import numpy as np
 
 from config import (
     COST_STORE_PER_GB, COST_DOWNLOAD_PER_GB,
-    COST_NET_TRAFFIC, COST_DROP_PENALTY2, LORA_SIZE_GB,
+    COST_NET_TRAFFIC, COST_DROP_PENALTY2, COST_DROP_PENALTY, LORA_SIZE_GB,
     COST_COMPUTE_PER_SEC
 )
 
@@ -43,10 +43,8 @@ def parse_logs(log_file):
                 offload_count = totals.get("total_offloads", 0)
                 cost_network = offload_count * COST_NET_TRAFFIC
 
-                drop_count = totals.get("total_drops", 0)
-                cost_penalty = drop_count * COST_DROP_PENALTY2 * (
-                    1 if log_file == "./experiment_single_cluster_2nodes2_logs/efo_global_metrics.log" else 1
-                )
+                drop_count = totals.get("total_drops", 0) 
+                cost_penalty = drop_count * COST_DROP_PENALTY 
 
                 total_cost = (
                     cost_storage

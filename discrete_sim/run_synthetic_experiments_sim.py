@@ -30,8 +30,8 @@ NUM_CLUSTERS = 3                     # Control Node 數量
 COMPUTE_NODES_PER_CLUSTER = 5        # 每個 Cluster 的 Compute Node 數量
 
 # 設定你這次要跑的 RPS 區間 (例如之前跑過 1~20，這次可以放 21~30)
-RPS_LIST = [i for i in range(1, 31)] 
-ZIPF_S_PARAMETER = 1.2               # Zipf 分佈傾斜度
+RPS_LIST = [i for i in range(1, 51)] 
+ZIPF_S_PARAMETER = 1.5               # Zipf 分佈傾斜度
 
 LORA_MAPPING_PATH = os.path.join(PROJECT_ROOT, "information", "lora_mapping.json")
 OUTPUT_CSV_FILE = os.path.join(PROJECT_ROOT, "synthetic_results.csv")
@@ -100,6 +100,28 @@ def run_single_task(args):
     sim.trace = synthetic_gen
     sim.TOTAL_REQUESTS = synthetic_gen.total_requests
     sim.PAD_LEN = len(str(sim.TOTAL_REQUESTS))
+
+    # =========================================================================
+    # 【新增修復：將生成的合成事件轉為 DataFrame，讓 EFO(SP1) 能正確預測】
+    # 避免 EFO 去讀取錯誤的 dummy trace csv，導致預測需求一直為 0 的問題
+    # =========================================================================
+    records = []
+    for t_ms, reqs in synthetic_gen._events.items():
+        arr_sec = t_ms / 1000.0
+        for cluster, lora_id in reqs:
+            records.append({
+                "arrival_sec": arr_sec,
+                "cluster": cluster,
+                "lora_id": lora_id
+            })
+    
+    if records:
+        df_synthetic = pd.DataFrame(records)
+        sim.efo.simulation_df = df_synthetic
+    else:
+        # 防呆機制：若無任何請求，給一個空表
+        sim.efo.simulation_df = pd.DataFrame(columns=["arrival_sec", "cluster", "lora_id"])
+    # =========================================================================
 
     # 3. 執行模擬 【核心修改：開啟黑洞屏蔽大量 print，大幅提升運算速度】
     with open(os.devnull, 'w') as fnull:
