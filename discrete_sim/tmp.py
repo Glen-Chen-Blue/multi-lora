@@ -22,7 +22,7 @@ except ImportError:
 # ==========================================
 # 實驗參數設定區 (必須與原本跑實驗的設定一致)
 # ==========================================
-RPS_LIST = [i for i in range(1, 31)] 
+RPS_LIST = [i for i in range(1, 51)] 
 
 BASELINE_STRATEGIES = [
     (1, "Experiment 1 (SP1+SP2)"),

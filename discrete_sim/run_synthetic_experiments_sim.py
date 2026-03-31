@@ -30,7 +30,7 @@ NUM_CLUSTERS = 3                     # Control Node 數量
 COMPUTE_NODES_PER_CLUSTER = 5        # 每個 Cluster 的 Compute Node 數量
 
 # 設定你這次要跑的 RPS 區間 (例如之前跑過 1~20，這次可以放 21~30)
-RPS_LIST = [i for i in range(1, 51)] 
+RPS_LIST = [i for i in range(1, 4)] + [i for i in range(35, 51)]
 ZIPF_S_PARAMETER = 1.5               # Zipf 分佈傾斜度
 
 LORA_MAPPING_PATH = os.path.join(PROJECT_ROOT, "information", "lora_mapping.json")
@@ -163,7 +163,7 @@ def main():
     results_data = []
 
     # 使用 ProcessPoolExecutor 進行多進程加速 (24核狂飆)
-    with concurrent.futures.ProcessPoolExecutor(max_workers=24) as executor:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=5) as executor:
         # submit 所有任務並等待完成
         futures = [executor.submit(run_single_task, task_args) for task_args in tasks]
         

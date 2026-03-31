@@ -44,7 +44,7 @@ def parse_logs(log_file):
                 cost_network = offload_count * COST_NET_TRAFFIC
 
                 drop_count = totals.get("total_drops", 0) 
-                cost_penalty = drop_count * COST_DROP_PENALTY
+                cost_penalty = drop_count * COST_DROP_PENALTY2
 
                 total_cost = (
                     cost_storage
@@ -263,9 +263,9 @@ if __name__ == "__main__":
         "experiment_single_cluster_2nodes3_logs/efo_global_metrics.log",
         "experiment_single_cluster_2nodes4_logs/efo_global_metrics.log",
         "experiment_single_cluster_2nodes5_logs/efo_global_metrics.log",
-        "experiment_single_cluster_2nodes6_logs/efo_global_metrics.log"
+        # "experiment_single_cluster_2nodes6_logs/efo_global_metrics.log"
     ]
-    folder_name = "./"
+    folder_name = "./results/long/"
 
     log_files = [folder_name + f for f in log_files]
 
@@ -274,19 +274,19 @@ if __name__ == "__main__":
         "Experiment 1 (SP1+SP2)",
         "Experiment 2 (SP1+SP2 w/o semantic)",
         "Experiment 3 (SP1+Random)",
-        "Experiment 4 (LRU+Random)",
-        "Experiment 5 (Dlora)",
-        "Experiment 6 (Slora)"
+        # "Experiment 4 (LRU+Random)",
+        "Experiment 4 (Dlora)",
+        "Experiment 5 (Slora)"
     ]
 
     plot_multiple_total_costs_with_simulation_bg(
         log_files=log_files,
         labels=labels,
-        output_path="cost_per_request",  # 更改輸出檔名以避免覆寫原檔
+        output_path="cost_per_request_long",  # 更改輸出檔名以避免覆寫原檔
         csv_path="./information/simulation_data.csv",
-        target_clusters=["cluster_1"],
+        target_clusters=["cluster_1", "cluster_2", "cluster_3"],
         speed_rate=1.0,
-        start_offset_days=4,
-        duration_hours=8,
+        start_offset_days=2,
+        duration_hours=240,
         bin_minutes=5,
     )
