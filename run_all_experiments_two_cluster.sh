@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export START_TIME=$((86400*2))
+
 SSH_SOCKET="/tmp/multi_lora_tunnel.sock"
 REMOTE_USER="glenchen"
 REMOTE_HOST="140.112.20.183"
@@ -26,7 +28,7 @@ echo "✅ Tunnel established!"
 trap 'echo "🔌 Closing SSH Tunnel..."; ssh -S "$SSH_SOCKET" -O exit ${REMOTE_USER}@${REMOTE_HOST} 2>/dev/null || true' EXIT INT TERM
 
 # 2. 依序執行 6 個實驗
-for i in {1..6}; do
+for i in 1 2 3 5 6; do
   script_file="start_deviceA_${i}.sh"
   
   echo ""

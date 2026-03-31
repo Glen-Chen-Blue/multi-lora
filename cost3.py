@@ -91,7 +91,7 @@ def plot_averaged_costs(
     # ==========================================
     # 3. 圖表樣式設定
     # ==========================================
-    ax1.set_title("Average Cost per Request Comparison (Day 1 to Day 4)", fontsize=16, fontweight='bold')
+    ax1.set_title("Average Cost per Request Comparison", fontsize=16, fontweight='bold')
     ax1.set_xlabel("Simulation Time (seconds)", fontsize=12)
     ax1.set_ylabel("Total Cost / Total Request (Credit/req)", fontsize=12)
 

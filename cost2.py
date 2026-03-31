@@ -258,12 +258,18 @@ def plot_multiple_total_costs_with_simulation_bg(
 
 if __name__ == "__main__":
     log_files = [
-        "experiment_single_cluster_2nodes1_logs/efo_global_metrics.log",
-        "experiment_single_cluster_2nodes2_logs/efo_global_metrics.log",
-        "experiment_single_cluster_2nodes3_logs/efo_global_metrics.log",
-        "experiment_single_cluster_2nodes4_logs/efo_global_metrics.log",
-        "experiment_single_cluster_2nodes5_logs/efo_global_metrics.log",
+        # "experiment_single_cluster_2nodes1_logs/efo_global_metrics.log",
+        # "experiment_single_cluster_2nodes2_logs/efo_global_metrics.log",
+        # "experiment_single_cluster_2nodes3_logs/efo_global_metrics.log",
+        # "experiment_single_cluster_2nodes4_logs/efo_global_metrics.log",
+        # "experiment_single_cluster_2nodes5_logs/efo_global_metrics.log",
         # "experiment_single_cluster_2nodes6_logs/efo_global_metrics.log"
+        "experiment_deviceA_logs_1/efo_global_metrics.log",
+        "experiment_deviceA_logs_2/efo_global_metrics.log",
+        "experiment_deviceA_logs_3/efo_global_metrics.log",
+        "experiment_deviceA_logs_4/efo_global_metrics.log",
+        "experiment_deviceA_logs_5/efo_global_metrics.log",
+        "experiment_deviceA_logs_6/efo_global_metrics.log"
     ]
     folder_name = "./results/long/"
 
@@ -282,11 +288,11 @@ if __name__ == "__main__":
     plot_multiple_total_costs_with_simulation_bg(
         log_files=log_files,
         labels=labels,
-        output_path="cost_per_request_long",  # 更改輸出檔名以避免覆寫原檔
+        output_path="cost_per_request_two_cluster",  # 更改輸出檔名以避免覆寫原檔
         csv_path="./information/simulation_data.csv",
-        target_clusters=["cluster_1", "cluster_2", "cluster_3"],
+        target_clusters=["cluster_1"],
         speed_rate=1.0,
-        start_offset_days=2,
-        duration_hours=240,
+        start_offset_days=4,
+        duration_hours=8,
         bin_minutes=5,
     )
