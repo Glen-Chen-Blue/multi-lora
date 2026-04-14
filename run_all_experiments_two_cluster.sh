@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export START_TIME=$((86400*2))
+export START_TIME=$((86400*4))
 
 SSH_SOCKET="/tmp/multi_lora_tunnel.sock"
 REMOTE_USER="glenchen"

@@ -267,11 +267,11 @@ if __name__ == "__main__":
         "experiment_deviceA_logs_1/efo_global_metrics.log",
         "experiment_deviceA_logs_2/efo_global_metrics.log",
         "experiment_deviceA_logs_3/efo_global_metrics.log",
-        "experiment_deviceA_logs_4/efo_global_metrics.log",
+        # "experiment_deviceA_logs_4/efo_global_metrics.log",
         "experiment_deviceA_logs_5/efo_global_metrics.log",
         "experiment_deviceA_logs_6/efo_global_metrics.log"
     ]
-    folder_name = "./results/long/"
+    folder_name = "./"
 
     log_files = [folder_name + f for f in log_files]
 
@@ -290,7 +290,7 @@ if __name__ == "__main__":
         labels=labels,
         output_path="cost_per_request_two_cluster",  # 更改輸出檔名以避免覆寫原檔
         csv_path="./information/simulation_data.csv",
-        target_clusters=["cluster_1"],
+        target_clusters=["cluster_1", "cluster_2"],
         speed_rate=1.0,
         start_offset_days=4,
         duration_hours=8,
