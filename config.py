@@ -63,6 +63,8 @@ COST_NET_TRAFFIC = 0.001     # kappa_net: 跨 Cluster 處理 1 個 Request 的�
 COST_DROP_PENALTY = 0.01*10      # SP1 視角的 Drop 懲罰 (對應 Psi_drop)
 COST_DROP_PENALTY2 = 0.01*0.3      # SP1 視角的 Drop 懲罰 (對應 Psi_drop)
 COST_COMPUTE_PER_SEC = 0.001 # [新增] kappa_compute: 每秒的算力成本 (用於預測模型的成本估計)
+PENALTY_DROP_BASE = 0.06
+
 
 # 物理容量與限制
 LORA_SIZE_GB = 0.1           # S_lora: 單一 LoRA Adapter 的檔案大小估算 (GB)
@@ -88,3 +90,16 @@ NETWORK_SIM_PARAMS = {
 
 SP1_INTERVAL_SECONDS = 3600          # SP1 全局優化的執行間隔 (秒)
 SP2_INTERVAL_SECONDS = 3             # SP2 局部優化的執行間隔 (秒)
+
+
+
+
+
+
+
+
+
+MERGED_CAPACITY = 25              # 讓 Ours 在高負載時可以獨佔 VRAM 衝高吞吐
+UNMERGED_CAPACITY = 10            # 限制 S-LoRA 與 dLoRA 的並行能力
+DELTA_LOAD_S = 0.4                # 增加冷啟動懲罰，凸顯語意替換的優勢
+LORA_CACHE_CAPACITY = 8           # 縮小快取，打破 dLoRA 的 LRU 優勢

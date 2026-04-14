@@ -177,7 +177,7 @@ class Simulation:
 
     def run(self):
         """Main simulation loop."""
-        duration_ms = self.config.duration_hours * 3600 * 1000
+        duration_ms = int(self.config.duration_hours * 3600 * 1000)
         sp1_interval_ms = SP1_INTERVAL_SECONDS * 1000
 
         # [修復] Wire callbacks (Chain them so Control Node also gets notified)
