@@ -302,8 +302,6 @@ class Simulation:
             for cn in self.control_nodes.values():
                 pass  # drops are handled inline in scheduler_tick
 
-            if t % 10000 == 0:
-                wall_time.sleep(0.01)
             if t % 100000 == 0:
                 gc.collect()
 

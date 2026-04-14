@@ -37,8 +37,7 @@ class SimComputeNode:
 
     def _on_engine_token(self, req: SimRequest, token_count: int = 0):
         """Called by engine when a token is generated."""
-        if req.tokens_generated == 1 and req.first_token_time_ms is None:
-            req.first_token_time_ms = self._clock.now()
+        if req.tokens_generated == 1:
             if self.on_request_first_token:
                 self.on_request_first_token(req)
 

@@ -131,6 +131,7 @@ class SimControlNodeBase:
     def get_cluster_metrics(self) -> dict:
         """Return metrics matching original /cluster_metrics format."""
         total_inf = sum(n.cumulative_inference_time_ms / 1000.0 for n in self.compute_nodes)
+        self.calculate_p95_and_clear()
         return {
             "local_completed": self.local_completed,
             "offload_in_completed": self.offload_in_completed,
@@ -146,7 +147,6 @@ class SimControlNodeBase:
             self.ttft_records.sort()
             idx = min(int(0.95 * len(self.ttft_records)), len(self.ttft_records) - 1)
             self.latest_p95 = self.ttft_records[idx]
-            self.ttft_records.clear()
         return self.latest_p95
 
     def _get_virtual_node_states(self) -> list:
@@ -243,6 +243,20 @@ class SimControlNodeSP2(SimControlNodeBase):
         self._autoscale_handle = clock.schedule_periodic(1000, self._autoscale_tick)
         self._last_scale_time_ms = 0
         self._surplus_duration_ms = 0
+
+    def _on_first_token(self, req: SimRequest):
+        super()._on_first_token(req)
+        # 真實的 Z(t) 更新：基於實際產生 first token 的延遲是否超標
+        if not req.is_delegated and req.ttft_ms is not None:
+            ttft_s = req.ttft_ms / 1000.0
+            violation = 1.0 if ttft_s > T_MAX else 0.0
+            self.Z_debt = max(0.0, self.Z_debt + violation - EPSILON)
+
+    def _handle_drop(self, req: SimRequest, reason: str):
+        super()._handle_drop(req, reason)
+        if not req.is_delegated:
+            # Drop 視為最嚴重的 SLO 違規，直接增加 Z_debt
+            self.Z_debt = max(0.0, self.Z_debt + 1.0 - EPSILON)
 
     def admit_request(self, req: SimRequest) -> bool:
         if self.system_paused:
@@ -389,11 +403,24 @@ class SimControlNodeSP2(SimControlNodeBase):
                         is_in_vram = (v.mode == "unmerge" and aid in v.active_loras)
                         is_in_cpu = (v.mode == "unmerge" and aid in v.loaded_adapters)
                         is_empty = (v.mode == "unmerge" and len(v.active_loras) == 0)
-                        score = (1 if is_merge else 0, 1 if is_in_vram else 0,
-                                 1 if is_in_cpu else 0, 1 if is_empty else 0, free)
-                        if best_plan is None or score > best_plan[2]:
-                            best_plan = (v, aid, score)
-
+                        V_param = 100.0  # Lyapunov 控制參數 (可視實驗需求調整大小)
+                        
+                        # 1. 評估資源調度成本 (c_dispatch)
+                        is_in_vram = (v.mode == "merge" and v.merged_adapter == aid) or (v.mode == "unmerge" and aid in v.active_loras)
+                        is_in_cpu = (v.mode == "unmerge" and aid in v.loaded_adapters)
+                        # 命中 VRAM 成本最低(0)，命中 CPU 其次(0.5)，Cold Start 最高(1.0)
+                        c_dispatch = 0.0 if is_in_vram else (0.5 if is_in_cpu else 1.0)
+                        
+                        # 2. 評估潛在的延遲懲罰 (Z * penalty)
+                        pred_ttft = self._predict_ttft(v_nodes, aid, v.running_batch)
+                        prob_violation = 1.0 if pred_ttft > T_MAX else 0.0
+                        
+                        # 3. 計算綜合成本 \Phi = V * 成本 + Z * (違規機率 - 容忍度)
+                        phi_local = V_param * c_dispatch + self.Z_debt * (prob_violation - EPSILON)
+                        
+                        # 尋找 \Phi 最小 (綜合成本最低) 的決策
+                        if best_plan is None or phi_local < best_plan[2]:
+                            best_plan = (v, aid, phi_local)
                 if best_plan:
                     v, aid, _ = best_plan
                     req.adapter_id = aid
