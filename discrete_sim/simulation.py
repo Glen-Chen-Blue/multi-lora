@@ -1,4 +1,4 @@
-import os, sys, json, uuid, math, time as wall_time
+import os, sys, json, uuid, math, gc, time as wall_time
 from datetime import timedelta
 from typing import Dict, List, Optional, Any
 from collections import defaultdict
@@ -233,27 +233,25 @@ class Simulation:
             
             # [新增] 2. 處理在途的跨叢集 Offload 請求 (模擬網路延遲抵達)
             if self._in_transit:
-                delivered = []
+                still_in_transit = []
                 for item in self._in_transit:
                     delivery_time, req, target_cluster = item
+                    
                     if t >= delivery_time:
+                        # [時間已到] 請求已抵達，交給目標 Control Node 處理
                         cn = self.control_nodes.get(target_cluster)
                         if cn:
-                            admitted = cn.admit_request(req)
-                            if not admitted or req.is_dropped:
+                            admit = cn.admit_request(req)
+                            if not admit or req.is_dropped:
                                 self.stats["dropped"] += 1
                                 self.dropped_requests.append(req)
-                                # [修改] 關閉單筆丟棄的輸出
-                                # ts_str = _format_sim_time(t)
-                                # reason = req.drop_reason or "Unknown"
-                                # idx = getattr(req, '_sim_idx', '?')
-                                # req_str = f"{idx:>{self.PAD_LEN}}/{self.TOTAL_REQUESTS}"
-                                # print(f"[{ts_str}] [DROP] Req:{req_str} | Target:{req.adapter_id:^8} | Reason: {reason} (Offload Failed)")
-                        delivered.append(item)
+                    else:
+                        # [時間未到] 請求還沒抵達，保留在在途陣列中
+                        still_in_transit.append(item)
                 
-                # 移除已送達的請求
-                if delivered:
-                    self._in_transit = [x for x in self._in_transit if x not in delivered]
+                # 直接用保留下來的項目覆寫原本的陣列
+                # 這是一個完美的 O(N) 單次遍歷，完全避免了 unhashable 問題，且效能比原本用 not in 過濾快非常多！
+                self._in_transit = still_in_transit
 
             # 3. Inject requests from trace
             events = self.trace.get_requests_at(t)
@@ -280,18 +278,9 @@ class Simulation:
                 req_interval = int(arrival_sec // SP1_INTERVAL_SECONDS)
                 if req_interval > current_interval:
                     # 這是系統重要訊息，保留不砍
-                    print() # 換行避免跟進度條衝到
                     ts_str = _format_sim_time(t)
-                    print(f"[{ts_str}] [SYS ] Reached Interval {req_interval}. Triggering /time_edge...")
                     self.efo.trigger_time_edge()
                     current_interval = req_interval
-                    print(f"[{ts_str}] [SYS ] Resuming simulation for Interval {req_interval}.")
-
-                # [修改] 關閉單筆送出的輸出
-                # ts_str = _format_sim_time(t)
-                # req_str = f"{self._request_idx:>{self.PAD_LEN}}/{self.TOTAL_REQUESTS}"
-                # adapter_str = f"{adapter_id:^8}"
-                # print(f"[{ts_str}] [SEND] Req:{req_str} | Target:{adapter_str} @ {cluster}")
 
                 # Admit to control node
                 cn = self.control_nodes[cluster]
@@ -313,12 +302,10 @@ class Simulation:
             for cn in self.control_nodes.values():
                 pass  # drops are handled inline in scheduler_tick
 
-            # 6. Progress (every 10 sim-seconds)
             if t % 10000 == 0:
-                elapsed_wall = wall_time.time() - wall_start
-                pct = t / duration_ms * 100
-                sim_s = t / 1000
-                print(f"\r  [Progress] {sim_s:.0f}s / {duration_ms/1000:.0f}s ({pct:.1f}%) | Wall: {elapsed_wall:.1f}s", end="", flush=True)
+                wall_time.sleep(0.01)
+            if t % 100000 == 0:
+                gc.collect()
 
         # Wait for remaining in-flight requests (give extra time)
         extra_ms = 30000  # 30s extra

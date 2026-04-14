@@ -6,8 +6,10 @@ Uses Poisson distribution for arrival times and Zipf distribution for LoRA selec
 """
 
 import os
+import gc
 import sys
 import json
+import time
 import pandas as pd
 import concurrent.futures  # 引入平行運算模組
 import contextlib          # 引入上下文模組，用來屏蔽輸出
@@ -25,12 +27,12 @@ from cost2 import parse_logs
 # ==========================================
 # 實驗參數設定區 (可自由修改)
 # ==========================================
-SIMULATION_DAYS = 3                  # 模擬天數 (跑3天)
+SIMULATION_DAYS = 2                  # 模擬天數 (跑3天)
 NUM_CLUSTERS = 3                     # Control Node 數量
 COMPUTE_NODES_PER_CLUSTER = 5        # 每個 Cluster 的 Compute Node 數量
 
 # 設定你這次要跑的 RPS 區間 (例如之前跑過 1~20，這次可以放 21~30)
-RPS_LIST = [i for i in range(1, 4)] + [i for i in range(35, 51)]
+RPS_LIST = [3] + [i for i in range(35, 51)]
 ZIPF_S_PARAMETER = 1.5               # Zipf 分佈傾斜度
 
 LORA_MAPPING_PATH = os.path.join(PROJECT_ROOT, "information", "lora_mapping.json")
@@ -135,6 +137,12 @@ def run_single_task(args):
     # 【畫面清爽第二步】算完才印出結果
     print(f"[DONE ] RPS: {rps:2d} | {exp_name} -> Avg Cost: {avg_cost:.4f}")
     
+    # 【新增】主動釋放記憶體，避免 Memory Leak
+    del sim, config, synthetic_gen, df_synthetic 
+    gc.collect()
+
+    time.sleep(5)
+
     return {
         "Global_RPS": rps,
         "Strategy": exp_name,
@@ -163,17 +171,12 @@ def main():
     results_data = []
 
     # 使用 ProcessPoolExecutor 進行多進程加速 (24核狂飆)
-    with concurrent.futures.ProcessPoolExecutor(max_workers=5) as executor:
-        # submit 所有任務並等待完成
-        futures = [executor.submit(run_single_task, task_args) for task_args in tasks]
-        
-        # as_completed 會在任何一個任務完成時馬上回傳結果
-        for future in concurrent.futures.as_completed(futures):
-            try:
-                result = future.result()
-                results_data.append(result)
-            except Exception as exc:
-                print(f"[Error] 某個實驗執行時發生錯誤: {exc}")
+    for task_args in tasks:
+        try:
+            result = run_single_task(task_args)
+            results_data.append(result)
+        except Exception as exc:
+            print(f"[Error] 某個實驗執行時發生錯誤: {exc}")
 
     # 5. 【核心修改：自動合併舊數據，保護之前辛苦跑出來的成果】
     df_new = pd.DataFrame(results_data)

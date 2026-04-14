@@ -106,7 +106,7 @@ def plot_simulation_requests(
         plt.plot(bin_centers_hours, rates, label=f"{cluster}", linewidth=2)
 
     # 7. 圖表修飾
-    plt.title(f"Request Rate over Time (Start: Day {start_offset_days}, Speed: {speed_rate}x)", fontsize=14)
+    plt.title(f"Request Rate over Time", fontsize=14)
     plt.xlabel("Simulation Time (Hours)", fontsize=12)
     plt.ylabel("Request Rate (req/s)", fontsize=12)
     plt.grid(True, linestyle='--', alpha=0.7)
@@ -115,11 +115,11 @@ def plot_simulation_requests(
     plt.ylim(0, 10)
     
     # 顯示 Bin 資訊作為註解
-    info_text = (f"Bin Size: {bin_minutes} min (Plot Time)\n"
-                 f"Source Data Window: {bin_minutes * speed_rate:.1f} min")
-    plt.text(0.02, 0.95, info_text, transform=plt.gca().transAxes, 
-             fontsize=10, verticalalignment='top', 
-             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    # info_text = (f"Bin Size: {bin_minutes} min (Plot Time)\n"
+    #              f"Source Data Window: {bin_minutes * speed_rate:.1f} min")
+    # plt.text(0.02, 0.95, info_text, transform=plt.gca().transAxes, 
+    #          fontsize=10, verticalalignment='top', 
+    #          bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
 
     plt.tight_layout()
     
@@ -139,7 +139,7 @@ if __name__ == "__main__":
         target_clusters=["cluster_1", "cluster_2", "cluster_3"], # 可以加入更多 Cluster
         speed_rate=1.0,       # 1倍速 (24小時資料壓縮成24小時)
         start_offset_days=0,  # 從第 0 天開始 (86400*0)
-        duration_hours=96,    # 畫 96 小時
+        duration_hours=48,    # 畫 96 小時
         bin_minutes=5,        # 每 10 分鐘一點
-        output_filename = "request_rate_plot_speed1_.png"
+        output_filename = "request_rate_plot_example_.png"
     )
