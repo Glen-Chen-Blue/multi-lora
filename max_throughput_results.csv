@@ -2,7 +2,7 @@ Scale,Algorithm,Max_Throughput_RPS
 1c_2n,Ours (SP1+SP2),2.64
 1c_2n,Ours w/o SP2,1.54
 1c_2n,Ours w/o Sem,2.38
-1c_2n,S-LoRA,1.51
+1c_2n,S-LoRA,1.52
 1c_2n,dLoRA,1.32
 2c_3n,Ours (SP1+SP2),3.16
 2c_3n,Ours w/o SP2,2.2
