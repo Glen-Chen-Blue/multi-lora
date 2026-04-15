@@ -1,16 +1,16 @@
 Scale,Algorithm,Max_Throughput_RPS
-1c_2n,Ours (SP1+SP2),2.64
-1c_2n,Ours w/o SP2,1.54
-1c_2n,Ours w/o Sem,2.38
-1c_2n,S-LoRA,1.52
-1c_2n,dLoRA,1.32
-2c_3n,Ours (SP1+SP2),3.16
-2c_3n,Ours w/o SP2,2.2
-2c_3n,Ours w/o Sem,2.29
-2c_3n,S-LoRA,2.15
-2c_3n,dLoRA,1.88
-10c_50n,Ours (SP1+SP2),40.11
-10c_50n,Ours w/o SP2,9.73
-10c_50n,Ours w/o Sem,39.56
-10c_50n,S-LoRA,34.09
-10c_50n,dLoRA,31.79
+1c_2n,Ours (SP1+SP2),2.45
+1c_2n,Ours w/o SP2,1.43
+1c_2n,Ours w/o Sem,2.04
+1c_2n,S-LoRA,1.32
+1c_2n,dLoRA,1.53
+2c_3n,Ours (SP1+SP2),3.04
+2c_3n,Ours w/o SP2,2.06
+2c_3n,Ours w/o Sem,2.49
+2c_3n,S-LoRA,1.88
+2c_3n,dLoRA,2.15
+10c_50n,Ours (SP1+SP2),43.52
+10c_50n,Ours w/o SP2,33.12
+10c_50n,Ours w/o Sem,39.02
+10c_50n,S-LoRA,31.79
+10c_50n,dLoRA,34.13

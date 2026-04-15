@@ -47,7 +47,7 @@ def draw_throughput_barchart(csv_path="max_throughput_results.csv", output_path=
     # 5. 美化與標籤設定
     ax.set_ylabel('Max Steady-state Throughput (Req/s)', fontsize=14, fontweight='bold')
     ax.set_xlabel('Scheduling & Deployment Methods', fontsize=14, fontweight='bold')
-    ax.set_title('Maximum Throughput Comparison Across System Scales', fontsize=16, fontweight='bold', pad=15)
+    # ax.set_title('Maximum Throughput Comparison Across System Scales', fontsize=16, fontweight='bold', pad=15)
     
     # 設定 X 軸的刻度與文字
     ax.set_xticks(x)

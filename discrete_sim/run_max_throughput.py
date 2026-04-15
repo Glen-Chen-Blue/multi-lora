@@ -23,8 +23,8 @@ EXP_LABELS = {
     1: "Ours (SP1+SP2)",
     2: "Ours w/o Sem",
     3: "Ours w/o SP2",
-    4: "S-LoRA",   # Exp 4 是 LRU + Random
-    5: "dLoRA"     # Exp 5 是 dLoRA + Greedy
+    4: "dLoRA",  
+    5: "S-LoRA"    
 }
 
 def get_mapping_path(num_clusters):
@@ -63,6 +63,13 @@ def run_single_pressure_test(exp_id: int, scale_name: str, total_rps: float):
         sim.network = SimNetwork(seed=42, params=generate_network_params(num_clusters))
         if hasattr(sim, 'efo'):
             sim.efo.network = sim.network
+
+    # ==========================================
+    # [關鍵修復] 將合成預測資料餵給 EFO
+    # ==========================================
+    if hasattr(sim, 'efo'):
+        sim.efo.simulation_df = sim.trace.to_dataframe()
+    # ==========================================
 
     with open(os.devnull, 'w') as fnull:
         with contextlib.redirect_stdout(fnull):

@@ -519,7 +519,7 @@ class SimControlNodeRandom(SimControlNodeBase):
         if not v_nodes:
             return
 
-        # [修復] 強制鎖定在 Unmerged 模式 (模擬缺乏 SP2)
+        # [修復 1] 強制鎖定在 Unmerged 模式 (模擬缺乏 SP2 動態記憶體管理的慘況)
         for v in v_nodes:
             if v.mode == "merge":
                 v.node.unmerge_all()
@@ -529,30 +529,19 @@ class SimControlNodeRandom(SimControlNodeBase):
         for req in list(self.pending_queue):
             aid = req.adapter_id
             
+            # [修復 2] 為了極限吞吐量測試，拔除嚴格的 Disk Cache Miss Drop！
+            # 允許它像 S-LoRA 一樣把請求塞進去，讓 Compute Node 去承受 SIM_LOAD_DELAY (0.4s)
             if aid not in self.local_available_loras:
-                offloaded = False
-                if not req.is_delegated and self.offload_callback:
-                    target_cluster = self._select_best_offload_target(aid)
-                    if target_cluster and self.offload_callback(req, tgt=target_cluster):
-                        self.offload_out += 1
-                        offloaded = True
-                if not offloaded:
-                    self._handle_drop(req, "Disk Cache Miss (Not provisioned by SP1)")
-                self.pending_queue.remove(req)
-                continue
+                self.local_available_loras.add(aid) # 假裝透過網路下載了
 
             valid = [v for v in v_nodes if v.get_free_slots(aid) > 0]
             valid_ttft = []
             for v in valid:
-                wait_ms = self._clock.now() - req.arrival_time_ms
-                exec_time = self._predict_ttft_simple(v, aid)
-                total = wait_ms / 1000.0 + exec_time
-                # [修復] 為了極限吞吐量測試，放寬 T_MAX 限制讓 Queue 可以堆積
-                if total <= T_MAX * 10.0:
-                    valid_ttft.append(v)
+                # [修復 3] 拔除 T_MAX 限制，允許 Queue 堆積，這樣才能測量硬體的純吞吐量極限
+                valid_ttft.append(v)
 
             if valid_ttft:
-                # [修復] 優先派給已載入的節點，並加入負載平衡
+                # 加入基本的負載平衡，否則隨機派發會塞爆單一節點
                 cache_hits = [v for v in valid_ttft if aid in v.active_loras or aid in v.loaded_adapters]
                 if cache_hits:
                     target = min(cache_hits, key=lambda v: v.running_batch)
@@ -569,7 +558,7 @@ class SimControlNodeRandom(SimControlNodeBase):
                         self.offload_out += 1
                         offloaded = True
                 if not offloaded:
-                    self._handle_drop(req, f"System Full (No Targets)")
+                    self._handle_drop(req, f"System Full")
             self.pending_queue.remove(req)
 
     def _predict_ttft_simple(self, node: VirtualNodeState, target_lora: str) -> float:

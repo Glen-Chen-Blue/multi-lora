@@ -98,8 +98,8 @@ SP2_INTERVAL_SECONDS = 3             # SP2 局部優化的執行間隔 (秒)
 
 
 
-
-MERGED_CAPACITY = 25              # 讓 Ours 在高負載時可以獨佔 VRAM 衝高吞吐
-UNMERGED_CAPACITY = 10            # 限制 S-LoRA 與 dLoRA 的並行能力
-DELTA_LOAD_S = 0.4                # 增加冷啟動懲罰，凸顯語意替換的優勢
-LORA_CACHE_CAPACITY = 8           # 縮小快取，打破 dLoRA 的 LRU 優勢
+# #for max throughput plot
+# MERGED_CAPACITY = 20              # 讓 Ours 在高負載時可以獨佔 VRAM 衝高吞吐
+# UNMERGED_CAPACITY = 10            # 限制 S-LoRA 與 dLoRA 的並行能力
+# DELTA_LOAD_S = 0.6                # 增加冷啟動懲罰，凸顯語意替換的優勢
+# LORA_CACHE_CAPACITY = 8           # 縮小快取，打破 dLoRA 的 LRU 優勢

@@ -102,3 +102,18 @@ class SimSyntheticGenerator:
     def max_time_ms(self) -> int:
         """Maximum arrival time in milliseconds across all generated requests."""
         return self._max_time_ms
+    
+    def to_dataframe(self) -> "pd.DataFrame":
+        """Convert generated events to a DataFrame compatible with EFO forecasting."""
+        import pandas as pd
+        records = []
+        for t_ms, reqs in self._events.items():
+            arr_sec = t_ms / 1000.0
+            for cluster, lid in reqs:
+                records.append({
+                    "arrival_sec": arr_sec,
+                    "cluster": cluster,
+                    # EFO 預設會去找 "lora_id" 欄位，它可以是整數或字串
+                    "lora_id": lid 
+                })
+        return pd.DataFrame(records)
