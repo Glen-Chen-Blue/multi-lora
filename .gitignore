@@ -7,6 +7,6 @@ information/simulation_data.csv
 discrete_sim/__pycache__/
 discrete_sim/results/
 *.log
-
-!results/
-!results/**
+results/
+# !results/
+# !results/**
