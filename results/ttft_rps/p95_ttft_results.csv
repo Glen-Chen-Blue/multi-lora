@@ -1,0 +1,76 @@
+RPS,Strategy,Label,P95_TTFT
+1,dlora,dLoRA,0.5578
+2,dlora,dLoRA,0.561
+3,dlora,dLoRA,0.559
+4,dlora,dLoRA,0.564
+5,dlora,dLoRA,0.5684499999999998
+6,dlora,dLoRA,0.569
+7,dlora,dLoRA,0.5663499999999999
+8,dlora,dLoRA,0.56875
+9,dlora,dLoRA,0.5755499999999997
+10,dlora,dLoRA,0.583
+11,dlora,dLoRA,0.635
+12,dlora,dLoRA,1.5957999999999992
+13,dlora,dLoRA,3.74525
+14,dlora,dLoRA,20.408
+15,dlora,dLoRA,36.6955
+16,dlora,dLoRA,59.91715
+17,dlora,dLoRA,68.79039999999999
+18,dlora,dLoRA,86.5839
+19,dlora,dLoRA,99.29225
+20,dlora,dLoRA,113.80560000000001
+21,dlora,dLoRA,124.11139999999999
+22,dlora,dLoRA,134.81949999999998
+23,dlora,dLoRA,144.49899999999997
+24,dlora,dLoRA,155.5614
+25,dlora,dLoRA,164.9819
+1,lru,LRU / S-LoRA,0.5554
+2,lru,LRU / S-LoRA,0.571
+3,lru,LRU / S-LoRA,0.578
+4,lru,LRU / S-LoRA,0.621
+5,lru,LRU / S-LoRA,0.623
+6,lru,LRU / S-LoRA,0.6446999999999998
+7,lru,LRU / S-LoRA,0.647
+8,lru,LRU / S-LoRA,0.657
+9,lru,LRU / S-LoRA,0.683
+10,lru,LRU / S-LoRA,0.6964499999999998
+11,lru,LRU / S-LoRA,0.701
+12,lru,LRU / S-LoRA,0.719
+13,lru,LRU / S-LoRA,0.72425
+14,lru,LRU / S-LoRA,0.749
+15,lru,LRU / S-LoRA,0.764
+16,lru,LRU / S-LoRA,0.9387499999999973
+17,lru,LRU / S-LoRA,3.1020000000000016
+18,lru,LRU / S-LoRA,4.405999999999994
+19,lru,LRU / S-LoRA,10.528999999999996
+20,lru,LRU / S-LoRA,36.510299999999965
+21,lru,LRU / S-LoRA,74.651
+22,lru,LRU / S-LoRA,101.71000000000001
+23,lru,LRU / S-LoRA,127.12144999999998
+24,lru,LRU / S-LoRA,146.25879999999995
+25,lru,LRU / S-LoRA,161.3652
+1,ours,Ours (Cross-timescale),0.5731999999999998
+2,ours,Ours (Cross-timescale),3.907199999999996
+3,ours,Ours (Cross-timescale),46.2297
+4,ours,Ours (Cross-timescale),115.1655
+5,ours,Ours (Cross-timescale),154.38400000000001
+6,ours,Ours (Cross-timescale),182.4356
+7,ours,Ours (Cross-timescale),213.14269999999993
+8,ours,Ours (Cross-timescale),233.66469999999998
+9,ours,Ours (Cross-timescale),250.282
+10,ours,Ours (Cross-timescale),261.05674999999997
+11,ours,Ours (Cross-timescale),268.4281
+12,ours,Ours (Cross-timescale),268.75919999999996
+13,ours,Ours (Cross-timescale),281.6334
+14,ours,Ours (Cross-timescale),284.9941
+15,ours,Ours (Cross-timescale),290.7224
+16,ours,Ours (Cross-timescale),296.97485
+17,ours,Ours (Cross-timescale),299.0566
+18,ours,Ours (Cross-timescale),302.6093
+19,ours,Ours (Cross-timescale),304.70375
+20,ours,Ours (Cross-timescale),307.5115
+21,ours,Ours (Cross-timescale),310.063
+22,ours,Ours (Cross-timescale),312.3883
+23,ours,Ours (Cross-timescale),314.52205
+24,ours,Ours (Cross-timescale),314.92400000000004
+25,ours,Ours (Cross-timescale),318.22465

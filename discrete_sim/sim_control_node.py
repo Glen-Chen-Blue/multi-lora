@@ -466,7 +466,7 @@ class SimControlNodeSP2(SimControlNodeBase):
                             dispatched_any = True
                             break
                         else:
-                            # [核心修復] 關閉 Drop 時，若缺乏資源就跳過此請求，讓後面的請求先執行
+                            # [核心修復] 關閉 Drop 時，若缺乏資源就跳過此請求，留在 pending_queue 中等待
                             continue
 
     def _autoscale_tick(self):
@@ -578,7 +578,7 @@ class SimControlNodeRandom(SimControlNodeBase):
                         self._handle_drop(req, f"System Full")
                         self.pending_queue.remove(req)
                     else:
-                        # [核心修復] 關閉 Drop 時跳過
+                        # [核心修復] 關閉 Drop 時跳過此請求，使其留在佇列中
                         continue
 
     def _predict_ttft_simple(self, node: VirtualNodeState, target_lora: str) -> float:
@@ -661,9 +661,17 @@ class SimControlNodeLRU(SimControlNodeBase):
                     if target_cluster and self.offload_callback(req, tgt=target_cluster):
                         self.offload_out += 1
                         offloaded = True
+                        # [核心修復] 僅在卸載成功時移除佇列
+                        self.pending_queue.remove(req)
                 
                 if not offloaded:
-                    self._handle_drop(req, f"System Full or SLO Violation (No Targets for T_MAX={T_MAX}s)")
+                    import config
+                    if getattr(config, 'ENABLE_DROP', True):
+                        self._handle_drop(req, f"System Full or SLO Violation (No Targets for T_MAX={T_MAX}s)")
+                        self.pending_queue.remove(req)
+                    else:
+                        # [核心修復] 關閉 Drop 時，保留在佇列中
+                        continue
             elif self.dispatch_strategy == "greedy":
                 cache_hits = [v for v in valid if aid in v.active_loras or aid in v.loaded_adapters]
                 if cache_hits:
@@ -676,8 +684,8 @@ class SimControlNodeLRU(SimControlNodeBase):
             if target:
                 target.commit_request(aid)
                 target.node.submit_request(req)
-
-            self.pending_queue.remove(req)
+                # [核心修復] 僅在成功指派時才移除請求 (移除原先置底的無條件 remove)
+                self.pending_queue.remove(req)
 
     def _predict_ttft_simple(self, node, target_lora):
         is_in = target_lora in node.active_loras or target_lora in node.loaded_adapters
@@ -790,18 +798,31 @@ class SimControlNodeDLoRA(SimControlNodeBase):
                     if target_cluster and self.offload_callback(req, tgt=target_cluster):
                         self.offload_out += 1
                         offloaded = True
+                        self.pending_queue.remove(req) # 成功卸載時移除
                         
                 if not offloaded:
-                    self._handle_drop(req, "System Full (No Targets)")
+                    import config
+                    if getattr(config, 'ENABLE_DROP', True):
+                        self._handle_drop(req, "System Full (No Targets)")
+                        self.pending_queue.remove(req)
+                    else:
+                        # [核心修復] 關閉 Drop 時，保留在佇列中
+                        continue
             else:
                 wait_s = (self._clock.now() - req.arrival_time_ms) / 1000.0
                 total = wait_s + download_penalty + min_time
-                if total > T_MAX * 5.0:
+                import config
+                
+                if total > T_MAX * 5.0 and getattr(config, 'ENABLE_DROP', True):
                     self._handle_drop(req, f"Extreme Congestion (Pred: {total:.2f}s)")
+                    self.pending_queue.remove(req)
+                elif total > T_MAX * 5.0 and not getattr(config, 'ENABLE_DROP', True):
+                    # 即使極度壅塞，因為 ENABLE_DROP 為 False 還是將其留在佇列中
+                    continue
                 else:
                     best_node.node.submit_request(req)
-
-            self.pending_queue.remove(req)
+                    # [核心修復] 成功提交給節點後才移除
+                    self.pending_queue.remove(req)
 
     def _calc_pending_time(self, node: VirtualNodeState, target_lora: str) -> float:
         is_in_cpu = target_lora in node.loaded_adapters

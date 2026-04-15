@@ -121,3 +121,22 @@ BATCH_SIZE_UNMERGED_BASE = 12 # Batch Size (U)
 LORA_CACHE_CAPACITY = 30   # LoRA Cache (30 adapters)
 DELTA_LOAD_S = 0.066       # \delta_load
 SLO_LIMIT_S = 6.0          # 6 秒 SLO 限制
+
+
+# =====================================================================
+# Added for P95 TTFT vs RPS Experiment (Do not delete)
+# =====================================================================
+# 1. 關閉所有 Drop 邏輯與逾時懲罰
+ENABLE_DROP = False
+REJECTION_PENALTY = 0.0          # 取消 Drop penalty
+MAX_QUEUE_SIZE = float('inf')    # 允許節點排隊佇列無上限
+MAX_WAITING_TIME = float('inf')  # 請求在佇列中等待不設置 timeout
+
+# 2. 設置極端的 Zipf 分佈以消除 LoRA Miss 干擾
+ZIPF_ALPHA = 10.0  # 設為 10.0，使幾乎所有請求都集中在少數幾個熱門 LoRA 模型上
+
+# 3. 確保預設架構符合實驗預期 (若指令碼有動態修改這裡作保底)
+NUM_CLUSTERS = 3
+COMPUTE_NODES_PER_CLUSTER = 5
+SIMULATION_HOURS = 0.1  # 360s
+# =====================================================================
