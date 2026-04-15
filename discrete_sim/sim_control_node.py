@@ -32,8 +32,9 @@ class VirtualNodeState:
         self.capacity_merged = MERGED_CAPACITY
         self.capacity_unmerged = UNMERGED_CAPACITY
         
-        # [核心修復] 引入 inner-tick 的動態駐列長度追蹤
-        self.simulated_queue_len = len(self.request_set)
+        # [⭐ 核心修復 1] 將等待駐列 (waiting_queue) 加入計算，讓排程器看見真實的塞車狀況，解決 Dogpiling 與預測失真問題
+        waiting_q_len = load.get("waiting_queue", 0)
+        self.simulated_queue_len = len(self.request_set) + waiting_q_len
 
     def get_free_slots(self, target_lora: str) -> int:
         if self.mode == "merge":
@@ -274,7 +275,7 @@ class SimControlNodeSP2(SimControlNodeBase):
         else:
             avg_per_req = SIM_DECODE_BASE_TIME * FIXED_OUTPUT_LEN
             
-        # [核心修復] 使用動態遞增的 simulated_queue_len，讓 Ours 達成完美負載平衡
+        # 由於修正了 simulated_queue_len，此處預測將反映真實的駐列狀態
         queue_len = node.simulated_queue_len
         return queue_len * avg_per_req + load_delay
 
@@ -294,7 +295,8 @@ class SimControlNodeSP2(SimControlNodeBase):
             if v.node.node_id in self.switching_nodes:
                 continue
             
-            can_merge = (unmerged_count > 1) or (total_pending > 10)
+            # [⭐ 核心修復 3] 移除 or (total_pending > 10) 的後門，強制保底至少 1 個節點處於 unmerge 狀態
+            can_merge = (unmerged_count > 1)
             
             if v.mode == "unmerge" and can_merge and len(v.request_set) >= MERGE_THRESHOLD:
                 counts = defaultdict(int)
@@ -320,11 +322,11 @@ class SimControlNodeSP2(SimControlNodeBase):
             for req in list(self.pending_queue):
                 target_aid = req.original_adapter_id
                 meta = self.lora_metadata.get(target_aid, {})
-                valid_aids = [target_aid] + [s for s in meta.get("substitutes", [])
-                                             if s in self.local_available_loras]
-                valid_aids = [aid for aid in valid_aids if aid in self.local_available_loras]
-                if not valid_aids:
-                    valid_aids = [target_aid]
+                
+                # [⭐ 修正]: 永遠保留 target_aid 作為選項！讓 Lyapunov 排程器自己決定 
+                # 「要排隊等現成的 substitute」還是「去閒置節點載入 target_aid」
+                subs = [s for s in meta.get("substitutes", []) if s in self.local_available_loras]
+                valid_aids = [target_aid] + subs
 
                 best_plan = None
                 for aid in valid_aids:
@@ -432,12 +434,8 @@ class SimControlNodeRandom(SimControlNodeBase):
             valid_ttft = v_nodes 
 
             if valid_ttft:
-                cache_hits = [v for v in valid_ttft if aid in v.active_loras or aid in v.loaded_adapters]
-                if cache_hits:
-                    # [稍微強一點] 不再盲目隨機，而是在快取命中的節點中找排隊最短的，這避免了 Dogpiling 導致的異常成績
-                    target = min(cache_hits, key=lambda v: v.simulated_queue_len)
-                else:
-                    target = min(valid_ttft, key=lambda v: v.simulated_queue_len)
+                # [⭐ 修正]: 取消 cache_hits 的強迫綁定，回歸最純粹的隨機分發，對齊 S-LoRA 的 Random 負載平衡能力
+                target = self._rng.choice(valid_ttft)
                 
                 target.commit_request(aid)
                 target.node.submit_request(req)
@@ -539,7 +537,6 @@ class SimControlNodeLRU(SimControlNodeBase):
             elif self.dispatch_strategy == "greedy":
                 cache_hits = [v for v in valid if aid in v.active_loras or aid in v.loaded_adapters]
                 if cache_hits:
-                    # [對齊] 讓 S-LoRA 的邏輯跟 Ours w/o SP2 完全一樣，會平衡排隊，所以不會異常小於1，但因為沒有合併與全域協調，表現會爛得很真實
                     target = min(cache_hits, key=lambda v: v.simulated_queue_len)
                 else:
                     target = min(valid, key=lambda v: v.simulated_queue_len)
@@ -673,7 +670,6 @@ class SimControlNodeDLoRA(SimControlNodeBase):
                     best_node.node.submit_request(req)
                     self.pending_queue.remove(req)
 
-    # [保留原貌] dLoRA 的排隊估算完全不更動
     def _calc_pending_time(self, node: VirtualNodeState, target_lora: str) -> float:
         is_in_cpu = target_lora in node.loaded_adapters
         load_delay = 0.0 if is_in_cpu else SIM_LOAD_DELAY

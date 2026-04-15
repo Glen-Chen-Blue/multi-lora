@@ -128,7 +128,7 @@ def main():
     print("=== Parallel P95 TTFT vs. RPS Analysis (No-Drop Saturation) ===")
     print("=" * 70)
 
-    rps_list = list(range(1, 31))
+    rps_list = list(range(1, 26, 2))
     strategies = ["ours", "ours_no_sem", "ours_no_sp2", "dlora", "lru"]
     
     tasks = [(rps, strat) for strat in strategies for rps in rps_list]
@@ -144,7 +144,7 @@ def main():
     df = df.sort_values(by=['Strategy', 'RPS'])
     
     os.makedirs('results/ttft_rps', exist_ok=True)
-    csv_path = 'results/ttft_rps/p95_ttft_results.csv'
+    csv_path = 'p95_ttft_results.csv'
     df.to_csv(csv_path, index=False)
     
     # 繪製學術級圖表

@@ -1,0 +1,126 @@
+RPS,Strategy,Label,P95_TTFT
+1,dlora,dLoRA,0.5554
+2,dlora,dLoRA,0.571
+3,dlora,dLoRA,0.578
+4,dlora,dLoRA,0.621
+5,dlora,dLoRA,0.623
+6,dlora,dLoRA,0.6446999999999998
+7,dlora,dLoRA,0.647
+8,dlora,dLoRA,0.657
+9,dlora,dLoRA,0.683
+10,dlora,dLoRA,0.6964499999999998
+11,dlora,dLoRA,0.701
+12,dlora,dLoRA,0.719
+13,dlora,dLoRA,0.72425
+14,dlora,dLoRA,0.749
+15,dlora,dLoRA,0.764
+16,dlora,dLoRA,0.9387499999999973
+17,dlora,dLoRA,3.1020000000000016
+18,dlora,dLoRA,4.405999999999994
+19,dlora,dLoRA,10.528999999999996
+20,dlora,dLoRA,36.510299999999965
+21,dlora,dLoRA,74.651
+22,dlora,dLoRA,101.71000000000001
+23,dlora,dLoRA,127.12144999999998
+24,dlora,dLoRA,146.25879999999995
+25,dlora,dLoRA,161.3652
+1,lru,S-LoRA,0.552
+2,lru,S-LoRA,0.556
+3,lru,S-LoRA,0.5594
+4,lru,S-LoRA,0.562
+5,lru,S-LoRA,0.5684499999999998
+6,lru,S-LoRA,0.568
+7,lru,S-LoRA,0.573
+8,lru,S-LoRA,0.577
+9,lru,S-LoRA,0.644
+10,lru,S-LoRA,1.5672499999999991
+11,lru,S-LoRA,2.955799999999999
+12,lru,S-LoRA,4.599999999999998
+13,lru,S-LoRA,6.2059999999999995
+14,lru,S-LoRA,10.330000000000002
+15,lru,S-LoRA,19.741900000000005
+16,lru,S-LoRA,31.64624999999997
+17,lru,S-LoRA,46.86899999999998
+18,lru,S-LoRA,60.68489999999999
+19,lru,S-LoRA,73.71725
+20,lru,S-LoRA,85.978
+21,lru,S-LoRA,98.94129999999998
+22,lru,S-LoRA,109.8778
+23,lru,S-LoRA,121.67500000000001
+24,lru,S-LoRA,131.8355
+25,lru,S-LoRA,142.13060000000002
+1,ours,Ours (SP1+SP2),0.546
+2,ours,Ours (SP1+SP2),0.55
+3,ours,Ours (SP1+SP2),0.563
+4,ours,Ours (SP1+SP2),13.8754
+5,ours,Ours (SP1+SP2),30.241400000000002
+6,ours,Ours (SP1+SP2),48.92579999999997
+7,ours,Ours (SP1+SP2),66.6244
+8,ours,Ours (SP1+SP2),81.4318
+9,ours,Ours (SP1+SP2),93.7436
+10,ours,Ours (SP1+SP2),103.09290000000001
+11,ours,Ours (SP1+SP2),113.87335
+12,ours,Ours (SP1+SP2),122.26629999999996
+13,ours,Ours (SP1+SP2),133.4338
+14,ours,Ours (SP1+SP2),142.82739999999995
+15,ours,Ours (SP1+SP2),151.58
+16,ours,Ours (SP1+SP2),159.97294999999997
+17,ours,Ours (SP1+SP2),165.61800000000002
+18,ours,Ours (SP1+SP2),171.744
+19,ours,Ours (SP1+SP2),177.6181
+20,ours,Ours (SP1+SP2),183.8705
+21,ours,Ours (SP1+SP2),189.7379
+22,ours,Ours (SP1+SP2),192.31584999999998
+23,ours,Ours (SP1+SP2),197.70039999999997
+24,ours,Ours (SP1+SP2),202.35889999999995
+25,ours,Ours (SP1+SP2),208.4625
+1,ours_no_sem,Ours w/o Sem,0.546
+2,ours_no_sem,Ours w/o Sem,0.55
+3,ours_no_sem,Ours w/o Sem,0.551
+4,ours_no_sem,Ours w/o Sem,0.547
+5,ours_no_sem,Ours w/o Sem,0.554
+6,ours_no_sem,Ours w/o Sem,0.554
+7,ours_no_sem,Ours w/o Sem,0.5574499999999999
+8,ours_no_sem,Ours w/o Sem,0.556
+9,ours_no_sem,Ours w/o Sem,0.563
+10,ours_no_sem,Ours w/o Sem,0.572
+11,ours_no_sem,Ours w/o Sem,0.574
+12,ours_no_sem,Ours w/o Sem,0.5803499999999999
+13,ours_no_sem,Ours w/o Sem,0.5973999999999996
+14,ours_no_sem,Ours w/o Sem,0.673
+15,ours_no_sem,Ours w/o Sem,1.5796999999999988
+16,ours_no_sem,Ours w/o Sem,2.3114999999999997
+17,ours_no_sem,Ours w/o Sem,3.622150000000004
+18,ours_no_sem,Ours w/o Sem,5.6442999999999905
+19,ours_no_sem,Ours w/o Sem,9.385499999999993
+20,ours_no_sem,Ours w/o Sem,22.889599999999998
+21,ours_no_sem,Ours w/o Sem,38.669399999999996
+22,ours_no_sem,Ours w/o Sem,52.085999999999984
+23,ours_no_sem,Ours w/o Sem,65.7122
+24,ours_no_sem,Ours w/o Sem,78.18939999999995
+25,ours_no_sem,Ours w/o Sem,90.65520000000001
+1,ours_no_sp2,Ours w/o SP2,0.552
+2,ours_no_sp2,Ours w/o SP2,0.556
+3,ours_no_sp2,Ours w/o SP2,0.5594
+4,ours_no_sp2,Ours w/o SP2,0.562
+5,ours_no_sp2,Ours w/o SP2,0.5684499999999998
+6,ours_no_sp2,Ours w/o SP2,0.568
+7,ours_no_sp2,Ours w/o SP2,0.573
+8,ours_no_sp2,Ours w/o SP2,0.577
+9,ours_no_sp2,Ours w/o SP2,0.644
+10,ours_no_sp2,Ours w/o SP2,1.5672499999999991
+11,ours_no_sp2,Ours w/o SP2,2.955799999999999
+12,ours_no_sp2,Ours w/o SP2,4.599999999999998
+13,ours_no_sp2,Ours w/o SP2,6.2059999999999995
+14,ours_no_sp2,Ours w/o SP2,10.330000000000002
+15,ours_no_sp2,Ours w/o SP2,19.741900000000005
+16,ours_no_sp2,Ours w/o SP2,31.64624999999997
+17,ours_no_sp2,Ours w/o SP2,46.86899999999998
+18,ours_no_sp2,Ours w/o SP2,60.68489999999999
+19,ours_no_sp2,Ours w/o SP2,73.71725
+20,ours_no_sp2,Ours w/o SP2,85.978
+21,ours_no_sp2,Ours w/o SP2,98.94129999999998
+22,ours_no_sp2,Ours w/o SP2,109.8778
+23,ours_no_sp2,Ours w/o SP2,121.67500000000001
+24,ours_no_sp2,Ours w/o SP2,131.8355
+25,ours_no_sp2,Ours w/o SP2,142.13060000000002
