@@ -17,8 +17,8 @@ EXP_MAPPING = {
     "ours": {"id": 1, "label": "Ours (SP1+SP2)"},
     "ours_no_sem": {"id": 2, "label": "Ours w/o Sem"},
     "ours_no_sp2": {"id": 3, "label": "Ours w/o SP2"},
-    "dlora": {"id": 4, "label": "dLoRA"},
-    "lru": {"id": 5, "label": "S-LoRA"}
+    "dlora": {"id": 5, "label": "dLoRA"},  # 修正：dLoRA 對應 ID 5
+    "lru": {"id": 4, "label": "S-LoRA"}    # 修正：S-LoRA 對應 ID 4
 }
 
 def run_single_experiment(args):
@@ -32,12 +32,6 @@ def run_single_experiment(args):
     import discrete_sim.sim_control_node_ as scn
     import discrete_sim.sim_efo as sefo
     import discrete_sim.sim_compute_node as s_compute
-
-    # 確保跟 max_throughput 的高容量設定一致
-    config.BATCH_SIZE_MERGED = 25
-    config.BATCH_SIZE_UNMERGED_BASE = 10
-    scn.MERGED_CAPACITY = 25
-    scn.UNMERGED_CAPACITY = 10
 
     config.ENABLE_DROP = False
     config.MAX_QUEUE_SIZE = float('inf')
@@ -134,7 +128,7 @@ def main():
     print("=== Parallel P95 TTFT vs. RPS Analysis (No-Drop Saturation) ===")
     print("=" * 70)
 
-    rps_list = list(range(1, 21))
+    rps_list = list(range(1, 31))
     strategies = ["ours", "ours_no_sem", "ours_no_sp2", "dlora", "lru"]
     
     tasks = [(rps, strat) for strat in strategies for rps in rps_list]

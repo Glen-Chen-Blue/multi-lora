@@ -5,7 +5,6 @@ from typing import Dict, List, Optional, Set, Any, Callable, Deque
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import (
     MERGED_CAPACITY, UNMERGED_CAPACITY, T_MAX, EPSILON, PSI_DROP,
-    SCALE_UP_DROP_THRESHOLD, SCALE_DOWN_SURPLUS_THRESHOLD,
     SCHEDULER_OVERHEAD, SIM_LOAD_DELAY, SIM_PREFILL_BASE_TIME,
     MERGE_SPEED_MULTIPLIER, SIM_DECODE_BASE_TIME, SIM_DECODE_SLOPE,
     SP1_INTERVAL_SECONDS, FIXED_OUTPUT_LEN
