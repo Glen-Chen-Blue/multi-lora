@@ -63,7 +63,7 @@ def worker_simulation_logic(multiplier):
     config.COST_DROP_PENALTY = new_penalty
 
     # 強制更新模組內常數
-    import discrete_sim.sim_control_node as scn
+    import discrete_sim.sim_control_node_ as scn
     import discrete_sim.sim_efo as sefo
     if hasattr(scn, 'PSI_DROP'): scn.PSI_DROP = new_penalty
     if hasattr(sefo, 'COST_DROP_PENALTY'): sefo.COST_DROP_PENALTY = new_penalty

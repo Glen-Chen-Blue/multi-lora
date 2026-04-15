@@ -48,7 +48,7 @@ def worker_simulation_logic(v_val):
     config.PSI_DROP = new_penalty
     config.COST_DROP_PENALTY = new_penalty
 
-    import discrete_sim.sim_control_node as scn
+    import discrete_sim.sim_control_node_ as scn
     if hasattr(scn, 'PSI_DROP'): scn.PSI_DROP = new_penalty
     
     # =========================================================================

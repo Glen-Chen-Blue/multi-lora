@@ -29,8 +29,9 @@ def run_single_experiment(args):
     
     # 動態注入配置 (Monkey Patch)
     import config
-    import discrete_sim.sim_control_node as scn
+    import discrete_sim.sim_control_node_ as scn
     import discrete_sim.sim_efo as sefo
+    import discrete_sim.sim_compute_node as s_compute
 
     # 確保跟 max_throughput 的高容量設定一致
     config.BATCH_SIZE_MERGED = 25
@@ -48,6 +49,20 @@ def run_single_experiment(args):
     scn.T_MAX = getattr(config, 'T_MAX', 6.0)
     sefo.T_MAX = getattr(config, 'T_MAX', 6.0)
     scn.ENABLE_DROP = False
+
+    # ==========================================
+    # [⭐ 核心修復 1] 強制滿載測試時所有節點必須火力全開
+    # ==========================================
+    if not hasattr(s_compute.SimComputeNode, '_original_full_reset'):
+        s_compute.SimComputeNode._original_full_reset = s_compute.SimComputeNode.full_reset
+        def patched_full_reset(self):
+            self._original_full_reset()
+            self.status = s_compute.NodeStatus.ACTIVE # 強制保持 ACTIVE，避免 SP1 重置把它們催眠
+        s_compute.SimComputeNode.full_reset = patched_full_reset
+    
+    # 讓 autoscale 即使沒有 drop 也能因為 Z_debt 喚醒節點 (保險機制)
+    scn.SCALE_UP_DROP_THRESHOLD = 0
+    # ==========================================
 
     topology = {"cluster_1": 5, "cluster_2": 5, "cluster_3": 5}
     target_clusters = list(topology.keys())
@@ -73,6 +88,11 @@ def run_single_experiment(args):
     try:
         sim = Simulation(sim_config)
         
+        # 強制喚醒所有節點 (對抗一開始只有 n1 是 active 的限制)
+        for cluster_nodes in sim.all_compute_nodes.values():
+            for node in cluster_nodes:
+                node.activate()
+                
         sim.trace = SimSyntheticGenerator(
             lora_mapping_path="./information/lora_mapping.json",
             duration_s=duration_sec,
@@ -114,7 +134,7 @@ def main():
     print("=== Parallel P95 TTFT vs. RPS Analysis (No-Drop Saturation) ===")
     print("=" * 70)
 
-    rps_list = list(range(1, 26))
+    rps_list = list(range(1, 21))
     strategies = ["ours", "ours_no_sem", "ours_no_sp2", "dlora", "lru"]
     
     tasks = [(rps, strat) for strat in strategies for rps in rps_list]
@@ -158,13 +178,25 @@ def main():
 
     plt.xlabel('System Workload (Requests per Second)', fontsize=14, fontweight='bold')
     plt.ylabel('95th Percentile TTFT (s)', fontsize=14, fontweight='bold')
-    plt.title('P95 Tail Latency under System Saturation', fontsize=16, fontweight='bold')
+    # plt.title('P95 Tail Latency under System Saturation', fontsize=16, fontweight='bold')
     plt.grid(True, linestyle='--', alpha=0.7)
     
     # 自動適應 Y 軸，避免被極端值壓平
-    max_reasonable_val = df['P95_TTFT'][df['P95_TTFT'] < 100].max() * 1.5
-    plt.ylim(0, max(max_reasonable_val, 10)) 
-    
+    plt.ylim(0, 15)
+
+    # 畫 SLO 虛線
+    plt.axhline(y=6, color='gray', linestyle='--', linewidth=2)
+
+    # 標註文字（稍微往右上避免重疊）
+    plt.text(
+        x=max(rps_list)*0.95, 
+        y=6 + 0.3, 
+        s='TTFT SLO',
+        color='gray',
+        fontsize=12,
+        ha='right'
+    )
+        
     # 排序 Legend
     handles, labels = plt.gca().get_legend_handles_labels()
     order = [labels.index(EXP_MAPPING[s]['label']) for s in strategies]

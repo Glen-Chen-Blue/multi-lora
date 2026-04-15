@@ -32,9 +32,6 @@ class VirtualNodeState:
             self.lora_request_counts[r["adapter_id"]] += 1
         self.capacity_merged = MERGED_CAPACITY
         self.capacity_unmerged = UNMERGED_CAPACITY
-        
-        # [核心修復] 引入 inner-tick 的動態駐列長度追蹤
-        self.simulated_queue_len = len(self.request_set)
 
     def get_free_slots(self, target_lora: str) -> int:
         if self.mode == "merge":
@@ -49,8 +46,6 @@ class VirtualNodeState:
         self.running_batch += 1
         self.active_loras.add(target_lora)
         self.lora_request_counts[target_lora] += 1
-        # [核心修復] 每分配一個請求，虛擬駐列長度+1，避免同一個 Tick 內發生雪崩式塞車 (Dogpiling)
-        self.simulated_queue_len += 1
 
 
 class SimControlNodeBase:
@@ -62,13 +57,16 @@ class SimControlNodeBase:
         self.lora_metadata = lora_metadata
         self._rng = random.Random(rng_seed)
 
+        # State
         self.local_available_loras: Set[str] = set()
         self.pending_queue: List[SimRequest] = []
         self.system_paused: bool = False
         
+        # [任務 C & D] Global Routing 相關狀態
         self.global_routing_table: Dict[str, Any] = {}
         self.offload_callback: Optional[Callable] = None
 
+        # Metrics (cumulative, matching cluster_metrics format)
         self.local_completed: int = 0
         self.offload_in_completed: int = 0
         self.offload_out: int = 0
@@ -78,27 +76,30 @@ class SimControlNodeBase:
         self.latest_p95: float = 0.0
         self.node_cumulative_inf_time: Dict[str, float] = {}
 
+        # Wire compute node callbacks
         for node in compute_nodes:
             node.on_request_first_token = self._on_first_token
             node.on_request_finish = self._on_request_finish
 
+        # Schedule periodic tasks
         self._scheduler_handle = clock.schedule_periodic(500, self._scheduler_tick)
 
     def admit_request(self, req: SimRequest) -> bool:
+        """Admission control. Return True if admitted, False if dropped."""
         raise NotImplementedError
 
     def _scheduler_tick(self):
+        """Called every 500ms. Dispatch pending to compute nodes."""
         raise NotImplementedError
 
     def _on_first_token(self, req: SimRequest):
-        if req.first_token_time_ms is None:
-            import config
-            req.first_token_time_ms = self._clock.now()
-
+        """Record TTFT."""
         if req.ttft_ms is not None:
             self.ttft_records.append(req.ttft_ms / 1000.0)
 
     def _on_request_finish(self, req: SimRequest):
+        """Record completion."""
+        # [任務 A] 區分本地完成與跨叢集卸載支援完成
         if req.is_delegated:
             self.offload_in_completed += 1
         else:
@@ -113,11 +114,13 @@ class SimControlNodeBase:
             self.drop_local_congestion += 1
 
     def apply_sp1_reset(self, new_loras: List[str]):
+        """SP1 reset for Random: clear queues and update loras WITHOUT sleeping nodes."""
         self.system_paused = True
         for req in self.pending_queue:
             self._handle_drop(req, "SP1 Reset")
         self.pending_queue.clear()
         
+        # 只重置引擎狀態，不要呼叫 full_reset() 以免節點進入 STANDBY
         for node in self.compute_nodes:
             node.engine.full_reset() 
             node.update_known_adapters(new_loras)
@@ -126,6 +129,7 @@ class SimControlNodeBase:
         self.system_paused = False
 
     def get_cluster_metrics(self) -> dict:
+        """Return metrics matching original /cluster_metrics format."""
         total_inf = sum(n.cumulative_inference_time_ms / 1000.0 for n in self.compute_nodes)
         self.calculate_p95_and_clear()
         return {
@@ -146,6 +150,7 @@ class SimControlNodeBase:
         return self.latest_p95
 
     def _get_virtual_node_states(self) -> list:
+        """Build virtual node state snapshots for scheduling."""
         states = []
         for node in self.compute_nodes:
             if node.status != NodeStatus.ACTIVE:
@@ -154,6 +159,7 @@ class SimControlNodeBase:
             states.append(VirtualNodeState(node, m))
         return states
 
+    # [任務 C] 生成真實的叢集狀態供 EFO 廣播使用
     def get_offload_status(self) -> dict:
         v_nodes = self._get_virtual_node_states()
         total_pending = len(self.pending_queue)
@@ -165,6 +171,7 @@ class SimControlNodeBase:
         )
         
         budget = max(0, total_free - total_pending)
+        # 如果壓力已經過大，直接回報 Budget 0
         if hasattr(self, 'Z_debt') and getattr(self, 'Z_debt') >= PSI_DROP * 0.9:
             budget = 0
             
@@ -188,6 +195,7 @@ class SimControlNodeBase:
     def receive_routing_table(self, table: dict):
         self.global_routing_table = table
 
+    # [任務 D] 實作跨叢集卸載目標的評估邏輯
     def _select_best_offload_target(self, adapter_id: str) -> Optional[str]:
         best_target = None
         best_score = float('inf')
@@ -211,6 +219,7 @@ class SimControlNodeBase:
             
             if status_penalty == float('inf'): continue
             
+            # 從延遲矩陣中取得對方的延遲
             delay_ms = info.get("delay", {}).get(self.cluster_id, 0.0)
             delay_sec = delay_ms / 1000.0
             
@@ -223,23 +232,21 @@ class SimControlNodeBase:
 
 
 class SimControlNodeSP2(SimControlNodeBase):
-    """Full Lyapunov-based control node."""
+    """Full Lyapunov-based control node (control_node_server.py)."""
 
     def __init__(self, cluster_id, clock, compute_nodes, lora_metadata, rng_seed=42):
         super().__init__(cluster_id, clock, compute_nodes, lora_metadata, rng_seed)
         self.Z_debt = 0.0
         self.switching_nodes: Set[str] = set()
         self.recent_drops: Deque = deque()
+        # Auto-scaling
         self._autoscale_handle = clock.schedule_periodic(1000, self._autoscale_tick)
         self._last_scale_time_ms = 0
         self._surplus_duration_ms = 0
-        
-        # [實驗設定] 直接將所有 node 都啟動
-        for node in self.compute_nodes:
-            node.activate()
 
     def _on_first_token(self, req: SimRequest):
         super()._on_first_token(req)
+        # 真實的 Z(t) 更新：基於實際產生 first token 的延遲是否超標
         if not req.is_delegated and req.ttft_ms is not None:
             ttft_s = req.ttft_ms / 1000.0
             violation = 1.0 if ttft_s > T_MAX else 0.0
@@ -248,6 +255,7 @@ class SimControlNodeSP2(SimControlNodeBase):
     def _handle_drop(self, req: SimRequest, reason: str):
         super()._handle_drop(req, reason)
         if not req.is_delegated:
+            # Drop 視為最嚴重的 SLO 違規，直接增加 Z_debt
             self.Z_debt = max(0.0, self.Z_debt + 1.0 - EPSILON)
 
     def admit_request(self, req: SimRequest) -> bool:
@@ -265,19 +273,82 @@ class SimControlNodeSP2(SimControlNodeBase):
         self.pending_queue.append(req)
         return True
 
-    def _predict_ttft(self, node: VirtualNodeState, target_lora: str) -> float:
-        is_in_vram = (node.mode == "merge" and node.merged_adapter == target_lora) or (node.mode == "unmerge" and target_lora in node.active_loras)
-        is_in_cpu = (node.mode == "unmerge" and target_lora in node.loaded_adapters)
-        load_delay = 0.0 if (is_in_vram or is_in_cpu) else SIM_LOAD_DELAY
-        
-        if node.mode == "merge" and node.merged_adapter == target_lora:
-            avg_per_req = (SIM_DECODE_BASE_TIME * FIXED_OUTPUT_LEN) / MERGE_SPEED_MULTIPLIER
+    def _predict_ttft(self, v_nodes, target_lora, pending_ahead):
+        """Port of predict_cluster_ttft from control_node_server.py"""
+        node_scores = []
+        total_free = 0
+        cluster_concurrent_capacity = 0
+        has_merged_node = False
+
+        for node in v_nodes:
+            if node.node.node_id in self.switching_nodes:
+                continue
+            is_merge = (node.mode == "merge" and node.merged_adapter == target_lora)
+            if node.mode == "merge" and not is_merge:
+                continue
+            if is_merge:
+                has_merged_node = True
+            is_in_vram = (node.mode == "unmerge" and target_lora in node.active_loras)
+            is_in_cpu = (node.mode == "unmerge" and target_lora in node.loaded_adapters)
+            is_empty = (node.mode == "unmerge" and len(node.active_loras) == 0)
+            free = node.get_free_slots(target_lora)
+            if is_merge:
+                cluster_concurrent_capacity += node.capacity_merged
+            elif node.mode == "unmerge":
+                cluster_concurrent_capacity += max(0, node.capacity_unmerged - 1)
+            if free > 0:
+                score = (1 if is_merge else 0, 1 if is_in_vram else 0,
+                         1 if is_in_cpu else 0, 1 if is_empty else 0, free)
+                node_scores.append({"score": score, "free": free})
+                total_free += free
+
+        my_pos = pending_ahead + 1
+        if my_pos <= total_free:
+            node_scores.sort(key=lambda x: x["score"], reverse=True)
+            allocated = 0
+            landing_score = None
+            take = 0
+            for ns in node_scores:
+                t = min(ns["free"], my_pos - allocated)
+                allocated += t
+                if allocated == my_pos:
+                    landing_score = ns["score"]
+                    take = t
+                    break
+            if landing_score is None:
+                return 999.0
+            is_merge_landing = landing_score[0] == 1
+            is_in_cpu_landing = landing_score[2] == 1
+            mult = MERGE_SPEED_MULTIPLIER if is_merge_landing else 1.0
+            load_delay = 0.0 if (is_in_cpu_landing or is_merge_landing) else SIM_LOAD_DELAY
+            prefill_time = SIM_PREFILL_BASE_TIME * take * mult
+            return SCHEDULER_OVERHEAD + load_delay + prefill_time
         else:
-            avg_per_req = SIM_DECODE_BASE_TIME * FIXED_OUTPUT_LEN
-            
-        # [核心修復] 使用動態遞增的 simulated_queue_len，讓 Ours 達成完美負載平衡
-        queue_len = node.simulated_queue_len
-        return queue_len * avg_per_req + load_delay
+            needed = my_pos - total_free
+            if has_merged_node:
+                assumed_batch = MERGED_CAPACITY
+                mult = MERGE_SPEED_MULTIPLIER
+            else:
+                assumed_batch = max(1, UNMERGED_CAPACITY - 2)
+                mult = 1.0
+            decode_speed = (SIM_DECODE_BASE_TIME + SIM_DECODE_SLOPE * assumed_batch) * mult
+            if cluster_concurrent_capacity == 0:
+                cluster_concurrent_capacity = MERGED_CAPACITY if has_merged_node else UNMERGED_CAPACITY
+            full_cycles = needed // cluster_concurrent_capacity
+            remainder = needed % cluster_concurrent_capacity
+            all_remains = []
+            for node in v_nodes:
+                if node.node.node_id in self.switching_nodes:
+                    continue
+                if (node.mode == "merge" and node.merged_adapter == target_lora) or node.mode == "unmerge":
+                    all_remains.extend([r.get("remaining_tokens", 256) for r in node.request_set])
+            if not all_remains:
+                current_wait = 1.0
+            else:
+                all_remains.sort()
+                idx = min(len(all_remains) - 1, max(0, remainder - 1))
+                current_wait = all_remains[idx] * decode_speed
+            return SCHEDULER_OVERHEAD + current_wait + (full_cycles * 256 * decode_speed) + (SIM_PREFILL_BASE_TIME * mult)
 
     def _scheduler_tick(self):
         if self.system_paused or not self.pending_queue:
@@ -286,35 +357,40 @@ class SimControlNodeSP2(SimControlNodeBase):
         if not v_nodes:
             return
 
-        MERGE_THRESHOLD = 4
-        UNMERGE_THRESHOLD = 1  
+        # ==========================================
+        # 1. 修正 Mode Switching (放寬 Merge 條件，發揮 Batch 紅利)
+        # ==========================================
+        MERGE_THRESHOLD = max(1, UNMERGED_CAPACITY - 2)
+        UNMERGE_THRESHOLD = max(1, UNMERGED_CAPACITY - 3)
         unmerged_count = sum(1 for n in v_nodes if n.mode == "unmerge")
-        total_pending = len(self.pending_queue)
 
         for v in v_nodes:
             if v.node.node_id in self.switching_nodes:
                 continue
             
-            can_merge = (unmerged_count > 1) or (total_pending > 10)
-            
-            if v.mode == "unmerge" and can_merge and len(v.request_set) >= MERGE_THRESHOLD:
+            # 只要 Unmerge 且負載夠高，就找出最主要的 LoRA 進行 Merge
+            if v.mode == "unmerge" and unmerged_count > 1 and v.running_batch >= MERGE_THRESHOLD:
                 counts = defaultdict(int)
                 for r in v.request_set:
                     counts[r["adapter_id"]] += 1
                 if counts:
                     best_lora = max(counts, key=counts.get)
-                    if counts[best_lora] / len(v.request_set) >= 0.4: 
+                    # 如果最主要的 LoRA 請求夠多，就強迫切換模式
+                    if counts[best_lora] >= (MERGE_THRESHOLD - 2):
                         v.node.merge_adapter(best_lora)
                         v.mode = "merge"
                         v.merged_adapter = best_lora
                         unmerged_count -= 1
             
-            elif v.mode == "merge" and v.running_batch < UNMERGE_THRESHOLD and total_pending == 0:
+            elif v.mode == "merge" and v.running_batch < UNMERGE_THRESHOLD:
                 v.node.unmerge_all()
                 v.mode = "unmerge"
                 v.merged_adapter = None
                 unmerged_count += 1
 
+        # ==========================================
+        # 2. Dispatch Requests (加入負載平衡 Tie-breaker)
+        # ==========================================
         dispatched_any = True
         while dispatched_any and self.pending_queue:
             dispatched_any = False
@@ -332,16 +408,22 @@ class SimControlNodeSP2(SimControlNodeBase):
                     for v in v_nodes:
                         if v.node.node_id in self.switching_nodes:
                             continue
+                        free = v.get_free_slots(aid)
+                        if free <= 0:
+                            continue
                         
                         is_in_vram = (v.mode == "merge" and v.merged_adapter == aid) or (v.mode == "unmerge" and aid in v.active_loras)
                         is_in_cpu = (v.mode == "unmerge" and aid in v.loaded_adapters)
                         c_dispatch = 0.0 if is_in_vram else (0.5 if is_in_cpu else 1.0)
                         
-                        pred_ttft = self._predict_ttft(v, aid)
+                        pred_ttft = self._predict_ttft(v_nodes, aid, v.running_batch)
                         prob_violation = 1.0 if pred_ttft > T_MAX else 0.0
                         
                         V_param = 100.0
-                        phi_local = V_param * c_dispatch + self.Z_debt * (prob_violation - EPSILON) + (pred_ttft * 50.0)
+                        phi_local = V_param * c_dispatch + self.Z_debt * (prob_violation - EPSILON)
+                        
+                        # [⭐ 核心修復] 加入微小的負載懲罰作為 Tie-breaker，強制完美負載平衡！
+                        phi_local += (v.running_batch * 0.01)
                         
                         if best_plan is None or phi_local < best_plan[2]:
                             best_plan = (v, aid, phi_local)
@@ -357,38 +439,57 @@ class SimControlNodeSP2(SimControlNodeBase):
                     dispatched_any = True
                     break
                 else:
-                    offloaded = False
                     if not req.is_delegated and self.offload_callback:
                         target_cluster = self._select_best_offload_target(target_aid)
                         if target_cluster:
                             if self.offload_callback(req, tgt=target_cluster):
                                 self.offload_out += 1
                                 self.pending_queue.remove(req)
-                                offloaded = True
                                 dispatched_any = True
                                 break
                     
-                    if not offloaded:
-                        import config
-                        if getattr(config, 'ENABLE_DROP', True):
-                            self._handle_drop(req, "System Full or SLO Violation (No Targets)")
-                            if not req.is_delegated:
-                                self.Z_debt += PSI_DROP
-                            self.recent_drops.append(self._clock.now())
-                            self.pending_queue.remove(req)
-                            dispatched_any = True
-                            break
-                        else:
-                            continue
+                    self._handle_drop(req, "System Full or SLO Violation (No Targets)")
+                    if not req.is_delegated:
+                        self.Z_debt += PSI_DROP
+                    self.recent_drops.append(self._clock.now())
+                    self.pending_queue.remove(req)
+                    dispatched_any = True
+                    break
 
     def _autoscale_tick(self):
         if self.system_paused:
             return
-        # [實驗設定] 暫停關閉節點的功能，永遠維持全開
-        for node in self.compute_nodes:
-            if node.status == NodeStatus.STANDBY:
-                node.activate()
-        return
+        now = self._clock.now()
+        while self.recent_drops and now - self.recent_drops[0] > 6000:
+            self.recent_drops.popleft()
+        recent_count = len(self.recent_drops)
+
+        # Scale up
+        if self.Z_debt > PSI_DROP * 0.8 and recent_count >= SCALE_UP_DROP_THRESHOLD:
+            if now - self._last_scale_time_ms > 6000:
+                for node in self.compute_nodes:
+                    if node.status == NodeStatus.STANDBY:
+                        node.activate()
+                        self._last_scale_time_ms = now
+                        self._surplus_duration_ms = 0
+                        break
+                return
+
+        # Scale down
+        active_nodes = [n for n in self.compute_nodes if n.status == NodeStatus.ACTIVE]
+        if len(active_nodes) > 1:
+            v_nodes = self._get_virtual_node_states()
+            total_pending = len(self.pending_queue)
+            total_free = sum(v.get_free_slots("") for v in v_nodes) 
+            if (total_free - total_pending) >= SCALE_DOWN_SURPLUS_THRESHOLD:
+                self._surplus_duration_ms += 1000
+            else:
+                self._surplus_duration_ms = 0
+            if self._surplus_duration_ms >= 6000 and now - self._last_scale_time_ms > 6000:
+                best = min(active_nodes, key=lambda n: n.engine.get_running_count())
+                best.drain()
+                self._last_scale_time_ms = now
+                self._surplus_duration_ms = 0
 
 
 class SimControlNodeRandom(SimControlNodeBase):
@@ -418,6 +519,7 @@ class SimControlNodeRandom(SimControlNodeBase):
         if not v_nodes:
             return
 
+        # [修復 1] 強制鎖定在 Unmerged 模式 (模擬缺乏 SP2 動態記憶體管理的慘況)
         for v in v_nodes:
             if v.mode == "merge":
                 v.node.unmerge_all()
@@ -427,38 +529,48 @@ class SimControlNodeRandom(SimControlNodeBase):
         for req in list(self.pending_queue):
             aid = req.adapter_id
             
+            # [修復 2] 為了極限吞吐量測試，拔除嚴格的 Disk Cache Miss Drop！
+            # 允許它像 S-LoRA 一樣把請求塞進去，讓 Compute Node 去承受 SIM_LOAD_DELAY (0.4s)
             if aid not in self.local_available_loras:
-                self.local_available_loras.add(aid)
+                self.local_available_loras.add(aid) # 假裝透過網路下載了
 
-            valid_ttft = v_nodes 
+            valid = [v for v in v_nodes if v.get_free_slots(aid) > 0]
+            valid_ttft = []
+            for v in valid:
+                # [修復 3] 拔除 T_MAX 限制，允許 Queue 堆積，這樣才能測量硬體的純吞吐量極限
+                valid_ttft.append(v)
 
             if valid_ttft:
+                # 加入基本的負載平衡，否則隨機派發會塞爆單一節點
                 cache_hits = [v for v in valid_ttft if aid in v.active_loras or aid in v.loaded_adapters]
                 if cache_hits:
-                    # [稍微強一點] 不再盲目隨機，而是在快取命中的節點中找排隊最短的，這避免了 Dogpiling 導致的異常成績
-                    target = min(cache_hits, key=lambda v: v.simulated_queue_len)
+                    target = min(cache_hits, key=lambda v: v.running_batch)
                 else:
-                    target = min(valid_ttft, key=lambda v: v.simulated_queue_len)
+                    target = min(valid_ttft, key=lambda v: v.running_batch)
                 
                 target.commit_request(aid)
                 target.node.submit_request(req)
-                self.pending_queue.remove(req)
             else:
                 offloaded = False
                 if not req.is_delegated and self.offload_callback:
                     target_cluster = self._select_best_offload_target(aid)
                     if target_cluster and self.offload_callback(req, tgt=target_cluster):
                         self.offload_out += 1
-                        self.pending_queue.remove(req)
                         offloaded = True
-                
                 if not offloaded:
-                    import config
-                    if getattr(config, 'ENABLE_DROP', True):
-                        self._handle_drop(req, f"System Full")
-                        self.pending_queue.remove(req)
-                    else:
-                        continue
+                    self._handle_drop(req, f"System Full")
+            self.pending_queue.remove(req)
+
+    def _predict_ttft_simple(self, node: VirtualNodeState, target_lora: str) -> float:
+        is_in_vram = target_lora in node.active_loras
+        is_in_cpu = target_lora in node.loaded_adapters
+        load_delay = 0.0 if (is_in_cpu or is_in_vram) else SIM_LOAD_DELAY
+        assumed_batch = UNMERGED_CAPACITY - 1
+        prefill = SIM_PREFILL_BASE_TIME
+        decode_speed = SIM_DECODE_BASE_TIME + SIM_DECODE_SLOPE * assumed_batch
+        all_remains = [r.get("remaining_tokens", 128) for r in node.request_set]
+        decode_wait = (sum(all_remains) / len(all_remains) * decode_speed) if all_remains else 0.0
+        return SCHEDULER_OVERHEAD + load_delay + decode_wait + prefill
 
 
 class SimControlNodeLRU(SimControlNodeBase):
@@ -513,13 +625,13 @@ class SimControlNodeLRU(SimControlNodeBase):
                     self.efo_ref.access_lora(self.cluster_id, aid)
 
             valid = []
-            import config
             for v in v_nodes:
-                wait_ms = self._clock.now() - req.arrival_time_ms
-                exec_time = v.simulated_queue_len * SIM_DECODE_BASE_TIME * FIXED_OUTPUT_LEN
-                total = wait_ms / 1000.0 + download_penalty + exec_time
-                if not getattr(config, 'ENABLE_DROP', True) or total <= T_MAX:
-                    valid.append(v)
+                if v.get_free_slots(aid) > 0:
+                    wait_ms = self._clock.now() - req.arrival_time_ms
+                    exec_time = self._predict_ttft_simple(v, aid)
+                    total = wait_ms / 1000.0 + download_penalty + exec_time
+                    if total <= T_MAX:
+                        valid.append(v)
 
             target = None
             if not valid:
@@ -529,28 +641,33 @@ class SimControlNodeLRU(SimControlNodeBase):
                     if target_cluster and self.offload_callback(req, tgt=target_cluster):
                         self.offload_out += 1
                         offloaded = True
-                        self.pending_queue.remove(req)
                 
                 if not offloaded:
-                    if getattr(config, 'ENABLE_DROP', True):
-                        self._handle_drop(req, f"System Full or SLO Violation (No Targets for T_MAX={T_MAX}s)")
-                        self.pending_queue.remove(req)
-                    else:
-                        continue
+                    self._handle_drop(req, f"System Full or SLO Violation (No Targets for T_MAX={T_MAX}s)")
             elif self.dispatch_strategy == "greedy":
                 cache_hits = [v for v in valid if aid in v.active_loras or aid in v.loaded_adapters]
                 if cache_hits:
-                    # [對齊] 讓 S-LoRA 的邏輯跟 Ours w/o SP2 完全一樣，會平衡排隊，所以不會異常小於1，但因為沒有合併與全域協調，表現會爛得很真實
-                    target = min(cache_hits, key=lambda v: v.simulated_queue_len)
+                    target = cache_hits[0]
                 else:
-                    target = min(valid, key=lambda v: v.simulated_queue_len)
+                    target = valid[0]
             else:
                 target = self._rng.choice(valid)
 
             if target:
                 target.commit_request(aid)
                 target.node.submit_request(req)
-                self.pending_queue.remove(req)
+
+            self.pending_queue.remove(req)
+
+    def _predict_ttft_simple(self, node, target_lora):
+        is_in = target_lora in node.active_loras or target_lora in node.loaded_adapters
+        load_delay = 0.0 if is_in else SIM_LOAD_DELAY
+        assumed_batch = UNMERGED_CAPACITY - 1
+        prefill = SIM_PREFILL_BASE_TIME
+        decode_speed = SIM_DECODE_BASE_TIME + SIM_DECODE_SLOPE * assumed_batch
+        all_remains = [r.get("remaining_tokens", 128) for r in node.request_set]
+        decode_wait = (sum(all_remains) / len(all_remains) * decode_speed) if all_remains else 0.0
+        return SCHEDULER_OVERHEAD + load_delay + decode_wait + prefill
 
     def apply_sp1_reset(self, new_loras):
         pass
@@ -653,28 +770,19 @@ class SimControlNodeDLoRA(SimControlNodeBase):
                     if target_cluster and self.offload_callback(req, tgt=target_cluster):
                         self.offload_out += 1
                         offloaded = True
-                        self.pending_queue.remove(req)
                         
                 if not offloaded:
-                    import config
-                    if getattr(config, 'ENABLE_DROP', True):
-                        self._handle_drop(req, "System Full (No Targets)")
-                        self.pending_queue.remove(req)
-                    else:
-                        continue
+                    self._handle_drop(req, "System Full (No Targets)")
             else:
                 wait_s = (self._clock.now() - req.arrival_time_ms) / 1000.0
                 total = wait_s + download_penalty + min_time
-                import config
-                
-                if total > T_MAX * 5.0 and getattr(config, 'ENABLE_DROP', True):
+                if total > T_MAX * 5.0:
                     self._handle_drop(req, f"Extreme Congestion (Pred: {total:.2f}s)")
-                    self.pending_queue.remove(req)
                 else:
                     best_node.node.submit_request(req)
-                    self.pending_queue.remove(req)
 
-    # [保留原貌] dLoRA 的排隊估算完全不更動
+            self.pending_queue.remove(req)
+
     def _calc_pending_time(self, node: VirtualNodeState, target_lora: str) -> float:
         is_in_cpu = target_lora in node.loaded_adapters
         load_delay = 0.0 if is_in_cpu else SIM_LOAD_DELAY
