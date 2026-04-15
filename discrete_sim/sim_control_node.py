@@ -94,6 +94,11 @@ class SimControlNodeBase:
 
     def _on_first_token(self, req: SimRequest):
         """Record TTFT."""
+        # [Bug 修正]: ttft_ms 是 property，必須改為設定 first_token_time_ms
+        if req.first_token_time_ms is None:
+            import config
+            req.first_token_time_ms = self._clock.now()
+
         if req.ttft_ms is not None:
             self.ttft_records.append(req.ttft_ms / 1000.0)
 
@@ -439,22 +444,30 @@ class SimControlNodeSP2(SimControlNodeBase):
                     dispatched_any = True
                     break
                 else:
+                    offloaded = False
                     if not req.is_delegated and self.offload_callback:
                         target_cluster = self._select_best_offload_target(target_aid)
                         if target_cluster:
                             if self.offload_callback(req, tgt=target_cluster):
                                 self.offload_out += 1
                                 self.pending_queue.remove(req)
+                                offloaded = True
                                 dispatched_any = True
                                 break
                     
-                    self._handle_drop(req, "System Full or SLO Violation (No Targets)")
-                    if not req.is_delegated:
-                        self.Z_debt += PSI_DROP
-                    self.recent_drops.append(self._clock.now())
-                    self.pending_queue.remove(req)
-                    dispatched_any = True
-                    break
+                    if not offloaded:
+                        import config
+                        if getattr(config, 'ENABLE_DROP', True):
+                            self._handle_drop(req, "System Full or SLO Violation (No Targets)")
+                            if not req.is_delegated:
+                                self.Z_debt += PSI_DROP
+                            self.recent_drops.append(self._clock.now())
+                            self.pending_queue.remove(req)
+                            dispatched_any = True
+                            break
+                        else:
+                            # [核心修復] 關閉 Drop 時，若缺乏資源就跳過此請求，讓後面的請求先執行
+                            continue
 
     def _autoscale_tick(self):
         if self.system_paused:
@@ -541,7 +554,6 @@ class SimControlNodeRandom(SimControlNodeBase):
                 valid_ttft.append(v)
 
             if valid_ttft:
-                # 加入基本的負載平衡，否則隨機派發會塞爆單一節點
                 cache_hits = [v for v in valid_ttft if aid in v.active_loras or aid in v.loaded_adapters]
                 if cache_hits:
                     target = min(cache_hits, key=lambda v: v.running_batch)
@@ -550,16 +562,24 @@ class SimControlNodeRandom(SimControlNodeBase):
                 
                 target.commit_request(aid)
                 target.node.submit_request(req)
+                self.pending_queue.remove(req)
             else:
                 offloaded = False
                 if not req.is_delegated and self.offload_callback:
                     target_cluster = self._select_best_offload_target(aid)
                     if target_cluster and self.offload_callback(req, tgt=target_cluster):
                         self.offload_out += 1
+                        self.pending_queue.remove(req)
                         offloaded = True
+                
                 if not offloaded:
-                    self._handle_drop(req, f"System Full")
-            self.pending_queue.remove(req)
+                    import config
+                    if getattr(config, 'ENABLE_DROP', True):
+                        self._handle_drop(req, f"System Full")
+                        self.pending_queue.remove(req)
+                    else:
+                        # [核心修復] 關閉 Drop 時跳過
+                        continue
 
     def _predict_ttft_simple(self, node: VirtualNodeState, target_lora: str) -> float:
         is_in_vram = target_lora in node.active_loras
