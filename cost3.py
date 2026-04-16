@@ -12,6 +12,7 @@ from config import (
 )
 from cost2 import build_request_rate_from_simulation_csv
 
+plt.rcParams.update({'font.size': 14})
 
 def parse_logs_detailed(log_file, target_clusters=["cluster_1"]):
     if not os.path.exists(log_file):
@@ -40,13 +41,13 @@ def parse_logs_detailed(log_file, target_clusters=["cluster_1"]):
                 download_count = totals.get("artifact_downloads", 0)
                 cost_download = download_count * LORA_SIZE_GB * COST_DOWNLOAD_PER_GB
 
-                cost_compute = totals.get("total_inference_time", 0.0) * COST_COMPUTE_PER_SEC
+                cost_compute = totals.get("total_inference_time", 0.0) * COST_COMPUTE_PER_SEC*2
 
                 offload_count = totals.get("total_offloads", 0)
                 cost_network = offload_count * COST_NET_TRAFFIC
 
                 drop_count = totals.get("total_drops", 0)
-                cost_penalty = drop_count * 0.02
+                cost_penalty = drop_count * 0.01
 
                 total_cost = (
                     cost_storage
@@ -147,7 +148,7 @@ def plot_averaged_costs(
 
         ax2.fill_between(
             avg_bg["time"], 0, avg_bg["request_rate"],
-            color="gray", alpha=0.12, label="Avg Request Rate (Bg)"
+            color="gray", alpha=0.12
         )
         ax2.plot(
             avg_bg["time"], avg_bg["request_rate"],
@@ -298,11 +299,11 @@ def plot_averaged_costs(
     # ==========================================
     # 4. 主圖表樣式設定
     # ==========================================
-    ax1.set_title("Average Cost per Request Comparison", fontsize=16, fontweight="bold")
-    ax1.set_xlabel("Simulation Time (seconds)", fontsize=12)
-    ax1.set_ylabel("Total Cost / Total Request (Credit/req)", fontsize=12)
+    # ax1.set_title("Average Cost per Request Comparison", fontsize=16, fontweight="bold")
+    ax1.set_xlabel("Simulation Time (seconds)", fontsize=18)
+    ax1.set_ylabel("Total Cost / Total Request (Credit/req)", fontsize=18)
 
-    ax2.set_ylabel("Request Rate (req/s)", fontsize=12, color="gray")
+    ax2.set_ylabel("Request Rate (req/s)", fontsize=18, color="gray")
     ax2.tick_params(axis="y", colors="gray")
     ax2.set_ylim(bottom=0)
 

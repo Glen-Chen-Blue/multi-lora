@@ -27,12 +27,12 @@ from cost2 import parse_logs
 # ==========================================
 # 實驗參數設定區 (可自由修改)
 # ==========================================
-SIMULATION_DAYS = 2                  # 模擬天數 (跑2天以達到論文穩定狀態)
+SIMULATION_HOURS = 8                  # 模擬小時 (跑2小時以達到論文穩定狀態)
 NUM_CLUSTERS = 3                     # Control Node 數量
 COMPUTE_NODES_PER_CLUSTER = 5        # 每個 Cluster 的 Compute Node 數量
 
 # 設定你這次要跑的 RPS 區間
-RPS_LIST = [i for i in range(11, 31)]
+RPS_LIST = [i for i in range(1, 31)]
 ZIPF_S_PARAMETER = 1.5               # Zipf 分佈傾斜度
 
 LORA_MAPPING_PATH = os.path.join(PROJECT_ROOT, "information", "lora_mapping.json")
@@ -146,7 +146,7 @@ def run_single_task(args):
     }
 
 def main():
-    duration_hours = SIMULATION_DAYS * 24
+    duration_hours = SIMULATION_HOURS
     topology = {f"cluster_{i}": COMPUTE_NODES_PER_CLUSTER for i in range(1, NUM_CLUSTERS + 1)}
     target_clusters = list(topology.keys())
     
@@ -160,7 +160,6 @@ def main():
     print("=" * 65)
     print("🚀 Starting Parallel Synthetic Experiments (Average Cost vs RPS)")
     print(f"Topology: {NUM_CLUSTERS} Clusters, {COMPUTE_NODES_PER_CLUSTER} Nodes/Cluster")
-    print(f"Duration: {SIMULATION_DAYS} Days ({duration_hours} Hours)")
     print(f"Total Tasks: {len(tasks)} (RPS variations x Baselines)")
     print("=" * 65)
 

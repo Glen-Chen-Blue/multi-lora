@@ -3,7 +3,6 @@ import os
 import matplotlib.pyplot as plt
 
 
-
 RESULTS = [
     {"multiplier": 1, "drop_rate": 20.95, "download_cost": 108.0},
     {"multiplier": 2, "drop_rate": 16.03, "download_cost": 186.0},
@@ -52,7 +51,7 @@ def main():
     results = RESULTS
 
     results.sort(key=lambda x: x["multiplier"])
-
+    plt.rcParams.update({'font.size': 20})
     x_vals = [r["multiplier"] for r in results]
     drop_rates = [r["drop_rate"]-3 for r in results]
     download_costs = [r["download_cost"] for r in results]
