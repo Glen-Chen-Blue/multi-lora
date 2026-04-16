@@ -34,8 +34,8 @@ def main():
     markers = ['o', 's', '^', 'D', 'v', 'p']
     
     # 取得所有的策略名稱
-    strategies = df['Strategy'].unique()
-    sorted_strategies = sorted(strategies)  # 按字母順序排序策略名稱
+    strategies = df['Strategy'].dropna().astype(str).unique()
+    sorted_strategies = sorted(strategies)
     # 依序為每種策略畫線
     for idx, strategy in enumerate(sorted_strategies):
         subset = df[df['Strategy'] == strategy]

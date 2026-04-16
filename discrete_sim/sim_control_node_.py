@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Set, Any, Callable, Deque
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import (
-    MERGED_CAPACITY, UNMERGED_CAPACITY, T_MAX, EPSILON, PSI_DROP,
+    MERGED_CAPACITY, UNMERGED_CAPACITY, T_MAX, EPSILON, 
     SCALE_UP_DROP_THRESHOLD, SCALE_DOWN_SURPLUS_THRESHOLD,
     SCHEDULER_OVERHEAD, SIM_LOAD_DELAY, SIM_PREFILL_BASE_TIME,
     MERGE_SPEED_MULTIPLIER, SIM_DECODE_BASE_TIME, SIM_DECODE_SLOPE,
@@ -15,6 +15,14 @@ from .sim_types import SimRequest, NodeMode, NodeStatus
 from .sim_clock import SimClock
 from .sim_compute_node import SimComputeNode
 
+# =========================================================================
+# [⭐ 論文最佳化參數硬編碼] 
+# 整合 run_lyapunov_variable.py 與 run_drop_penalty.py 算出的最佳解
+# =========================================================================
+OPTIMAL_V = 8.0              # Lyapunov Trade-off 實驗最佳解
+OPTIMAL_MULTIPLIER = 60      # Drop Penalty 實驗最佳解 (Pareto Knee)
+OPTIMAL_PSI_DROP = 0.01 * OPTIMAL_MULTIPLIER  # 0.6
+# =========================================================================
 
 class VirtualNodeState:
     def __init__(self, node: SimComputeNode, metrics: dict):
@@ -66,7 +74,7 @@ class SimControlNodeBase:
         self.global_routing_table: Dict[str, Any] = {}
         self.offload_callback: Optional[Callable] = None
 
-        # Metrics (cumulative, matching cluster_metrics format)
+        # Metrics
         self.local_completed: int = 0
         self.offload_in_completed: int = 0
         self.offload_out: int = 0
@@ -76,30 +84,23 @@ class SimControlNodeBase:
         self.latest_p95: float = 0.0
         self.node_cumulative_inf_time: Dict[str, float] = {}
 
-        # Wire compute node callbacks
         for node in compute_nodes:
             node.on_request_first_token = self._on_first_token
             node.on_request_finish = self._on_request_finish
 
-        # Schedule periodic tasks
         self._scheduler_handle = clock.schedule_periodic(500, self._scheduler_tick)
 
     def admit_request(self, req: SimRequest) -> bool:
-        """Admission control. Return True if admitted, False if dropped."""
         raise NotImplementedError
 
     def _scheduler_tick(self):
-        """Called every 500ms. Dispatch pending to compute nodes."""
         raise NotImplementedError
 
     def _on_first_token(self, req: SimRequest):
-        """Record TTFT."""
         if req.ttft_ms is not None:
             self.ttft_records.append(req.ttft_ms / 1000.0)
 
     def _on_request_finish(self, req: SimRequest):
-        """Record completion."""
-        # [任務 A] 區分本地完成與跨叢集卸載支援完成
         if req.is_delegated:
             self.offload_in_completed += 1
         else:
@@ -114,13 +115,11 @@ class SimControlNodeBase:
             self.drop_local_congestion += 1
 
     def apply_sp1_reset(self, new_loras: List[str]):
-        """SP1 reset for Random: clear queues and update loras WITHOUT sleeping nodes."""
         self.system_paused = True
         for req in self.pending_queue:
             self._handle_drop(req, "SP1 Reset")
         self.pending_queue.clear()
         
-        # 只重置引擎狀態，不要呼叫 full_reset() 以免節點進入 STANDBY
         for node in self.compute_nodes:
             node.engine.full_reset() 
             node.update_known_adapters(new_loras)
@@ -129,7 +128,6 @@ class SimControlNodeBase:
         self.system_paused = False
 
     def get_cluster_metrics(self) -> dict:
-        """Return metrics matching original /cluster_metrics format."""
         total_inf = sum(n.cumulative_inference_time_ms / 1000.0 for n in self.compute_nodes)
         self.calculate_p95_and_clear()
         return {
@@ -150,7 +148,6 @@ class SimControlNodeBase:
         return self.latest_p95
 
     def _get_virtual_node_states(self) -> list:
-        """Build virtual node state snapshots for scheduling."""
         states = []
         for node in self.compute_nodes:
             if node.status != NodeStatus.ACTIVE:
@@ -159,7 +156,6 @@ class SimControlNodeBase:
             states.append(VirtualNodeState(node, m))
         return states
 
-    # [任務 C] 生成真實的叢集狀態供 EFO 廣播使用
     def get_offload_status(self) -> dict:
         v_nodes = self._get_virtual_node_states()
         total_pending = len(self.pending_queue)
@@ -170,10 +166,8 @@ class SimControlNodeBase:
             for n in v_nodes
         )
         
+        # [⭐ Patch A: 移除 Z_debt 造成的跨叢集孤島效應，正確回報 Budget]
         budget = max(0, total_free - total_pending)
-        # 如果壓力已經過大，直接回報 Budget 0
-        if hasattr(self, 'Z_debt') and getattr(self, 'Z_debt') >= PSI_DROP * 0.9:
-            budget = 0
             
         merged, loaded = set(), set()
         for n in v_nodes:
@@ -195,7 +189,6 @@ class SimControlNodeBase:
     def receive_routing_table(self, table: dict):
         self.global_routing_table = table
 
-    # [任務 D] 實作跨叢集卸載目標的評估邏輯
     def _select_best_offload_target(self, adapter_id: str) -> Optional[str]:
         best_target = None
         best_score = float('inf')
@@ -219,7 +212,6 @@ class SimControlNodeBase:
             
             if status_penalty == float('inf'): continue
             
-            # 從延遲矩陣中取得對方的延遲
             delay_ms = info.get("delay", {}).get(self.cluster_id, 0.0)
             delay_sec = delay_ms / 1000.0
             
@@ -232,21 +224,19 @@ class SimControlNodeBase:
 
 
 class SimControlNodeSP2(SimControlNodeBase):
-    """Full Lyapunov-based control node (control_node_server.py)."""
+    """Full Lyapunov-based control node (整合論文最佳參數版)."""
 
     def __init__(self, cluster_id, clock, compute_nodes, lora_metadata, rng_seed=42):
         super().__init__(cluster_id, clock, compute_nodes, lora_metadata, rng_seed)
         self.Z_debt = 0.0
         self.switching_nodes: Set[str] = set()
         self.recent_drops: Deque = deque()
-        # Auto-scaling
         self._autoscale_handle = clock.schedule_periodic(1000, self._autoscale_tick)
         self._last_scale_time_ms = 0
         self._surplus_duration_ms = 0
 
     def _on_first_token(self, req: SimRequest):
         super()._on_first_token(req)
-        # 真實的 Z(t) 更新：基於實際產生 first token 的延遲是否超標
         if not req.is_delegated and req.ttft_ms is not None:
             ttft_s = req.ttft_ms / 1000.0
             violation = 1.0 if ttft_s > T_MAX else 0.0
@@ -255,7 +245,6 @@ class SimControlNodeSP2(SimControlNodeBase):
     def _handle_drop(self, req: SimRequest, reason: str):
         super()._handle_drop(req, reason)
         if not req.is_delegated:
-            # Drop 視為最嚴重的 SLO 違規，直接增加 Z_debt
             self.Z_debt = max(0.0, self.Z_debt + 1.0 - EPSILON)
 
     def admit_request(self, req: SimRequest) -> bool:
@@ -274,7 +263,6 @@ class SimControlNodeSP2(SimControlNodeBase):
         return True
 
     def _predict_ttft(self, v_nodes, target_lora, pending_ahead):
-        """Port of predict_cluster_ttft from control_node_server.py"""
         node_scores = []
         total_free = 0
         cluster_concurrent_capacity = 0
@@ -357,9 +345,6 @@ class SimControlNodeSP2(SimControlNodeBase):
         if not v_nodes:
             return
 
-        # ==========================================
-        # 1. 修正 Mode Switching (放寬 Merge 條件，發揮 Batch 紅利)
-        # ==========================================
         MERGE_THRESHOLD = max(1, UNMERGED_CAPACITY - 2)
         UNMERGE_THRESHOLD = max(1, UNMERGED_CAPACITY - 3)
         unmerged_count = sum(1 for n in v_nodes if n.mode == "unmerge")
@@ -368,14 +353,12 @@ class SimControlNodeSP2(SimControlNodeBase):
             if v.node.node_id in self.switching_nodes:
                 continue
             
-            # 只要 Unmerge 且負載夠高，就找出最主要的 LoRA 進行 Merge
             if v.mode == "unmerge" and unmerged_count > 1 and v.running_batch >= MERGE_THRESHOLD:
                 counts = defaultdict(int)
                 for r in v.request_set:
                     counts[r["adapter_id"]] += 1
                 if counts:
                     best_lora = max(counts, key=counts.get)
-                    # 如果最主要的 LoRA 請求夠多，就強迫切換模式
                     if counts[best_lora] >= (MERGE_THRESHOLD - 2):
                         v.node.merge_adapter(best_lora)
                         v.mode = "merge"
@@ -388,9 +371,6 @@ class SimControlNodeSP2(SimControlNodeBase):
                 v.merged_adapter = None
                 unmerged_count += 1
 
-        # ==========================================
-        # 2. Dispatch Requests (加入負載平衡 Tie-breaker)
-        # ==========================================
         dispatched_any = True
         while dispatched_any and self.pending_queue:
             dispatched_any = False
@@ -419,11 +399,9 @@ class SimControlNodeSP2(SimControlNodeBase):
                         pred_ttft = self._predict_ttft(v_nodes, aid, v.running_batch)
                         prob_violation = 1.0 if pred_ttft > T_MAX else 0.0
                         
-                        V_param = 100.0
-                        phi_local = V_param * c_dispatch + self.Z_debt * (prob_violation - EPSILON)
-                        
-                        # [⭐ 核心修復] 加入微小的負載懲罰作為 Tie-breaker，強制完美負載平衡！
-                        phi_local += (v.running_batch * 0.01)
+                        # 使用動態注入的最佳參數
+                        phi_local = OPTIMAL_V * c_dispatch + self.Z_debt * (prob_violation - EPSILON)
+                        phi_local += (v.running_batch * 0.01) # Tie-breaker
                         
                         if best_plan is None or phi_local < best_plan[2]:
                             best_plan = (v, aid, phi_local)
@@ -439,6 +417,8 @@ class SimControlNodeSP2(SimControlNodeBase):
                     dispatched_any = True
                     break
                 else:
+                    # [⭐ Patch C: 如果滿載，先嘗試 offload，不行就留在 queue 排隊產生真實 Queueing Delay]
+                    offloaded = False
                     if not req.is_delegated and self.offload_callback:
                         target_cluster = self._select_best_offload_target(target_aid)
                         if target_cluster:
@@ -446,15 +426,20 @@ class SimControlNodeSP2(SimControlNodeBase):
                                 self.offload_out += 1
                                 self.pending_queue.remove(req)
                                 dispatched_any = True
-                                break
+                                offloaded = True
+                                break 
                     
-                    self._handle_drop(req, "System Full or SLO Violation (No Targets)")
-                    if not req.is_delegated:
-                        self.Z_debt += PSI_DROP
-                    self.recent_drops.append(self._clock.now())
-                    self.pending_queue.remove(req)
-                    dispatched_any = True
-                    break
+                    if not offloaded:
+                        wait_s = (self._clock.now() - req.arrival_time_ms) / 1000.0
+                        if wait_s > 60.0:  # 等待超過 60 秒才強制 Drop
+                            self._handle_drop(req, f"Extreme Congestion (Waited {wait_s:.1f}s)")
+                            if not req.is_delegated:
+                                self.Z_debt += OPTIMAL_PSI_DROP
+                            self.recent_drops.append(self._clock.now())
+                            self.pending_queue.remove(req)
+                            dispatched_any = True
+                            break
+                        # 尚未超時 -> 什麼都不做，繼續留在 pending_queue 累積排隊延遲！
 
     def _autoscale_tick(self):
         if self.system_paused:
@@ -462,16 +447,23 @@ class SimControlNodeSP2(SimControlNodeBase):
         now = self._clock.now()
         while self.recent_drops and now - self.recent_drops[0] > 6000:
             self.recent_drops.popleft()
-        recent_count = len(self.recent_drops)
+            
+        # [⭐ Patch B: 結合 V 參數與 Penalty 的 Lyapunov 動態敏感度 Auto-scaling]
+        scale_up_thresh = max(1, int(OPTIMAL_V * 2))
+        dyn_thresh = max(1, int(15 / (OPTIMAL_MULTIPLIER ** 0.5))) 
 
         # Scale up
-        if self.Z_debt > PSI_DROP * 0.8 and recent_count >= SCALE_UP_DROP_THRESHOLD:
-            if now - self._last_scale_time_ms > 6000:
+        if (len(self.pending_queue) >= scale_up_thresh or 
+            self.Z_debt >= scale_up_thresh or 
+            len(self.recent_drops) >= dyn_thresh):
+            
+            if now - self._last_scale_time_ms > 4000:
                 for node in self.compute_nodes:
                     if node.status == NodeStatus.STANDBY:
                         node.activate()
                         self._last_scale_time_ms = now
                         self._surplus_duration_ms = 0
+                        self.Z_debt = max(0.0, self.Z_debt - scale_up_thresh)
                         break
                 return
 
@@ -481,11 +473,16 @@ class SimControlNodeSP2(SimControlNodeBase):
             v_nodes = self._get_virtual_node_states()
             total_pending = len(self.pending_queue)
             total_free = sum(v.get_free_slots("") for v in v_nodes) 
+            
+            # V 越大越急著關機省錢
+            patience_ms = max(2000, int(10000 / (OPTIMAL_V + 1)))
+            
             if (total_free - total_pending) >= SCALE_DOWN_SURPLUS_THRESHOLD:
                 self._surplus_duration_ms += 1000
             else:
                 self._surplus_duration_ms = 0
-            if self._surplus_duration_ms >= 6000 and now - self._last_scale_time_ms > 6000:
+                
+            if self._surplus_duration_ms >= patience_ms and now - self._last_scale_time_ms > 6000:
                 best = min(active_nodes, key=lambda n: n.engine.get_running_count())
                 best.drain()
                 self._last_scale_time_ms = now

@@ -17,7 +17,7 @@ from .sim_network import SimNetwork
 from .sim_logger import SimLogger
 from .sim_trace_reader import SimTraceReader
 from .sim_compute_node import SimComputeNode
-from .sim_control_node import (
+from .sim_control_node_ import (
     SimControlNodeBase, SimControlNodeSP2, SimControlNodeRandom,
     SimControlNodeLRU, SimControlNodeDLoRA
 )

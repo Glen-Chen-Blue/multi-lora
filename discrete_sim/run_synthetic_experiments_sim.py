@@ -2,7 +2,7 @@
 """
 CLI entry point for Synthetic Multi-LoRA Simulation Experiments.
 Uses Poisson distribution for arrival times and Zipf distribution for LoRA selection.
-(Multiprocessing Accelerated Version - Suppressed Output)
+(Multiprocessing Accelerated Version - 25 Workers)
 """
 
 import os
@@ -11,8 +11,8 @@ import sys
 import json
 import time
 import pandas as pd
-import concurrent.futures  # 引入平行運算模組
-import contextlib          # 引入上下文模組，用來屏蔽輸出
+import concurrent.futures  
+import contextlib          
 
 # 1. 自動定位專案根目錄
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -27,12 +27,12 @@ from cost2 import parse_logs
 # ==========================================
 # 實驗參數設定區 (可自由修改)
 # ==========================================
-SIMULATION_DAYS = 2                  # 模擬天數 (跑3天)
+SIMULATION_DAYS = 2                  # 模擬天數 (跑2天以達到論文穩定狀態)
 NUM_CLUSTERS = 3                     # Control Node 數量
 COMPUTE_NODES_PER_CLUSTER = 5        # 每個 Cluster 的 Compute Node 數量
 
-# 設定你這次要跑的 RPS 區間 (例如之前跑過 1~20，這次可以放 21~30)
-RPS_LIST = [3] + [i for i in range(35, 51)]
+# 設定你這次要跑的 RPS 區間
+RPS_LIST = [i for i in range(11, 31)]
 ZIPF_S_PARAMETER = 1.5               # Zipf 分佈傾斜度
 
 LORA_MAPPING_PATH = os.path.join(PROJECT_ROOT, "information", "lora_mapping.json")
@@ -40,14 +40,13 @@ OUTPUT_CSV_FILE = os.path.join(PROJECT_ROOT, "synthetic_results.csv")
 TRACE_CSV_DUMMY = os.path.join(PROJECT_ROOT, "information", "simulation_data.csv")
 METADATA_DIR = os.path.join(PROJECT_ROOT, "information")
 
-# 六種 Baseline
+# 五種 Baseline (已對齊論文與先前實驗的命名)
 BASELINE_STRATEGIES = [
-    (1, "Experiment 1 (SP1+SP2)"),
-    (2, "Experiment 2 (SP1+SP2 w/o semantic)"),
-    (3, "Experiment 3 (SP1+Random)"),
-    # (4, "Experiment 4 (LRU+Random)"),
-    (4, "Experiment 4 (Dlora)"),
-    (5, "Experiment 5 (Slora)")
+    (1, "Ours (SP1+SP2)"),
+    (2, "Ours w/o Sem"),
+    (3, "Ours w/o SP2"),
+    (4, "dLoRA"),
+    (5, "S-LoRA")
 ]
 # ==========================================
 
@@ -70,7 +69,7 @@ def run_single_task(args):
     # 【畫面清爽第一步】只印出任務開始
     print(f"[START] RPS: {rps:2d} | {exp_name}")
     
-    # 將 log 輸出分開
+    # 將 log 輸出分開，避免多進程同時寫入同一個資料夾造成 I/O 衝突
     out_dir = os.path.join(PROJECT_ROOT, "results", "synthetic", f"RPS_{rps}", f"Exp_{exp_id}_logs")
     os.makedirs(out_dir, exist_ok=True)
 
@@ -89,14 +88,14 @@ def run_single_task(args):
     
     sim = Simulation(config)
 
-    # 2. 替換 Trace Generator
+    # 2. 替換 Trace Generator (加入 rps 與 exp_id 作為 seed 確保多樣性)
     synthetic_gen = SimSyntheticGenerator(
         lora_mapping_path=LORA_MAPPING_PATH,
         duration_s=duration_hours * 3600,
         target_clusters=target_clusters,
         rps_per_cluster=cluster_rps,
         zipf_s=ZIPF_S_PARAMETER,
-        seed=42 + exp_id + rps # 加入 rps 作為 seed 確保多樣性
+        seed=42 + exp_id + rps 
     )
     
     sim.trace = synthetic_gen
@@ -104,7 +103,7 @@ def run_single_task(args):
     sim.PAD_LEN = len(str(sim.TOTAL_REQUESTS))
 
     # =========================================================================
-    # 【新增修復：將生成的合成事件轉為 DataFrame，讓 EFO(SP1) 能正確預測】
+    # 【核心修復：將生成的合成事件轉為 DataFrame，讓 EFO(SP1) 能正確預測】
     # 避免 EFO 去讀取錯誤的 dummy trace csv，導致預測需求一直為 0 的問題
     # =========================================================================
     records = []
@@ -121,11 +120,10 @@ def run_single_task(args):
         df_synthetic = pd.DataFrame(records)
         sim.efo.simulation_df = df_synthetic
     else:
-        # 防呆機制：若無任何請求，給一個空表
         sim.efo.simulation_df = pd.DataFrame(columns=["arrival_sec", "cluster", "lora_id"])
     # =========================================================================
 
-    # 3. 執行模擬 【核心修改：開啟黑洞屏蔽大量 print，大幅提升運算速度】
+    # 3. 執行模擬 【開啟黑洞屏蔽大量 print，大幅提升運算速度】
     with open(os.devnull, 'w') as fnull:
         with contextlib.redirect_stdout(fnull):
             sim.run()
@@ -135,13 +133,11 @@ def run_single_task(args):
     avg_cost = extract_final_average_cost(log_file_path)
     
     # 【畫面清爽第二步】算完才印出結果
-    print(f"[DONE ] RPS: {rps:2d} | {exp_name} -> Avg Cost: {avg_cost:.4f}")
+    print(f"[DONE ] RPS: {rps:2d} | {exp_name:<15} -> Avg Cost: NT${avg_cost:.4f}")
     
-    # 【新增】主動釋放記憶體，避免 Memory Leak
+    # 主動釋放記憶體，避免 25 個 Process 狂吃 RAM
     del sim, config, synthetic_gen, df_synthetic 
     gc.collect()
-
-    time.sleep(5)
 
     return {
         "Global_RPS": rps,
@@ -162,23 +158,28 @@ def main():
             tasks.append((rps, cluster_rps, exp_id, exp_name, topology, target_clusters, duration_hours))
 
     print("=" * 65)
-    print("🚀 Starting Parallel Synthetic Experiments (Poisson + Zipf)")
+    print("🚀 Starting Parallel Synthetic Experiments (Average Cost vs RPS)")
     print(f"Topology: {NUM_CLUSTERS} Clusters, {COMPUTE_NODES_PER_CLUSTER} Nodes/Cluster")
-    print(f"Duration: {SIMULATION_DAYS} Days")
+    print(f"Duration: {SIMULATION_DAYS} Days ({duration_hours} Hours)")
     print(f"Total Tasks: {len(tasks)} (RPS variations x Baselines)")
     print("=" * 65)
 
     results_data = []
 
-    # 使用 ProcessPoolExecutor 進行多進程加速 (24核狂飆)
-    for task_args in tasks:
-        try:
-            result = run_single_task(task_args)
-            results_data.append(result)
-        except Exception as exc:
-            print(f"[Error] 某個實驗執行時發生錯誤: {exc}")
+    # =========================================================================
+    # 【極速引擎啟動】使用 25 核心平行處理
+    # =========================================================================
+    with concurrent.futures.ProcessPoolExecutor(max_workers=25) as executor:
+        futures = [executor.submit(run_single_task, task) for task in tasks]
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                result = future.result()
+                results_data.append(result)
+            except Exception as exc:
+                print(f"[Error] 某個實驗執行時發生錯誤: {exc}")
+    # =========================================================================
 
-    # 5. 【核心修改：自動合併舊數據，保護之前辛苦跑出來的成果】
+    # 5. 自動合併舊數據，保護之前辛苦跑出來的成果
     df_new = pd.DataFrame(results_data)
     if not df_new.empty:
         if os.path.exists(OUTPUT_CSV_FILE):
@@ -191,6 +192,9 @@ def main():
             df_combined = df_new
             
         # 依照 RPS 和策略排序，讓 CSV 乾淨整齊
+        # (將 Strategy 轉換為 Categorical 以便按照我們定義的順序排列)
+        strategy_order = [s[1] for s in BASELINE_STRATEGIES]
+        df_combined['Strategy'] = pd.Categorical(df_combined['Strategy'], categories=strategy_order, ordered=True)
         df_combined = df_combined.sort_values(by=['Global_RPS', 'Strategy'])
         df_combined.to_csv(OUTPUT_CSV_FILE, index=False)
     

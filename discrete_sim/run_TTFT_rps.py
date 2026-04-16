@@ -157,14 +157,15 @@ def main():
 
         if strat_df.empty:
             continue
-
+        z = 3 if strat_key == 'ours' else 2
         ax.plot(
             strat_df['RPS'],
             strat_df['P95_TTFT'],
             linewidth=2.5,
             marker='o',
             markersize=7,
-            label=label
+            label=label,
+            zorder=z
         )
 
     ax.set_xlabel('System Workload (Requests per Second)', fontsize=12)

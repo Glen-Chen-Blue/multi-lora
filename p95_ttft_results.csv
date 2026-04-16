@@ -24,31 +24,31 @@ RPS,Strategy,Label,P95_TTFT
 23,dlora,dLoRA,127.68350000000001
 24,dlora,dLoRA,147.18105
 25,dlora,dLoRA,161.79519999999982
-1,lru,S-LoRA,0.5524
+1,lru,S-LoRA,0.5554
 2,lru,S-LoRA,0.55855
-3,lru,S-LoRA,0.56
-4,lru,S-LoRA,0.565
-5,lru,S-LoRA,0.564
-6,lru,S-LoRA,0.566
-7,lru,S-LoRA,0.574
-8,lru,S-LoRA,0.578
-9,lru,S-LoRA,0.629
-10,lru,S-LoRA,1.6253499999999994
-11,lru,S-LoRA,3.0597499999999993
-12,lru,S-LoRA,4.922
-13,lru,S-LoRA,6.944
-14,lru,S-LoRA,12.338300000000007
-15,lru,S-LoRA,20.6606
-16,lru,S-LoRA,35.9034
-17,lru,S-LoRA,46.93915
-18,lru,S-LoRA,61.348
-19,lru,S-LoRA,74.5633
-20,lru,S-LoRA,87.99
-21,lru,S-LoRA,98.89919999999998
-22,lru,S-LoRA,110.41225
-23,lru,S-LoRA,122.67620000000001
-24,lru,S-LoRA,132.77219999999997
-25,lru,S-LoRA,143.0169
+3,lru,S-LoRA,0.5548
+4,lru,S-LoRA,0.562
+5,lru,S-LoRA,0.5694499999999998
+6,lru,S-LoRA,0.5706999999999998
+7,lru,S-LoRA,0.576
+8,lru,S-LoRA,0.58975
+9,lru,S-LoRA,0.7616999999999962
+10,lru,S-LoRA,2.3619
+11,lru,S-LoRA,3.6859499999999987
+12,lru,S-LoRA,5.403799999999998
+13,lru,S-LoRA,8.509
+14,lru,S-LoRA,13.150900000000004
+15,lru,S-LoRA,22.488999999999997
+16,lru,S-LoRA,36.962
+17,lru,S-LoRA,49.517649999999996
+18,lru,S-LoRA,64.9161
+19,lru,S-LoRA,76.69609999999999
+20,lru,S-LoRA,88.65725
+21,lru,S-LoRA,100.6255
+22,lru,S-LoRA,112.68479999999997
+23,lru,S-LoRA,123.54430000000002
+24,lru,S-LoRA,133.72819999999996
+25,lru,S-LoRA,144.23989999999998
 1,ours,Ours (SP1+SP2),0.546
 2,ours,Ours (SP1+SP2),0.55
 3,ours,Ours (SP1+SP2),0.551
@@ -99,28 +99,28 @@ RPS,Strategy,Label,P95_TTFT
 23,ours_no_sem,Ours w/o Sem,79.967
 24,ours_no_sem,Ours w/o Sem,90.8785
 25,ours_no_sem,Ours w/o Sem,102.7319
-1,ours_no_sp2,Ours w/o SP2,0.551
+1,ours_no_sp2,Ours w/o SP2,0.5493999999999999
 2,ours_no_sp2,Ours w/o SP2,0.557
-3,ours_no_sp2,Ours w/o SP2,0.56
-4,ours_no_sp2,Ours w/o SP2,0.57
-5,ours_no_sp2,Ours w/o SP2,0.568
-6,ours_no_sp2,Ours w/o SP2,0.5746999999999998
-7,ours_no_sp2,Ours w/o SP2,0.5783499999999999
-8,ours_no_sp2,Ours w/o SP2,0.605
-9,ours_no_sp2,Ours w/o SP2,1.074899999999995
-10,ours_no_sp2,Ours w/o SP2,2.317699999999999
-11,ours_no_sp2,Ours w/o SP2,3.3070999999999997
-12,ours_no_sp2,Ours w/o SP2,5.967399999999996
-13,ours_no_sp2,Ours w/o SP2,9.695
-14,ours_no_sp2,Ours w/o SP2,15.305049999999994
-15,ours_no_sp2,Ours w/o SP2,24.056499999999993
-16,ours_no_sp2,Ours w/o SP2,38.79985
-17,ours_no_sp2,Ours w/o SP2,49.7332
-18,ours_no_sp2,Ours w/o SP2,63.93275
-19,ours_no_sp2,Ours w/o SP2,75.09
-20,ours_no_sp2,Ours w/o SP2,87.34725
-21,ours_no_sp2,Ours w/o SP2,98.89874999999999
-22,ours_no_sp2,Ours w/o SP2,111.2938
-23,ours_no_sp2,Ours w/o SP2,122.64970000000002
-24,ours_no_sp2,Ours w/o SP2,132.9845
-25,ours_no_sp2,Ours w/o SP2,144.007
+3,ours_no_sp2,Ours w/o SP2,0.557
+4,ours_no_sp2,Ours w/o SP2,0.565
+5,ours_no_sp2,Ours w/o SP2,0.569
+6,ours_no_sp2,Ours w/o SP2,0.573
+7,ours_no_sp2,Ours w/o SP2,0.5856999999999998
+8,ours_no_sp2,Ours w/o SP2,0.61675
+9,ours_no_sp2,Ours w/o SP2,0.8128499999999981
+10,ours_no_sp2,Ours w/o SP2,2.514999999999996
+11,ours_no_sp2,Ours w/o SP2,3.090199999999999
+12,ours_no_sp2,Ours w/o SP2,5.224799999999999
+13,ours_no_sp2,Ours w/o SP2,9.13725
+14,ours_no_sp2,Ours w/o SP2,14.043300000000002
+15,ours_no_sp2,Ours w/o SP2,24.779799999999994
+16,ours_no_sp2,Ours w/o SP2,40.049499999999995
+17,ours_no_sp2,Ours w/o SP2,51.2035
+18,ours_no_sp2,Ours w/o SP2,67.0129
+19,ours_no_sp2,Ours w/o SP2,79.13179999999998
+20,ours_no_sp2,Ours w/o SP2,90.15249999999996
+21,ours_no_sp2,Ours w/o SP2,102.59089999999999
+22,ours_no_sp2,Ours w/o SP2,113.20979999999999
+23,ours_no_sp2,Ours w/o SP2,124.50265
+24,ours_no_sp2,Ours w/o SP2,135.13850000000002
+25,ours_no_sp2,Ours w/o SP2,145.02475

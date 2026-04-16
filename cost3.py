@@ -46,7 +46,7 @@ def parse_logs_detailed(log_file, target_clusters=["cluster_1"]):
                 cost_network = offload_count * COST_NET_TRAFFIC
 
                 drop_count = totals.get("total_drops", 0)
-                cost_penalty = drop_count * COST_DROP_PENALTY2
+                cost_penalty = drop_count * 0.02
 
                 total_cost = (
                     cost_storage
@@ -357,11 +357,13 @@ if __name__ == "__main__":
     # folders_to_average = [
     #     "./record_two_day_1/",
     #     "./record_two_day_2/",
+    #     "./record_two_day_3/",
+    #     "./record_two_day_4/"
     # ]
     folders_to_average = [
         "./results/long/",
     ]
-    start_offsets = [1, 2, 3, 4]  # 對應 day_1, day_2, day_3, day_4 的資料
+    # start_offsets = [1, 2, 3, 4]  # 對應 day_1, day_2, day_3, day_4 的資料
     start_offsets = [2]
     experiments_to_plot = {
         1: "Experiment 1 (SP1+SP2)",
@@ -375,7 +377,7 @@ if __name__ == "__main__":
         folders=folders_to_average,
         start_offsets=start_offsets,
         experiments=experiments_to_plot,
-        output_path="cost_per_request_avg3_day1_to_4_without_exp4.png",
+        output_path="cost_per_request_avg_3cluster.png",
         csv_path="./information/simulation_data.csv",
         target_clusters=["cluster_1", "cluster_2", "cluster_3"],
         speed_rate=1.0,
