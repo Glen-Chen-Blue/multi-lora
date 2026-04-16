@@ -92,7 +92,7 @@ def run_single_experiment(args):
             duration_s=duration_sec,
             target_clusters=target_clusters,
             rps_per_cluster=rps_per_cluster,
-            zipf_s=10.0 
+            zipf_s=8 
         )
         sim.TOTAL_REQUESTS = sim.trace.total_requests
         
@@ -128,7 +128,7 @@ def main():
     print("=== Parallel P95 TTFT vs. RPS Analysis (No-Drop Saturation) ===")
     print("=" * 70)
 
-    rps_list = list(range(1, 26, 2))
+    rps_list = list(range(1, 26, 1))
     strategies = ["ours", "ours_no_sem", "ours_no_sp2", "dlora", "lru"]
     
     tasks = [(rps, strat) for strat in strategies for rps in rps_list]
@@ -142,69 +142,72 @@ def main():
 
     df = pd.DataFrame(results)
     df = df.sort_values(by=['Strategy', 'RPS'])
-    
+
     os.makedirs('results/ttft_rps', exist_ok=True)
     csv_path = 'p95_ttft_results.csv'
     df.to_csv(csv_path, index=False)
-    
-    # 繪製學術級圖表
-    plt.figure(figsize=(9, 6), dpi=150)
-    
-    style_map = {
-        'ours': {'color': '#d62728', 'marker': 'o', 'linestyle': '-'},        # Red
-        'ours_no_sem': {'color': '#9467bd', 'marker': 'v', 'linestyle': '--'},# Purple
-        'dlora': {'color': '#ff7f0e', 'marker': 's', 'linestyle': '-'},       # Orange
-        'ours_no_sp2': {'color': '#8c564b', 'marker': 'x', 'linestyle': '-.'},# Brown
-        'lru': {'color': '#1f77b4', 'marker': '^', 'linestyle': '-'}          # Blue
-    }
-    
+
+    # 改成和下面那份 code 接近的風格
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    # 使用 matplotlib 預設色盤，不再手動指定 color / marker / linestyle
     for strat_key in strategies:
         strat_df = df[df['Strategy'] == strat_key]
         label = EXP_MAPPING[strat_key]['label']
-        st = style_map[strat_key]
-        
-        plt.plot(strat_df['RPS'], strat_df['P95_TTFT'], 
-                 label=label, 
-                 color=st['color'], 
-                 marker=st['marker'],
-                 linestyle=st['linestyle'],
-                 linewidth=2.5, markersize=8)
 
-    plt.xlabel('System Workload (Requests per Second)', fontsize=14, fontweight='bold')
-    plt.ylabel('95th Percentile TTFT (s)', fontsize=14, fontweight='bold')
-    # plt.title('P95 Tail Latency under System Saturation', fontsize=16, fontweight='bold')
-    plt.grid(True, linestyle='--', alpha=0.7)
-    
-    # 自動適應 Y 軸，避免被極端值壓平
-    plt.ylim(0, 15)
+        if strat_df.empty:
+            continue
 
-    # 畫 SLO 虛線
-    plt.axhline(y=6, color='gray', linestyle='--', linewidth=2)
+        ax.plot(
+            strat_df['RPS'],
+            strat_df['P95_TTFT'],
+            linewidth=2.5,
+            marker='o',
+            markersize=7,
+            label=label
+        )
 
-    # 標註文字（稍微往右上避免重疊）
-    plt.text(
-        x=max(rps_list)*0.95, 
-        y=6 + 0.3, 
+    ax.set_xlabel('System Workload (Requests per Second)', fontsize=12)
+    ax.set_ylabel('95th Percentile TTFT (s)', fontsize=12)
+
+    # 保留你原本的 y 軸範圍
+    ax.set_ylim(0, 15)
+
+    # SLO 線，風格改得更接近你下面那份 code
+    ax.axhline(
+        y=6,
+        color='gray',
+        linestyle='--',
+        linewidth=2,
+        alpha=0.8,
+        label='TTFT SLO'
+    )
+
+    # 標註文字
+    ax.text(
+        x=max(rps_list) * 0.95,
+        y=6 + 0.3,
         s='TTFT SLO',
         color='gray',
         fontsize=12,
         ha='right'
     )
-        
-    # 排序 Legend
-    handles, labels = plt.gca().get_legend_handles_labels()
-    order = [labels.index(EXP_MAPPING[s]['label']) for s in strategies]
-    plt.legend([handles[idx] for idx in order], [labels[idx] for idx in order], fontsize=12, loc='upper left')
-    
+
+    # grid 風格跟下面那份 code 對齊
+    ax.grid(True, linestyle='--', alpha=0.4)
+
+    # legend 保持簡潔
+    ax.legend(loc='upper left', fontsize=12)
+
     plt.tight_layout()
-    
+
     plot_path = 'p95_ttft_vs_rps.png'
     plt.savefig(plot_path, dpi=300, format='png')
-    
+    plt.close()
+
     print("\n" + "=" * 70)
     print(f"🎉 Simulation Completed! Data saved to {csv_path}")
     print(f"📊 Plot saved to {plot_path}")
     print("=" * 70)
-
 if __name__ == '__main__':
     main()

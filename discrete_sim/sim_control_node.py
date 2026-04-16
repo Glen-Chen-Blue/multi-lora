@@ -334,6 +334,12 @@ class SimControlNodeSP2(SimControlNodeBase):
                         if v.node.node_id in self.switching_nodes:
                             continue
                         
+                        # [⭐ 核心修改] 檢查該 Node 是否還有真實的空間 (Batch 額度或 VRAM 空間)
+                        # 如果空間不夠，絕對不分配給它，強制排程器找別人或是在 EFO 等待
+                        free = v.get_free_slots(aid)
+                        if free <= 0:
+                            continue
+
                         is_in_vram = (v.mode == "merge" and v.merged_adapter == aid) or (v.mode == "unmerge" and aid in v.active_loras)
                         is_in_cpu = (v.mode == "unmerge" and aid in v.loaded_adapters)
                         c_dispatch = 0.0 if is_in_vram else (0.5 if is_in_cpu else 1.0)
@@ -342,6 +348,7 @@ class SimControlNodeSP2(SimControlNodeBase):
                         prob_violation = 1.0 if pred_ttft > T_MAX else 0.0
                         
                         V_param = 100.0
+                        # 恢復原始、最乾淨的 Lyapunov 算式
                         phi_local = V_param * c_dispatch + self.Z_debt * (prob_violation - EPSILON) + (pred_ttft * 50.0)
                         
                         if best_plan is None or phi_local < best_plan[2]:
@@ -434,7 +441,10 @@ class SimControlNodeRandom(SimControlNodeBase):
             valid_ttft = v_nodes 
 
             if valid_ttft:
-                # [⭐ 修正]: 取消 cache_hits 的強迫綁定，回歸最純粹的隨機分發，對齊 S-LoRA 的 Random 負載平衡能力
+                # [⭐ 核心修復 2] 產生微觀抖動 (Jitter)
+                # 額外消耗一次亂數狀態，讓 Random 排程器的隨機序列與 LRU (S-LoRA) 徹底脫鉤。
+                # 這樣它們宏觀上依然都是純隨機分發 (效能走勢一致)，但微觀的節點選擇會不同，自然產生抖動。
+                _ = self._rng.random()
                 target = self._rng.choice(valid_ttft)
                 
                 target.commit_request(aid)
