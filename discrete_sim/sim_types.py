@@ -80,12 +80,12 @@ class ExperimentDef:
 
 
 EXPERIMENT_CONFIGS = {
-    1: ExperimentDef(1, "sp1", "sp2", "lora_metadata.json", 5, "lyapunov"),
-    2: ExperimentDef(2, "sp1", "sp2", "lora_metadata_without_substitutes.json", 5, "lyapunov"),
-    3: ExperimentDef(3, "sp1", "random", "lora_metadata_without_substitutes.json", 5, "random"),
-    4: ExperimentDef(4, "lru", "lru", "lora_metadata_without_substitutes.json", 5, "random"),
-    5: ExperimentDef(5, "dlora", "dlora", "lora_metadata_without_substitutes.json", 5, "greedy"),
-    6: ExperimentDef(6, "lru", "lru", "lora_metadata_without_substitutes.json", 5, "greedy"),
+    1: ExperimentDef(1, "sp1", "sp2", "lora_metadata.json", 6, "lyapunov"),
+    2: ExperimentDef(2, "sp1", "sp2", "lora_metadata_without_substitutes.json", 6, "lyapunov"),
+    3: ExperimentDef(3, "sp1", "random", "lora_metadata_without_substitutes.json", 6, "random"),
+    4: ExperimentDef(4, "lru", "lru", "lora_metadata_without_substitutes.json", 6, "random"),
+    5: ExperimentDef(5, "dlora", "dlora", "lora_metadata_without_substitutes.json", 6, "greedy"),
+    6: ExperimentDef(6, "lru", "lru", "lora_metadata_without_substitutes.json", 6, "greedy"),
 }
 
 

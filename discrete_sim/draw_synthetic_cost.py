@@ -51,12 +51,12 @@ def main():
         )
 
     # 設定圖表標題與座標軸標籤
-    plt.title('System Load vs Average Cost (3 Days Simulation)', fontsize=16, fontweight='bold')
-    plt.xlabel('Global Requests Per Second (RPS)', fontsize=14)
-    plt.ylabel('Average Cost per Request', fontsize=14)
+    # plt.title('System Load vs Average Cost', fontsize=16, fontweight='bold')
+    plt.xlabel('Global Requests Per Second (RPS)', fontsize=20)
+    plt.ylabel('Average Cost per Request', fontsize=20)
 
-    plt.xticks(fontsize=12)
-    plt.yticks(fontsize=12)
+    plt.xticks(fontsize=18)
+    plt.yticks(fontsize=18)
 
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.legend(fontsize=11, loc='best')

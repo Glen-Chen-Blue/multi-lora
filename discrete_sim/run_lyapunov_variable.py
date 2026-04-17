@@ -48,7 +48,7 @@ def worker_simulation_logic(v_val):
     config.PSI_DROP = new_penalty
     config.COST_DROP_PENALTY = new_penalty
 
-    import discrete_sim.sim_control_node_ as scn
+    import discrete_sim.sim_control_node as scn
     if hasattr(scn, 'PSI_DROP'): scn.PSI_DROP = new_penalty
     
     # =========================================================================
@@ -257,7 +257,7 @@ def main():
         print("=" * 65)
         
         results = []
-        with ProcessPoolExecutor(max_workers=24) as executor:
+        with ProcessPoolExecutor(max_workers=25) as executor:
             futures = [executor.submit(run_worker_process, v) for v in V_VALUES]
             for future in futures:
                 res = future.result()
