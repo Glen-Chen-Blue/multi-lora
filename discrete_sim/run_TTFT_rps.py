@@ -29,7 +29,7 @@ def run_single_experiment(args):
     
     # 動態注入配置 (Monkey Patch)
     import config
-    import discrete_sim.sim_control_node_ as scn
+    import discrete_sim.sim_control_node as scn
     import discrete_sim.sim_efo as sefo
     import discrete_sim.sim_compute_node as s_compute
 

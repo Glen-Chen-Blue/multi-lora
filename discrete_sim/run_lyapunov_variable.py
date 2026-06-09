@@ -13,7 +13,7 @@ V_VALUES = [
     0.1, 0.2, 0.3, 0.5, 0.7,
     1, 1.5, 2, 3, 5, 7,
     10, 15, 20, 30, 40,
-    50, 60, 70, 80, 90, 
+    50, 60, 70, 80, 90, 100
 ]
 
 def run_worker_process(v_val):
@@ -27,7 +27,7 @@ def run_worker_process(v_val):
         if line.startswith('RESULT_JSON:'):
             data = json.loads(line.split('RESULT_JSON:')[1])
             data['v_val'] = v_val
-            print(f"[Master] 完成 V = {v_val:6.1f} -> 全域 P95 TTFT: {data['p95_ttft']:5.2f}s, Time-Avg Cost: NT${data['avg_cost']:6.4f}")
+            print(f"[Master] 完成 V = {v_val:6.1f} -> 全域 P95 TTFT: {data['p95_ttft']:5.5f}s, Time-Avg Cost: NT${data['avg_cost']:6.5f}")
             return data
             
     print(f"[Master] 錯誤: V = {v_val} 失敗。\n{result.stderr}")
@@ -48,7 +48,7 @@ def worker_simulation_logic(v_val):
     config.PSI_DROP = new_penalty
     config.COST_DROP_PENALTY = new_penalty
 
-    import discrete_sim.sim_control_node as scn
+    import discrete_sim.sim_control_node_ as scn
     if hasattr(scn, 'PSI_DROP'): scn.PSI_DROP = new_penalty
     
     # =========================================================================

@@ -123,24 +123,24 @@ DELTA_LOAD_S = 0.066       # \delta_load
 SLO_LIMIT_S = 6.0          # 6 秒 SLO 限制
 
 
-# =====================================================================
-# Added for P95 TTFT vs RPS Experiment
-# =====================================================================
-# 1. 關閉所有 Drop 邏輯與逾時懲罰
-# =====================================================================
-# Added for P95 TTFT vs RPS Experiment
-# =====================================================================
-# 1. 關閉所有 Drop 邏輯與逾時懲罰
-ENABLE_DROP = False
-REJECTION_PENALTY = 0.0          
-MAX_QUEUE_SIZE = float('inf')    
-MAX_WAITING_TIME = float('inf')  
+# # =====================================================================
+# # Added for P95 TTFT vs RPS Experiment
+# # =====================================================================
+# # 1. 關閉所有 Drop 邏輯與逾時懲罰
+# # =====================================================================
+# # Added for P95 TTFT vs RPS Experiment
+# # =====================================================================
+# # 1. 關閉所有 Drop 邏輯與逾時懲罰
+# ENABLE_DROP = False
+# REJECTION_PENALTY = 0.0          
+# MAX_QUEUE_SIZE = float('inf')    
+# MAX_WAITING_TIME = float('inf')  
 
-# 2. 設置極端的 Zipf 分佈以消除 LoRA Miss 干擾
-ZIPF_ALPHA = 10.0  
+# # 2. 設置極端的 Zipf 分佈以消除 LoRA Miss 干擾
+# ZIPF_ALPHA = 10.0  
 
-# 3. 同步最大吞吐量測試的高容量設定，確保 25 RPS 時能完美拉開差距
-BATCH_SIZE_MERGED = 12        
-BATCH_SIZE_UNMERGED_BASE = 10 
-MERGED_CAPACITY = 12
-UNMERGED_CAPACITY = 10
+# # 3. 同步最大吞吐量測試的高容量設定，確保 25 RPS 時能完美拉開差距
+# BATCH_SIZE_MERGED = 12        
+# BATCH_SIZE_UNMERGED_BASE = 10 
+# MERGED_CAPACITY = 12
+# UNMERGED_CAPACITY = 10

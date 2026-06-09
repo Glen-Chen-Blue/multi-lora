@@ -12,7 +12,6 @@ from config import (
 )
 from cost2 import build_request_rate_from_simulation_csv
 
-plt.rcParams.update({'font.size': 14})
 
 def parse_logs_detailed(log_file, target_clusters=["cluster_1"]):
     if not os.path.exists(log_file):
@@ -47,7 +46,7 @@ def parse_logs_detailed(log_file, target_clusters=["cluster_1"]):
                 cost_network = offload_count * COST_NET_TRAFFIC
 
                 drop_count = totals.get("total_drops", 0)
-                cost_penalty = drop_count * 0.01
+                cost_penalty = drop_count * 0.02
 
                 total_cost = (
                     cost_storage
@@ -384,5 +383,5 @@ if __name__ == "__main__":
         speed_rate=1.0,
         duration_hours=240,
         bin_minutes=5,
-        summary_csv_path="experiment_summary3.csv",
+        summary_csv_path="experiment_summary_.csv",
     )

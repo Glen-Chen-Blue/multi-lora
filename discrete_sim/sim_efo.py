@@ -12,7 +12,7 @@ from config import (
 
 from .sim_types import SimRequest
 from .sim_clock import SimClock
-from .sim_control_node_ import SimControlNodeBase
+from .sim_control_node import SimControlNodeBase
 from .sim_network import SimNetwork
 from .sim_logger import SimLogger
 
