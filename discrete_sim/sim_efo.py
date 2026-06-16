@@ -236,7 +236,7 @@ class SimEFOSP1(SimEFOBase):
                     target_disk.add(best_cand)
                     candidates.remove(best_cand)
                 else:
-                    swappable = [t for t in target_disk if t not in mandatory]
+                    swappable = sorted([t for t in target_disk if t not in mandatory])
                     if not swappable:
                         break
                     victim = None

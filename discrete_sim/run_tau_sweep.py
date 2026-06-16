@@ -327,6 +327,9 @@ def _worker(tau_sim: float):
     _orig_init = Simulation.__init__
     def _patched_init(self_, cfg, *a, **kw):
         _orig_init(self_, cfg, *a, **kw)
+        self_.simulation_df = gen.to_dataframe()
+        if hasattr(self_, 'efo') and self_.efo is not None:
+            self_.efo.simulation_df = self_.simulation_df
         # EFO uses PROVISIONING metadata (fixed, for SP1 placement)
         self_.efo.lora_metadata = prov_meta
         # Control nodes use DISPATCH metadata (threshold-specific, for substitution)
@@ -348,9 +351,9 @@ def _worker(tau_sim: float):
         seed=42,
     )
 
-    import discrete_sim.sim_trace_reader as trace_mod
-    _orig_reader = trace_mod.SimTraceReader
-    trace_mod.SimTraceReader = lambda *a, **kw: gen
+    import discrete_sim.simulation as sim_mod
+    _orig_reader = sim_mod.SimTraceReader
+    sim_mod.SimTraceReader = lambda *a, **kw: gen
 
     sim_config = SimulationConfig(
         experiment_id=1,
@@ -367,7 +370,7 @@ def _worker(tau_sim: float):
     with open(os.devnull, "w") as fnull, contextlib.redirect_stdout(fnull):
         sim.run()
 
-    trace_mod.SimTraceReader = _orig_reader
+    sim_mod.SimTraceReader = _orig_reader
     Simulation.__init__      = _orig_init
 
     # ── Metrics ───────────────────────────────────────────────────────
